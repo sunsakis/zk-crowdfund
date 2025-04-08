@@ -1,23 +1,32 @@
-Cargo partisia-contract
-Compiles Smart Contracts for the Partisia Blockchain for deployment on-chain.
+# Cargo Partisia Contract
 
-Installation
-You can either install from the crate on crates.io, or from source.
+> Compiles Smart Contracts for the Partisia Blockchain for deployment on-chain.
 
-From Crates.io
-To install run the command
+## Installation
 
+You can either install from the crate on crates.io, or from source:
+
+### From Crates.io
+
+To install, run the command:
+
+```shell
 cargo install cargo-partisia-contract
-Install from source
-Clone the repository and go to the folder. Run the following command
+```
 
+### Install from source
+
+Clone the repository and go to the folder. Run the following command:
+
+```shell
 cargo install --path .
-Usage
+```
+
+## Usage
+
 Compiles Smart Contracts for the Partisia Blockchain for deployment on-chain.
 
-Partisia-contract 
-Compiles Smart Contracts for the Partisia Blockchain to WASM- and ABI-files for deployment on-chain.
-
+```
 Usage: cargo pbc [OPTIONS] <COMMAND>
 
 Commands:
@@ -51,11 +60,15 @@ Options:
 
   -V, --version
           Print version
-build
+```
+
+## Commands
+
+### build
+
 Compile a smart contract for deployment on Partisia Blockchain.
 
-Compile contracts to WASM and generate ABI files.
-
+```
 Usage: cargo pbc build [OPTIONS] [ADDITIONAL_ARGS]...
 
 Arguments:
@@ -74,22 +87,26 @@ Options:
       --coverage                       Compile an instrumented binary for the smart contract. This enables generation of coverage files.
   -p, --package <PACKAGE>              Build only the specified packages
   -h, --help                           Print help
-init
-Initialize the contract. Retrieves dependencies for build.
+```
+
+### init
 
 Initialize the contract. Retrieves dependencies for build.
 
+```
 Usage: cargo pbc init [OPTIONS]
 
 Options:
       --workspace                      Init all zk contracts in the workspace
       --manifest-path <MANIFEST_PATH>  Specify path to the Cargo.toml of the contract or workspace
   -h, --help                           Print help
-print-version
+```
+
+### print-version
+
 Create a new smart contract project.
 
-Print the client and binder version of the contract.
-
+```
 Usage: cargo pbc print-version [OPTIONS] <WASM contract>
 
 Arguments:
@@ -98,33 +115,39 @@ Arguments:
 Options:
   -b, --bashlike  Print the version as bash variables
   -h, --help      Print help
-path-of-abi
-Print the expected ABI file path based on the context of Cargo.toml
+```
+
+### path-of-abi
 
 Print the expected ABI file path based on the context of Cargo.toml
 
+```
 Usage: cargo pbc path-of-abi [OPTIONS]
 
 Options:
   -r, --release                        File is in release folder instead of debug
       --manifest-path <MANIFEST_PATH>  Specify path to the Cargo.toml of the contract or workspace
   -h, --help                           Print help
-path-of-wasm
-Print the expected WASM file path based on the context of Cargo.toml
+```
+
+### path-of-wasm
 
 Print the expected WASM file path based on the context of Cargo.toml
 
+```
 Usage: cargo pbc path-of-wasm [OPTIONS]
 
 Options:
   -r, --release                        File is in release folder instead of debug
       --manifest-path <MANIFEST_PATH>  Specify path to the Cargo.toml of the contract or workspace
   -h, --help                           Print help
-set-sdk
-Update the sdk used for compiling the contracts.
+```
 
-Update the sdk used for compiling the contracts. 
+### set-sdk
 
+Update the SDK used for compiling the contracts.
+
+```
 Usage: cargo pbc set-sdk [OPTIONS] <sdk>
 
 Arguments:
@@ -139,8 +162,13 @@ Options:
       --manifest-path <MANIFEST_PATH>  Specify path to the Cargo.toml of the contract or workspace
   -p, --package <PACKAGE>              Build only the specified packages
   -h, --help                           Print help
-transaction
+```
+
+### transaction
+
+```
 Usage: cargo pbc transaction [-hv] [--net=<netname>] COMMAND
+
 Builds, signs and sends transactions.
   -h, --help            Print usage description of the command.
       --net=<netname>   The blockchain net to target. To see all named nets,
@@ -152,6 +180,7 @@ Builds, signs and sends transactions.
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   action   Build, sign and send a transaction that calls a specific action with
              parameters. Uses the contract ABI.
@@ -165,8 +194,13 @@ Commands:
   latest   Get the latest transactions from the blockchain.
   upgrade  Build, sign and send a transaction that upgrades a smart-contract on
              the blockchain.
-account
+```
+
+### account
+
+```
 Usage: cargo pbc account [-hv] [--net=<netname>] COMMAND
+
 Account creation and information about accounts on the Partisia Blockchain.
   -h, --help            Print usage description of the command.
       --net=<netname>   The blockchain net to target. To see all named nets,
@@ -178,19 +212,24 @@ Account creation and information about accounts on the Partisia Blockchain.
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   create   Create a private key and print the associated address on the
              blockchain.
-           By default, the private key will be output to the file '<address>.
-             pk'.
+           By default, the private key will be output to the file '<address>.pk'.
            If the target is the Testnet, then the account is also filled with
              gas.
   show     Show information about an account (as JSON).
   mintgas  Mint gas for the given account. (This is only possible on the
              testnet)
   address  Print the blockchain address for a given private key.
-contract
+```
+
+### contract
+
+```
 Usage: cargo pbc contract [-hv] [--net=<netname>] COMMAND
+
 Interacts with contracts.
   -h, --help            Print usage description of the command.
       --net=<netname>   The blockchain net to target. To see all named nets,
@@ -202,14 +241,20 @@ Interacts with contracts.
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   show       Show information about a contract (as JSON).
   standard   Get information on contract and token standards.
   secret     Interact with secrets from a Zk contract.
   refuelgas  Build, sign and send a transaction that adds more gas to a
                contract.
-config
+```
+
+### config
+
+```
 Usage: cargo pbc config [-hv] [--net=<netname>] COMMAND
+
 Set default values for options used during execution of commands.
   -h, --help            Print usage description of the command.
       --net=<netname>   The blockchain net to target. To see all named nets,
@@ -221,12 +266,18 @@ Set default values for options used during execution of commands.
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   privatekey  Set the default private key to be used.
   net         Set the net option to be used during runtime.
   list        List the configurations set.
-block
+```
+
+### block
+
+```
 Usage: cargo pbc block [-hv] [--net=<netname>] COMMAND
+
 View latest or specific blocks
   -h, --help            Print usage description of the command.
       --net=<netname>   The blockchain net to target. To see all named nets,
@@ -238,11 +289,17 @@ View latest or specific blocks
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   show    Show information about a block (as JSON).
   latest  Get the latest blocks from the blockchain
-wallet
+```
+
+### wallet
+
+```
 Usage: cargo pbc wallet [-hv] [--net=<netname>] COMMAND
+
 Wallet creation. A wallet contains multiple accounts.
   -h, --help            Print usage description of the command.
       --net=<netname>   The blockchain net to target. To see all named nets,
@@ -254,16 +311,21 @@ Wallet creation. A wallet contains multiple accounts.
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   create  Create a new wallet and save it to a file
-          (by default the file is ~/.pbc/id_pbc ).
+          (by default the file is ~/.pbc/id_pbc).
           A wallet consists of a 12-word mnemonic phrase,
-          which is used to derive private keys that can be used on the
-            blockchain.
+          which is used to derive private keys that can be used on the blockchain.
           If the target is the Testnet, then the first account is also filled
-            with gas.
-abi
+          with gas.
+```
+
+### abi
+
+```
 Usage: cargo pbc abi [-hv] [--lenient] [--net=<netname>] COMMAND
+
 Interact with ABI files.
   -h, --help            Print usage description of the command.
       --lenient         Allow invalid Java identifiers.
@@ -276,17 +338,24 @@ Interact with ABI files.
                           custom browser.
   -v, --verbose         Print all available information. Default is to print
                           minimum information.
+
 Commands:
   show     Show basic information about an abi
   codegen  Generate code to interact with a contract based on an abi.
-How to use
+```
+
+## How to Use
+
 Go into the rust project containing your Cargo.toml and the contract.
 
-An example for a contract written in rust can be found here.
+An example for a contract written in rust can be found [here](https://gitlab.com/partisiablockchain/language/example-contracts).
 
-When you are standing in the directory, run the following command to compile the contract and generate the ABI.
+When you are standing in the directory, run the following command to compile the contract and generate the ABI:
 
+```shell
 cargo partisia-contract build --release
-This will build and write the contract and ABI files in the target/wasm32-unknown-unknown/debug.
+```
 
-If you run it with the flag --release, then the files will be in target/wasm32-unknown-unknown/release.
+This will build and write the contract and ABI files in the `target/wasm32-unknown-unknown/debug` directory.
+
+If you run it with the flag `--release`, then the files will be in `target/wasm32-unknown-unknown/release`.
