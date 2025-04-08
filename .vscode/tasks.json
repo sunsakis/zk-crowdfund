@@ -1,0 +1,125 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Deploy Crowdfunding Contract",
+            "type": "shell",
+            "command": "cargo pbc transaction deploy --gas 10000000 --privatekey ${input:key}.pk target/wasm32-unknown-unknown/release/zk_crowdfunding.pbc '${input:project-title}' '${input:project-description}' ${input:funding-target} ${input:deadline}",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "Start Campaign",
+            "type": "shell",
+            "command": "cargo pbc transaction action --gas 20000 --privatekey ${input:key}.pk ${input:contract-address} start_campaign",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "Submit Contribution",
+            "type": "shell",
+            "command": "cargo pbc transaction action --gas 100000 --privatekey ${input:key}.pk ${input:contract-address} add_contribution ${input:contribution-amount}",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "End Campaign and Compute Results",
+            "type": "shell",
+            "command": "cargo pbc transaction action --gas 20000 --privatekey ${input:key}.pk ${input:contract-address} end_campaign",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "Withdraw Funds",
+            "type": "shell",
+            "command": "cargo pbc transaction action --gas 20000 --privatekey ${input:key}.pk ${input:contract-address} withdraw_funds",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        },
+        {
+            "label": "Start Crowdfunding Frontend",
+            "type": "shell",
+            "command": "npm install; npm start",
+            "options": {
+                "cwd": "${workspaceFolder}/zk-crowdfunding-frontend"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "contract-address",
+            "description": "The Address of the deployed contract.",
+            "type": "promptString"
+        },
+        {
+            "id": "key",
+            "description": "The id of the key, to perform the given action with. Can be either Account-A, Account-B or Account-C.",
+            "type": "pickString",
+            "options": [
+                "Account-A",
+                "Account-B",
+                "Account-C"
+            ],
+            "default": "Account-A"
+        },
+        {
+            "id": "contribution-amount",
+            "description": "The amount to contribute as a secret input, should be an integer.",
+            "type": "promptString"
+        },
+        {
+            "id": "project-title",
+            "description": "The title of the crowdfunding project.",
+            "type": "promptString"
+        },
+        {
+            "id": "project-description",
+            "description": "The description of the crowdfunding project.",
+            "type": "promptString"
+        },
+        {
+            "id": "funding-target",
+            "description": "The funding target (threshold) of the project.",
+            "type": "promptString"
+        },
+        {
+            "id": "deadline",
+            "description": "The deadline timestamp for the project.",
+            "type": "promptString"
+        }
+    ]
+}
