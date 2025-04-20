@@ -6,6 +6,8 @@ export interface AppConfig {
   };
   // Default contract address (can be loaded from JSON or env)
   contractAddress?: string;
+  // Test mode for development - will use mock data when errors occur
+  testMode: boolean;
 }
 
 // Try to load JSON config file
@@ -23,7 +25,8 @@ const config: AppConfig = {
     rpcNodeUrl: jsonConfig.blockchain?.rpcNodeUrl || "https://node1.testnet.partisiablockchain.com",
     browserUrl: jsonConfig.blockchain?.browserUrl || "https://browser.testnet.partisiablockchain.com"
   },
-  contractAddress: jsonConfig.contractAddress || ""
+  contractAddress: jsonConfig.contractAddress || "",
+  testMode: jsonConfig.testMode !== undefined ? jsonConfig.testMode : true
 };
 
 export default config;

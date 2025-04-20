@@ -38,38 +38,28 @@ export interface PrivateKeyInfo {
 }
 
 class BlockchainService {
-  private readonly TESTNET_URL = "https://node1.testnet.partisiablockchain.com";
-  private readonly BROWSER_URL = "https://browser.testnet.partisiablockchain.com";
-  private readonly GAS_LIMIT = 100000;
+  private readonly API_BASE_URL: string;
+  private readonly BROWSER_URL: string;
+  private readonly GAS_LIMIT = 500000; // Increased gas limit for zk operations
   
   constructor() {
     // Initialize connection to testnet
-    console.log("Initializing BlockchainService with testnet connection");
+    this.API_BASE_URL = config.blockchain?.rpcNodeUrl || "https://node1.testnet.partisiablockchain.com";
+    this.BROWSER_URL = config.blockchain?.browserUrl || "https://browser.testnet.partisiablockchain.com";
+    console.log("Initializing BlockchainService with connection to:", this.API_BASE_URL);
   }
 
   // Parse a private key file or string
   async parsePrivateKey(privateKeyData: string): Promise<PrivateKeyInfo> {
     try {
-      // Convert the private key string to bytes
-      let privateKeyBytes: Uint8Array;
-      
-      if (privateKeyData.startsWith("0x")) {
-        // Hex format with prefix
-        privateKeyBytes = this.hexToBytes(privateKeyData.slice(2));
-      } else if (privateKeyData.match(/^[0-9a-fA-F]+$/)) {
-        // Hex format without prefix
-        privateKeyBytes = this.hexToBytes(privateKeyData);
-      } else {
-        // Assume it's a PEM or another format
-        privateKeyBytes = new TextEncoder().encode(privateKeyData);
-      }
+      // For demo purposes, we'll just use a simple hash of the key as the address
+      const encoder = new TextEncoder();
+      const privateKeyBytes = encoder.encode(privateKeyData);
       
       // Generate a mock address based on the private key input
-      // In a real implementation, this would use the Partisia SDK
-      const mockAddress = `0x${Array.from(new TextEncoder().encode(privateKeyData))
+      const mockAddress = `0x${Array.from(privateKeyBytes.slice(0, 20))
         .map(b => b.toString(16).padStart(2, '0'))
-        .join('')
-        .substring(0, 40)}`;
+        .join('')}`;
       
       return {
         key: privateKeyBytes,
@@ -84,21 +74,21 @@ class BlockchainService {
   // Get contract state and parse it into project data
   async getProject(contractAddress: string): Promise<ProjectData> {
     try {
-      // For now we'll use a direct API call to fetch the contract state
-      const response = await fetch(`${this.TESTNET_URL}/contract/state/${contractAddress}`);
+      // Using fetch directly to get contract state
+      const response = await fetch(`${this.API_BASE_URL}/contract/${contractAddress}`);
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch contract state: ${response.statusText}`);
+        throw new Error(`Failed to fetch contract: ${response.statusText}`);
       }
       
-      const contractState = await response.json();
+      const contractData = await response.json();
       
-      if (!contractState || !contractState.state) {
-        throw new Error("Contract state not found or invalid");
+      if (!contractData || !contractData.state) {
+        throw new Error("Contract state not found");
       }
       
       // Parse the state into our ProjectData format
-      const state = contractState.state;
+      const state = contractData.state;
       
       return {
         title: state.title || "",
@@ -113,17 +103,22 @@ class BlockchainService {
     } catch (error) {
       console.error("Error fetching project data:", error);
       
-      // Fallback to mock data in case of error or during development
-      return {
-        title: "Privacy-Preserving Research Project",
-        description: "Funding research on advanced privacy techniques in blockchain applications",
-        fundingTarget: 1000,
-        deadline: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days from now
-        status: 'Active',
-        totalRaised: null,
-        numContributors: 5,
-        isSuccessful: null
-      };
+      // Fallback to mock data during development
+      if (config.testMode) {
+        console.log("Using mock data due to error or test mode");
+        return {
+          title: "Privacy-Preserving Research Project",
+          description: "Funding research on advanced privacy techniques in blockchain applications",
+          fundingTarget: 1000,
+          deadline: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days from now
+          status: 'Active',
+          totalRaised: null,
+          numContributors: 5,
+          isSuccessful: null
+        };
+      }
+      
+      throw new Error("Failed to fetch project details from blockchain");
     }
   }
   
@@ -142,41 +137,58 @@ class BlockchainService {
     return "Setup";
   }
 
-  // Submit a contribution as a secret input
+  // Submit a contribution as a secret input - using direct API call
   async contribute(
     contractAddress: string,
     amount: number,
-    privateKey: string
+    privateKeyStr: string
   ): Promise<ContributionResult> {
     try {
-      // Prepare the transaction payload
-      const payload = {
-        contractAddress,
-        methodName: "add_contribution",
+      // For real implementation, we'd use the SDK
+      // However, as the SDK has compatibility issues, we'll use a direct API call approach
+      
+      // Get the address from the private key
+      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      
+      // Prepare the function call data
+      const callData = {
+        contractAddress: contractAddress,
+        functionName: "add_contribution",
         parameters: [amount.toString()],
-        privateKey: privateKey,
-        gasLimit: this.GAS_LIMIT
+        gas: this.GAS_LIMIT,
+        privateKey: privateKeyStr // Note: In a real implementation, we'd use a proper signing mechanism
       };
       
-      // We'll use a direct API call to submit the transaction
-      // In a real implementation, we'd use the Partisia SDK to sign and submit
-      const response = await fetch(`${this.TESTNET_URL}/transaction/invoke`, {
+      console.log("Contribution call data:", JSON.stringify(callData, null, 2));
+      
+      if (config.testMode) {
+        // In test mode, simulate a successful transaction
+        console.log("Test mode: Simulating successful contribution transaction");
+        return { 
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      
+      // Send the transaction request
+      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(callData)
       });
       
       if (!response.ok) {
-        throw new Error(`Transaction failed: ${response.statusText}`);
+        throw new Error(`Failed to submit transaction: ${response.statusText}`);
       }
       
       const result = await response.json();
       
-      return {
+      console.log("Contribution transaction result:", result);
+      return { 
         success: true,
-        txId: result.transactionId || 'pending'
+        txId: result.transactionId || result.txId || `pending_${Date.now()}`
       };
     } catch (error) {
       console.error("Error submitting contribution:", error);
@@ -190,36 +202,51 @@ class BlockchainService {
   // Start the campaign (move from Setup to Active)
   async startCampaign(
     contractAddress: string,
-    privateKey: string
+    privateKeyStr: string
   ): Promise<ContributionResult> {
     try {
-      // Prepare the transaction payload
-      const payload = {
-        contractAddress,
-        methodName: "start_campaign",
+      // Get the address from the private key
+      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      
+      // Prepare the function call data
+      const callData = {
+        contractAddress: contractAddress,
+        functionName: "start_campaign",
         parameters: [],
-        privateKey: privateKey,
-        gasLimit: this.GAS_LIMIT
+        gas: this.GAS_LIMIT,
+        privateKey: privateKeyStr 
       };
       
-      // We'll use a direct API call to submit the transaction
-      const response = await fetch(`${this.TESTNET_URL}/transaction/invoke`, {
+      console.log("Start campaign call data:", JSON.stringify(callData, null, 2));
+      
+      if (config.testMode) {
+        // In test mode, simulate a successful transaction
+        console.log("Test mode: Simulating successful start campaign transaction");
+        return { 
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      
+      // Send the transaction request
+      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(callData)
       });
       
       if (!response.ok) {
-        throw new Error(`Transaction failed: ${response.statusText}`);
+        throw new Error(`Failed to submit transaction: ${response.statusText}`);
       }
       
       const result = await response.json();
       
-      return {
+      console.log("Start campaign transaction result:", result);
+      return { 
         success: true,
-        txId: result.transactionId || 'pending'
+        txId: result.transactionId || result.txId || `pending_${Date.now()}`
       };
     } catch (error) {
       console.error("Error starting campaign:", error);
@@ -233,36 +260,51 @@ class BlockchainService {
   // End the campaign and start computation
   async endCampaign(
     contractAddress: string,
-    privateKey: string
+    privateKeyStr: string
   ): Promise<CampaignEndResult> {
     try {
-      // Prepare the transaction payload
-      const payload = {
-        contractAddress,
-        methodName: "end_campaign",
+      // Get the address from the private key
+      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      
+      // Prepare the function call data
+      const callData = {
+        contractAddress: contractAddress,
+        functionName: "end_campaign",
         parameters: [],
-        privateKey: privateKey,
-        gasLimit: this.GAS_LIMIT
+        gas: this.GAS_LIMIT,
+        privateKey: privateKeyStr 
       };
       
-      // We'll use a direct API call to submit the transaction
-      const response = await fetch(`${this.TESTNET_URL}/transaction/invoke`, {
+      console.log("End campaign call data:", JSON.stringify(callData, null, 2));
+      
+      if (config.testMode) {
+        // In test mode, simulate a successful transaction
+        console.log("Test mode: Simulating successful end campaign transaction");
+        return { 
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      
+      // Send the transaction request
+      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(callData)
       });
       
       if (!response.ok) {
-        throw new Error(`Transaction failed: ${response.statusText}`);
+        throw new Error(`Failed to submit transaction: ${response.statusText}`);
       }
       
       const result = await response.json();
       
-      return {
+      console.log("End campaign transaction result:", result);
+      return { 
         success: true,
-        txId: result.transactionId || 'pending'
+        txId: result.transactionId || result.txId || `pending_${Date.now()}`
       };
     } catch (error) {
       console.error("Error ending campaign:", error);
@@ -276,36 +318,51 @@ class BlockchainService {
   // Withdraw funds (for project owner)
   async withdrawFunds(
     contractAddress: string,
-    privateKey: string
+    privateKeyStr: string
   ): Promise<WithdrawalResult> {
     try {
-      // Prepare the transaction payload
-      const payload = {
-        contractAddress,
-        methodName: "withdraw_funds",
+      // Get the address from the private key
+      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      
+      // Prepare the function call data
+      const callData = {
+        contractAddress: contractAddress,
+        functionName: "withdraw_funds",
         parameters: [],
-        privateKey: privateKey,
-        gasLimit: this.GAS_LIMIT
+        gas: this.GAS_LIMIT,
+        privateKey: privateKeyStr
       };
       
-      // We'll use a direct API call to submit the transaction
-      const response = await fetch(`${this.TESTNET_URL}/transaction/invoke`, {
+      console.log("Withdraw funds call data:", JSON.stringify(callData, null, 2));
+      
+      if (config.testMode) {
+        // In test mode, simulate a successful transaction
+        console.log("Test mode: Simulating successful withdraw funds transaction");
+        return { 
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      
+      // Send the transaction request
+      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(callData)
       });
       
       if (!response.ok) {
-        throw new Error(`Transaction failed: ${response.statusText}`);
+        throw new Error(`Failed to submit transaction: ${response.statusText}`);
       }
       
       const result = await response.json();
       
-      return {
+      console.log("Withdraw funds transaction result:", result);
+      return { 
         success: true,
-        txId: result.transactionId || 'pending'
+        txId: result.transactionId || result.txId || `pending_${Date.now()}`
       };
     } catch (error) {
       console.error("Error withdrawing funds:", error);
@@ -319,7 +376,7 @@ class BlockchainService {
   // Check the status of a transaction
   async checkTransactionStatus(txId: string): Promise<any> {
     try {
-      const response = await fetch(`${this.TESTNET_URL}/transaction/${txId}`);
+      const response = await fetch(`${this.API_BASE_URL}/transaction/${txId}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch transaction: ${response.statusText}`);
@@ -338,24 +395,28 @@ class BlockchainService {
     address: string
   ): Promise<boolean> {
     try {
-      const response = await fetch(`${this.TESTNET_URL}/contract/state/${contractAddress}`);
+      const response = await fetch(`${this.API_BASE_URL}/contract/${contractAddress}`);
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch contract state: ${response.statusText}`);
+        throw new Error(`Failed to fetch contract: ${response.statusText}`);
       }
       
-      const contractState = await response.json();
+      const contractData = await response.json();
       
-      if (!contractState || !contractState.state || !contractState.state.owner) {
+      if (!contractData || !contractData.state || !contractData.state.owner) {
         return false;
       }
       
-      return contractState.state.owner === address;
+      return contractData.state.owner === address;
     } catch (error) {
       console.error("Error checking project ownership:", error);
       
-      // For testing only - in a real implementation, we'd properly check
-      return address.startsWith('0x');
+      // For testing only
+      if (config.testMode) {
+        return address.startsWith('0x');
+      }
+      
+      return false;
     }
   }
 
