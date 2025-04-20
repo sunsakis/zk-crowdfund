@@ -1,115 +1,146 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { useBlockchain } from './hooks/useBlockchain';
 
-// Mock API functions - these would be replaced with actual blockchain interactions
-const mockFetchProject = async (address: string) => {
-  // Simulate API call
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  return {
-    title: "Privacy-Preserving Research Project",
-    description: "Funding research on advanced privacy techniques in blockchain applications",
-    fundingTarget: 1000,
-    deadline: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days from now
-    status: "Active",
-    totalRaised: null,
-    numContributors: 5,
-    isSuccessful: null
-  };
-};
-
-const mockContribute = async (amount: number, privateKey: string) => {
-  // Simulate API call
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  return { success: true };
-};
-
-const mockEndCampaign = async (privateKey: string) => {
-  // Simulate API call
-  await new Promise(resolve => setTimeout(resolve, 3000));
-  return { 
-    success: true,
-    totalRaised: 1200,
-    isSuccessful: true
-  };
+// Try to load saved contract address from local storage or config file
+const getSavedContractAddress = (): string => {
+  try {
+    // First check localStorage
+    const savedAddress = localStorage.getItem('contractAddress');
+    if (savedAddress) return savedAddress;
+    
+    // Then check if we have a config file with the address
+    try {
+      const loadedConfig = require('./config.json');
+      if (loadedConfig.contractAddress) return loadedConfig.contractAddress;
+    } catch (e) {
+      // Config file might not exist, which is fine
+    }
+  } catch (e) {
+    // Ignore error if localStorage is not available
+  }
+  return '';
 };
 
 function App() {
-  const [contractAddress, setContractAddress] = useState('');
+  // State variables
+  const [contractAddress, setContractAddress] = useState(getSavedContractAddress());
   const [privateKey, setPrivateKey] = useState('');
   const [contributionAmount, setContributionAmount] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [project, setProject] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-
-  const handleSetAddress = async () => {
+  
+  // Use our blockchain hook
+  const {
+    project,
+    userAddress,
+    isOwner,
+    loading,
+    error,
+    refreshProject,
+    contribute,
+    startCampaign,
+    endCampaign,
+    withdrawFunds
+  } = useBlockchain({
+    contractAddress,
+    privateKey: isLoggedIn ? privateKey : '',
+    refreshInterval: 10000 // 10 seconds
+  });
+  
+  // Show error messages from the hook
+  useEffect(() => {
+    if (error) {
+      setMessage(error);
+    }
+  }, [error]);
+  
+  // Handle setting the contract address
+  const handleSetAddress = () => {
     if (!contractAddress) return;
     
-    setLoading(true);
-    try {
-      const projectData = await mockFetchProject(contractAddress);
-      setProject(projectData);
-      setMessage('Project loaded successfully');
-    } catch (error) {
-      setMessage('Error loading project');
-    }
-    setLoading(false);
+    // Save to localStorage for persistence
+    localStorage.setItem('contractAddress', contractAddress);
+    
+    // The hook will automatically fetch project data
+    setMessage('Loading project data...');
   };
 
-  const handleLogin = () => {
-    if (privateKey) {
-      setIsLoggedIn(true);
-      setMessage('Logged in successfully');
-    }
+  // Handle user login with private key
+  const handleLogin = async () => {
+    if (!privateKey) return;
+    
+    setIsLoggedIn(true);
+    setMessage(`Logging in...`);
   };
 
+  // Handle contribution submission
   const handleContribute = async () => {
-    if (!isLoggedIn || !contributionAmount) return;
+    if (!isLoggedIn || !contributionAmount || !contractAddress) return;
     
-    setLoading(true);
-    try {
-      const amount = parseInt(contributionAmount);
-      if (isNaN(amount) || amount <= 0) {
-        setMessage('Please enter a valid amount');
-        setLoading(false);
-        return;
-      }
-      
-      const result = await mockContribute(amount, privateKey);
-      if (result.success) {
-        setMessage(`Contribution of ${amount} submitted successfully!`);
-        setContributionAmount('');
-        // Refresh project data
-        const projectData = await mockFetchProject(contractAddress);
-        setProject(projectData);
-      }
-    } catch (error) {
-      setMessage('Error submitting contribution');
+    const amount = parseInt(contributionAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setMessage('Please enter a valid amount');
+      return;
     }
-    setLoading(false);
+    
+    setMessage('Submitting contribution...');
+    const result = await contribute(amount);
+    
+    if (result.success) {
+      setMessage(`Contribution of ${amount} submitted successfully! Transaction ID: ${result.txId || 'pending'}`);
+      setContributionAmount('');
+    } else {
+      setMessage(`Contribution failed: ${result.error}`);
+    }
   };
 
-  const handleEndCampaign = async () => {
-    if (!isLoggedIn) return;
+  // Handle starting the campaign
+  const handleStartCampaign = async () => {
+    if (!isLoggedIn || !isOwner || !contractAddress) return;
     
-    setLoading(true);
-    try {
-      const result = await mockEndCampaign(privateKey);
-      if (result.success) {
-        setMessage('Campaign ended successfully');
-        // Update project with results
-        setProject({
-          ...project,
-          status: 'Completed',
-          totalRaised: result.totalRaised,
-          isSuccessful: result.isSuccessful
-        });
-      }
-    } catch (error) {
-      setMessage('Error ending campaign');
+    setMessage('Starting campaign...');
+    const result = await startCampaign();
+    
+    if (result.success) {
+      setMessage(`Campaign started successfully! Transaction ID: ${result.txId || 'pending'}`);
+    } else {
+      setMessage(`Failed to start campaign: ${result.error}`);
     }
-    setLoading(false);
+  };
+
+  // Handle ending the campaign
+  const handleEndCampaign = async () => {
+    if (!isLoggedIn || !contractAddress) return;
+    
+    setMessage('Ending campaign and starting computation...');
+    const result = await endCampaign();
+    
+    if (result.success) {
+      setMessage(`Campaign end request submitted successfully. Computation in progress... Transaction ID: ${result.txId || 'pending'}`);
+    } else {
+      setMessage(`Failed to end campaign: ${result.error}`);
+    }
+  };
+
+  // Handle fund withdrawal
+  const handleWithdrawFunds = async () => {
+    if (!isLoggedIn || !isOwner || !contractAddress) return;
+    
+    setMessage('Withdrawing funds...');
+    const result = await withdrawFunds();
+    
+    if (result.success) {
+      setMessage(`Funds withdrawal request submitted successfully. Transaction ID: ${result.txId || 'pending'}`);
+    } else {
+      setMessage(`Failed to withdraw funds: ${result.error}`);
+    }
+  };
+
+  // Handle manual refresh
+  const handleRefresh = () => {
+    setMessage('Refreshing project data...');
+    refreshProject();
   };
 
   return (
@@ -129,10 +160,18 @@ function App() {
               value={contractAddress}
               onChange={(e) => setContractAddress(e.target.value)}
             />
-            <button onClick={handleSetAddress} disabled={loading}>
+            <button onClick={handleSetAddress} disabled={loading || !contractAddress}>
               {loading ? 'Loading...' : 'Set Address'}
             </button>
           </div>
+          
+          {contractAddress && (
+            <div className="refresh-section">
+              <button onClick={handleRefresh} disabled={loading} className="refresh-button">
+                {loading ? 'Refreshing...' : 'Refresh State'}
+              </button>
+            </div>
+          )}
         </section>
 
         {project && (
@@ -172,13 +211,13 @@ function App() {
               
               <div className="detail-item">
                 <span>Deadline:</span>
-                <span>{new Date(project.deadline).toLocaleString()}</span>
+                <span>{new Date(project.deadline * 1000).toLocaleString()}</span>
               </div>
             </div>
             
             {!isLoggedIn ? (
               <div className="login-section">
-                <h3>Login to Contribute</h3>
+                <h3>Login to Interact</h3>
                 <div className="input-group">
                   <input
                     type="password"
@@ -186,11 +225,32 @@ function App() {
                     value={privateKey}
                     onChange={(e) => setPrivateKey(e.target.value)}
                   />
-                  <button onClick={handleLogin}>Login</button>
+                  <button onClick={handleLogin} disabled={loading || !privateKey}>Login</button>
                 </div>
               </div>
             ) : (
               <div className="action-section">
+                <div className="user-info">
+                  <p>Logged in as: {userAddress.substring(0, 8)}...{userAddress.substring(userAddress.length - 6)}</p>
+                  {isOwner && <p className="owner-badge">Project Owner</p>}
+                </div>
+                
+                {project.status === 'Setup' && isOwner && (
+                  <div className="start-campaign-section">
+                    <h3>Start Campaign</h3>
+                    <button 
+                      onClick={handleStartCampaign} 
+                      disabled={loading}
+                      className="action-button"
+                    >
+                      {loading ? 'Processing...' : 'Start Campaign'}
+                    </button>
+                    <p className="note">
+                      This will activate the campaign and allow contributions
+                    </p>
+                  </div>
+                )}
+                
                 {project.status === 'Active' && (
                   <>
                     <div className="contribute-section">
@@ -202,7 +262,7 @@ function App() {
                           value={contributionAmount}
                           onChange={(e) => setContributionAmount(e.target.value)}
                         />
-                        <button onClick={handleContribute} disabled={loading}>
+                        <button onClick={handleContribute} disabled={loading || !contributionAmount}>
                           {loading ? 'Processing...' : 'Contribute'}
                         </button>
                       </div>
@@ -213,25 +273,61 @@ function App() {
                     
                     <div className="end-campaign-section">
                       <h3>End Campaign</h3>
-                      <button onClick={handleEndCampaign} disabled={loading}>
+                      <button 
+                        onClick={handleEndCampaign} 
+                        disabled={loading}
+                        className="action-button"
+                      >
                         {loading ? 'Processing...' : 'End Campaign & Compute Results'}
                       </button>
                       <p className="note">
-                        This will start the computation to determine if the campaign reached its funding goal
+                        {isOwner 
+                          ? "As the owner, you can end the campaign at any time" 
+                          : "Only the owner can end the campaign before the deadline"}
                       </p>
                     </div>
                   </>
                 )}
                 
-                {project.status === 'Completed' && project.isSuccessful && (
+                {project.status === 'Computing' && (
+                  <div className="computing-section">
+                    <h3>Computation in Progress</h3>
+                    <div className="loading-indicator">
+                      <div className="spinner"></div>
+                    </div>
+                    <p className="note">
+                      The secure computation to tally all contributions is in progress.
+                      This may take several minutes. The page will automatically update.
+                    </p>
+                  </div>
+                )}
+                
+                {project.status === 'Completed' && project.isSuccessful && isOwner && (
                   <div className="withdrawal-section">
                     <h3>Withdraw Funds</h3>
-                    <button disabled={loading}>
+                    <button 
+                      onClick={handleWithdrawFunds} 
+                      disabled={loading}
+                      className="action-button"
+                    >
                       {loading ? 'Processing...' : 'Withdraw Funds'}
                     </button>
                     <p className="note">
-                      Only the project owner can withdraw funds
+                      As the project owner, you can now withdraw the raised funds
                     </p>
+                  </div>
+                )}
+                
+                {project.status === 'Completed' && (
+                  <div className="result-section">
+                    <h3>Campaign Results</h3>
+                    <div className={`result ${project.isSuccessful ? 'success' : 'failure'}`}>
+                      <p>
+                        {project.isSuccessful 
+                          ? `Successfully raised ${project.totalRaised} (target: ${project.fundingTarget})` 
+                          : `Did not meet the target (raised ${project.totalRaised} of ${project.fundingTarget})`}
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>

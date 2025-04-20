@@ -38,11 +38,21 @@ CONTRACT_ADDRESS=$(echo "$DEPLOYMENT_RESULT" | grep -o 'Contract address: [^ ]*'
 if [ -n "$CONTRACT_ADDRESS" ]; then
   echo "Deployment successful!"
   echo "Contract address: $CONTRACT_ADDRESS"
-  echo "Contract address has been saved to .contract-address file"
-  echo $CONTRACT_ADDRESS > .contract-address
+  echo "Contract address has been saved to .env file"
   
-  # Generate a configuration file for the frontend
-  echo "Generating frontend configuration..."
+  # Create or update .env file
+  echo "CONTRACT_ADDRESS=$CONTRACT_ADDRESS" > .env
+  
+  # Start the campaign automatically
+  echo "Starting the campaign..."
+  START_RESULT=$(cargo partisia-contract transaction action --gas 20000 --privatekey $PRIVATE_KEY $CONTRACT_ADDRESS start_campaign)
+  
+  echo "Campaign has been started! Your crowdfunding project is now active."
+  echo "Frontend URL: http://localhost:3000"
+  
+  # Generate a config file for the frontend
+  echo "Creating frontend configuration..."
+  mkdir -p zk-crowdfunding-frontend/src
   cat > zk-crowdfunding-frontend/src/config.json << EOL
 {
   "contractAddress": "$CONTRACT_ADDRESS",
@@ -52,7 +62,9 @@ if [ -n "$CONTRACT_ADDRESS" ]; then
   "deadline": $DEADLINE
 }
 EOL
-  echo "Frontend configuration has been generated"
+  
+  echo "Done! You can start the frontend with:"
+  echo "cd zk-crowdfunding-frontend && npm install && npm start"
 else
   echo "Deployment failed or couldn't extract contract address."
   exit 1
