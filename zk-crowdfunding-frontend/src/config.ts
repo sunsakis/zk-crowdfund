@@ -4,27 +4,26 @@ export interface AppConfig {
     rpcNodeUrl: string;
     browserUrl: string;
   };
-  // Project defaults (can be overridden)
-  projectDefaults: {
-    title: string;
-    description: string;
-    fundingTarget: number;
-    deadline: number;
-  };
+  // Default contract address (can be loaded from JSON or env)
+  contractAddress?: string;
+}
+
+// Try to load JSON config file
+let jsonConfig: any = {};
+try {
+  jsonConfig = require('./config.json');
+} catch (e) {
+  // Config file might not exist, which is fine
+  console.log('No config.json file found, using default settings');
 }
 
 // Default configuration with testnet settings
 const config: AppConfig = {
   blockchain: {
-    rpcNodeUrl: "https://node1.testnet.partisiablockchain.com",
-    browserUrl: "https://browser.testnet.partisiablockchain.com"
+    rpcNodeUrl: jsonConfig.blockchain?.rpcNodeUrl || "https://node1.testnet.partisiablockchain.com",
+    browserUrl: jsonConfig.blockchain?.browserUrl || "https://browser.testnet.partisiablockchain.com"
   },
-  projectDefaults: {
-    title: "Privacy-Preserving Research Project",
-    description: "Funding research on advanced privacy techniques in blockchain applications",
-    fundingTarget: 1000,
-    deadline: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days from now
-  }
+  contractAddress: jsonConfig.contractAddress || ""
 };
 
 export default config;

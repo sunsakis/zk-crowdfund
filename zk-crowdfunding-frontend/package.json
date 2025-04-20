@@ -10,23 +10,23 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Privacy-Preserving Crowdfunding Platform",
   "dependencies": {
-    "@partisiablockchain/abi-client": "^4.189.0",
-    "@partisiablockchain/zk-client": "^4.162.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "@partisiablockchain/abi-client": "^5.163.0",
+    "@partisiablockchain/zk-client": "^5.190.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.1",
-    "css-loader": "^7.1.2",
-    "html-webpack-plugin": "^5.6.3",
-    "style-loader": "^4.0.0",
-    "ts-loader": "^9.5.2",
-    "typescript": "^5.8.3",
-    "webpack": "^5.99.3",
-    "webpack-cli": "^6.0.1",
-    "webpack-dev-server": "^5.2.1"
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "css-loader": "^6.8.1",
+    "html-webpack-plugin": "^5.5.3",
+    "style-loader": "^3.3.3",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.2.2",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1"
   }
 }

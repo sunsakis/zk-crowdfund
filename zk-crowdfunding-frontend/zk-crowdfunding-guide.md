@@ -1,161 +1,104 @@
-# Privacy-Preserving Crowdfunding Platform Guide
+# ZK-Crowdfunding Frontend
 
-This guide will walk you through the process of using the ZK Crowdfunding platform, a privacy-focused crowdfunding solution built on Partisia Blockchain. The platform allows contributors to keep their individual contribution amounts private while ensuring transparency in the overall funding process.
+A privacy-focused crowdfunding platform frontend that interacts with the Partisia Blockchain. This application allows users to interact with the ZK-Crowdfunding smart contract, which keeps individual contributions private while ensuring transparency in the overall funding process.
 
-## Contents
+## Features
 
-1. [Prerequisites](#prerequisites)
-2. [Project Setup](#project-setup)
-3. [Deploying a Crowdfunding Project](#deploying-a-crowdfunding-project)
-4. [Starting the Campaign](#starting-the-campaign)
-5. [Making Contributions](#making-contributions)
-6. [Ending the Campaign](#ending-the-campaign)
-7. [Withdrawing Funds](#withdrawing-funds)
-8. [Privacy Features Explained](#privacy-features-explained)
-9. [Troubleshooting](#troubleshooting)
+- **Private Contributions**: Individual contribution amounts are kept confidential using zero-knowledge proofs
+- **Threshold-Based Reveal**: Total raised amount is only revealed when the campaign ends
+- **Secure Computation**: Uses Partisia's Multi-Party Computation to securely tally all contributions
+- **Role-Based Actions**: Project owner has special privileges like starting/ending campaigns and withdrawing funds
 
 ## Prerequisites
 
-Before you begin, make sure you have:
+- Node.js and NPM installed
+- Access to a deployed ZK-Crowdfunding contract on Partisia Blockchain
+- Private key file for interacting with the blockchain
 
-- Node.js and npm installed
-- Cargo and Rust toolchain installed
-- The Partisia Blockchain CLI tools (cargo-partisia-contract)
-- At least one account with test tokens (in the `.pk` file format)
+## Setup and Installation
 
-## Project Setup
-
-1. Clone the repository and install dependencies:
-
+1. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/zk-crowdfunding.git
-cd zk-crowdfunding
-cargo build --release
+cd zk-crowdfunding/zk-crowdfunding-frontend
+```
 
-# Setup the frontend
-cd zk-crowdfunding-frontend
+2. Install dependencies:
+```bash
 npm install
 ```
 
-2. Make the deployment script executable:
-
-```bash
-chmod +x ../scripts/deploy-crowdfunding.sh
+3. Create a `config.json` file in the `src` directory with your contract information:
+```json
+{
+  "contractAddress": "YOUR_CONTRACT_ADDRESS_HERE",
+  "blockchain": {
+    "rpcNodeUrl": "https://node1.testnet.partisiablockchain.com",
+    "browserUrl": "https://browser.testnet.partisiablockchain.com"
+  }
+}
 ```
 
-## Deploying a Crowdfunding Project
-
-1. Use the deployment script to create a new crowdfunding project:
-
+4. Start the development server:
 ```bash
-cd scripts
-./deploy-crowdfunding.sh Account-A.pk "My Project Title" "Project Description" 1000 $(( $(date +%s) + 7*24*60*60 ))
-```
-
-This command:
-- Uses `Account-A.pk` as the project owner
-- Sets the project title and description
-- Sets a funding target of 1000 units
-- Sets a deadline 7 days from now
-  
-The script will output your contract address and automatically start the campaign.
-
-2. The script creates a `config.json` file for the frontend. You're ready to start the frontend:
-
-```bash
-cd zk-crowdfunding-frontend
 npm start
 ```
 
-## Starting the Campaign
+## Usage Guide
 
-The deployment script automatically starts the campaign. However, if you deployed the contract separately:
+### Connecting to a Contract
 
-1. Start the campaign using the CLI:
+1. Enter the contract address in the input field at the top of the application.
+2. Click "Set Address" to connect to the contract and load project details.
 
-```bash
-cargo partisia-contract transaction action --gas 20000 --privatekey Account-A.pk YOUR_CONTRACT_ADDRESS start_campaign
-```
+### Logging In
 
-2. Or use the frontend:
-   - Log in with your private key
-   - Click the "Start Campaign" button (only visible to the project owner)
+1. Enter your private key in the login section.
+2. Click "Login" to authenticate yourself with the blockchain.
 
-## Making Contributions
+### Project Owner Actions
 
-Contributors can make private contributions without revealing the amount to other users:
+If you're the project owner, you can:
 
-1. Using the frontend:
-   - Enter the contract address
-   - Log in with your private key
-   - Enter the contribution amount
-   - Click "Contribute"
-   
-2. Using the CLI:
+- **Start Campaign**: Transition the project from Setup to Active state.
+- **End Campaign**: Close the funding period and trigger the computation of results.
+- **Withdraw Funds**: If the campaign was successful, withdraw the raised funds.
 
-```bash
-cargo partisia-contract transaction action --gas 100000 --privatekey Account-B.pk YOUR_CONTRACT_ADDRESS add_contribution 500
-```
+### Contributor Actions
 
-**Important Privacy Note**: Each address can only contribute once. This is a design decision to ensure privacy of individual contributions.
+Any user with a private key can:
 
-## Ending the Campaign
+- **Make a Contribution**: Submit a confidential contribution to the project.
+- **View Project Status**: Check the current state of the project, including deadline and funding target.
 
-When you're ready to end the campaign:
+## Privacy Features
 
-1. Using the frontend:
-   - Log in with your private key (project owner or after deadline)
-   - Click "End Campaign & Compute Results"
-   
-2. Using the CLI:
-
-```bash
-cargo partisia-contract transaction action --gas 20000 --privatekey Account-A.pk YOUR_CONTRACT_ADDRESS end_campaign
-```
-
-After ending the campaign, the contract will enter a "Computing" state while the ZK computation runs. This may take several minutes. The frontend will automatically refresh to show when computation is complete.
-
-## Withdrawing Funds
-
-If the campaign was successful (raised at least the target amount):
-
-1. Using the frontend:
-   - Log in with the project owner's private key
-   - Click "Withdraw Funds"
-   
-2. Using the CLI:
-
-```bash
-cargo partisia-contract transaction action --gas 20000 --privatekey Account-A.pk YOUR_CONTRACT_ADDRESS withdraw_funds
-```
-
-## Privacy Features Explained
-
-This crowdfunding platform provides several privacy guarantees:
-
-1. **Private Contributions**: Individual contribution amounts are never revealed on the blockchain.
+1. **Confidential Contributions**: Individual contribution amounts are never revealed on the blockchain.
 
 2. **Threshold-Based Reveal**: The total raised amount is only revealed after the campaign has ended.
 
-3. **Zero-Knowledge Proofs**: The computation of the total uses secure multi-party computation to ensure accuracy without revealing individual data.
+3. **Fair Computation**: The use of zero-knowledge proofs ensures that the computation is done correctly without exposing any individual contribution.
 
-4. **Consensus Verification**: The Partisia Blockchain validators ensure that the computation was performed correctly.
+4. **Consensus Verification**: The Partisia Blockchain consensus mechanism ensures that the computation is validated by multiple parties.
 
 ## Troubleshooting
 
-**Transaction Errors**:
-- Make sure your account has enough gas
-- Check that you're using the correct contract address
-- Verify that the campaign is in the correct state for your action
+### Common Issues:
 
-**Frontend Connection Issues**:
-- Ensure the contract address is correct
-- Check that you're connected to the testnet
-- Verify your private key format is correct
+- **Transaction Errors**: Make sure your private key is correct and has sufficient gas.
+- **Contract Not Found**: Verify the contract address is correct and the contract is deployed.
+- **Computation Taking Too Long**: ZK computations can take time. The interface will automatically refresh.
 
-**Computation Delays**:
-- ZK computations can take time to complete
-- Use the frontend's auto-refresh feature to track progress
-- You can also check the contract state manually via CLI
+## Developer Notes
 
-For more detailed help, please reach out on our Discord community.
+- The frontend uses React and TypeScript
+- API calls are made directly to the Partisia Blockchain nodes
+- The auto-refresh mechanism checks for updates every 10 seconds when a computation is in progress
+
+## License
+
+[Insert your license information here]
+
+## Contact
+
+[Your contact information]

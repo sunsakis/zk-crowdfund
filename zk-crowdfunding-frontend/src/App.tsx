@@ -11,8 +11,8 @@ const getSavedContractAddress = (): string => {
     
     // Then check if we have a config file with the address
     try {
-      const loadedConfig = require('./config.json');
-      if (loadedConfig.contractAddress) return loadedConfig.contractAddress;
+      const config = require('./config.json');
+      if (config.contractAddress) return config.contractAddress;
     } catch (e) {
       // Config file might not exist, which is fine
     }
@@ -88,7 +88,7 @@ function App() {
     const result = await contribute(amount);
     
     if (result.success) {
-      setMessage(`Contribution of ${amount} submitted successfully! Transaction ID: ${result.txId || 'pending'}`);
+      setMessage(`Contribution of ${amount} submitted successfully! ${result.txId ? `Transaction ID: ${result.txId}` : ''}`);
       setContributionAmount('');
     } else {
       setMessage(`Contribution failed: ${result.error}`);
@@ -103,7 +103,7 @@ function App() {
     const result = await startCampaign();
     
     if (result.success) {
-      setMessage(`Campaign started successfully! Transaction ID: ${result.txId || 'pending'}`);
+      setMessage(`Campaign started successfully! ${result.txId ? `Transaction ID: ${result.txId}` : ''}`);
     } else {
       setMessage(`Failed to start campaign: ${result.error}`);
     }
@@ -117,7 +117,7 @@ function App() {
     const result = await endCampaign();
     
     if (result.success) {
-      setMessage(`Campaign end request submitted successfully. Computation in progress... Transaction ID: ${result.txId || 'pending'}`);
+      setMessage(`Campaign end request submitted successfully. Computation in progress... ${result.txId ? `Transaction ID: ${result.txId}` : ''}`);
     } else {
       setMessage(`Failed to end campaign: ${result.error}`);
     }
@@ -131,7 +131,7 @@ function App() {
     const result = await withdrawFunds();
     
     if (result.success) {
-      setMessage(`Funds withdrawal request submitted successfully. Transaction ID: ${result.txId || 'pending'}`);
+      setMessage(`Funds withdrawal request submitted successfully. ${result.txId ? `Transaction ID: ${result.txId}` : ''}`);
     } else {
       setMessage(`Failed to withdraw funds: ${result.error}`);
     }
@@ -211,7 +211,7 @@ function App() {
               
               <div className="detail-item">
                 <span>Deadline:</span>
-                <span>{new Date(project.deadline * 1000).toLocaleString()}</span>
+                <span>{new Date(project.deadline).toLocaleString()}</span>
               </div>
             </div>
             
@@ -277,71 +277,71 @@ function App() {
                         onClick={handleEndCampaign} 
                         disabled={loading}
                         className="action-button"
-                      >
-                        {loading ? 'Processing...' : 'End Campaign & Compute Results'}
-                      </button>
-                      <p className="note">
-                        {isOwner 
-                          ? "As the owner, you can end the campaign at any time" 
-                          : "Only the owner can end the campaign before the deadline"}
-                      </p>
-                    </div>
-                  </>
-                )}
-                
-                {project.status === 'Computing' && (
-                  <div className="computing-section">
-                    <h3>Computation in Progress</h3>
-                    <div className="loading-indicator">
-                      <div className="spinner"></div>
-                    </div>
-                    <p className="note">
-                      The secure computation to tally all contributions is in progress.
-                      This may take several minutes. The page will automatically update.
-                    </p>
-                  </div>
-                )}
-                
-                {project.status === 'Completed' && project.isSuccessful && isOwner && (
-                  <div className="withdrawal-section">
-                    <h3>Withdraw Funds</h3>
-                    <button 
-                      onClick={handleWithdrawFunds} 
-                      disabled={loading}
-                      className="action-button"
                     >
-                      {loading ? 'Processing...' : 'Withdraw Funds'}
+                      {loading ? 'Processing...' : 'End Campaign & Compute Results'}
                     </button>
                     <p className="note">
-                      As the project owner, you can now withdraw the raised funds
+                      {isOwner 
+                        ? "As the owner, you can end the campaign at any time" 
+                        : "Only the owner can end the campaign before the deadline"}
                     </p>
                   </div>
-                )}
-                
-                {project.status === 'Completed' && (
-                  <div className="result-section">
-                    <h3>Campaign Results</h3>
-                    <div className={`result ${project.isSuccessful ? 'success' : 'failure'}`}>
-                      <p>
-                        {project.isSuccessful 
-                          ? `Successfully raised ${project.totalRaised} (target: ${project.fundingTarget})` 
-                          : `Did not meet the target (raised ${project.totalRaised} of ${project.fundingTarget})`}
-                      </p>
-                    </div>
+                </>
+              )}
+              
+              {project.status === 'Computing' && (
+                <div className="computing-section">
+                  <h3>Computation in Progress</h3>
+                  <div className="loading-indicator">
+                    <div className="spinner"></div>
                   </div>
-                )}
-              </div>
-            )}
-          </section>
-        )}
+                  <p className="note">
+                    The secure computation to tally all contributions is in progress.
+                    This may take several minutes. The page will automatically update.
+                  </p>
+                </div>
+              )}
+              
+              {project.status === 'Completed' && project.isSuccessful && isOwner && (
+                <div className="withdrawal-section">
+                  <h3>Withdraw Funds</h3>
+                  <button 
+                    onClick={handleWithdrawFunds} 
+                    disabled={loading}
+                    className="action-button"
+                  >
+                    {loading ? 'Processing...' : 'Withdraw Funds'}
+                  </button>
+                  <p className="note">
+                    As the project owner, you can now withdraw the raised funds
+                  </p>
+                </div>
+              )}
+              
+              {project.status === 'Completed' && (
+                <div className="result-section">
+                  <h3>Campaign Results</h3>
+                  <div className={`result ${project.isSuccessful ? 'success' : 'failure'}`}>
+                    <p>
+                      {project.isSuccessful 
+                        ? `Successfully raised ${project.totalRaised} (target: ${project.fundingTarget})` 
+                        : `Did not meet the target (raised ${project.totalRaised} of ${project.fundingTarget})`}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
-        {message && (
-          <div className="message-section">
-            <p>{message}</p>
-          </div>
-        )}
-      </main>
-    </div>
+      {message && (
+        <div className="message-section">
+          <p>{message}</p>
+        </div>
+      )}
+    </main>
+  </div>
   );
 }
 
