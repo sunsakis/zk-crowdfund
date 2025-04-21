@@ -10,6 +10,7 @@ function App() {
   const [contributionAmount, setContributionAmount] = useState<string>('');
   const [message, setMessage] = useState<string>('');
   const [messageType, setMessageType] = useState<'success' | 'error' | 'info'>('info');
+  const [privateKey, setPrivateKey] = useState<string>('');
   
   // Use the blockchain hook
   const {
@@ -82,14 +83,22 @@ function App() {
   
   // Handle wallet connection
   const handleConnectWallet = async () => {
+    if (!privateKey) {
+      setMessage('Please enter a private key');
+      setMessageType('error');
+      return;
+    }
+    
     setMessage('Connecting to wallet...');
     setMessageType('info');
     
     try {
-      const connectedWallet = await connectWallet();
+      const connectedWallet = await connectWallet(privateKey);
       if (connectedWallet) {
         setMessage(`Connected to wallet: ${connectedWallet.address.substring(0, 8)}...`);
         setMessageType('success');
+        // Clear private key from state for security
+        setPrivateKey('');
       }
     } catch (error) {
       setMessage(`Failed to connect wallet: ${error instanceof Error ? error.message : String(error)}`);
@@ -264,13 +273,25 @@ function App() {
         <section className="wallet-section">
           <h2>Wallet Connection</h2>
           {!wallet ? (
-            <button 
-              onClick={handleConnectWallet} 
-              disabled={loading}
-              className="action-button"
-            >
-              {loading ? 'Connecting...' : 'Connect Wallet'}
-            </button>
+            <div>
+              <div className="input-group">
+                <input
+                  type="password"
+                  placeholder="Enter private key"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                />
+                <button 
+                  onClick={handleConnectWallet} 
+                  disabled={loading || !privateKey}
+                >
+                  {loading ? 'Connecting...' : 'Connect Wallet'}
+                </button>
+              </div>
+              <p className="note">
+                Use the private key for Account-A.pk, Account-B.pk, or Account-C.pk
+              </p>
+            </div>
           ) : (
             <div className="wallet-info">
               <p>Connected: {wallet.address.substring(0, 6)}...{wallet.address.substring(wallet.address.length - 4)}</p>

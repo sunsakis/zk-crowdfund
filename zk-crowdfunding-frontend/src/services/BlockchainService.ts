@@ -1,32 +1,21 @@
+import { ChainControllerApi, Configuration } from "@partisiablockchain/blockchain-api-transaction-client";
+import { ZkCrowdfundingContract } from '../contract/ZkCrowdfundingContract';
 import config from '../config';
 
-// Type definitions
+// Project data structure
 export interface ProjectData {
   title: string;
   description: string;
   fundingTarget: number;
-  deadline: number;
+  deadline: number; // timestamp
   status: 'Setup' | 'Active' | 'Computing' | 'Completed';
   totalRaised: number | null;
   numContributors: number | null;
   isSuccessful: boolean | null;
 }
 
+// Response types for various actions
 export interface ContributionResult {
-  success: boolean;
-  txId?: string;
-  error?: string;
-}
-
-export interface CampaignEndResult {
-  success: boolean;
-  txId?: string;
-  totalRaised?: number;
-  isSuccessful?: boolean;
-  error?: string;
-}
-
-export interface WithdrawalResult {
   success: boolean;
   txId?: string;
   error?: string;
@@ -34,69 +23,20 @@ export interface WithdrawalResult {
 
 export interface WalletInfo {
   address: string;
-  signAndSendTransaction: (payload: any, gas?: number) => Promise<any>;
 }
 
 class BlockchainService {
-  constructor() {
-    console.log("Initializing BlockchainService with connection to:", config.blockchain.rpcNodeUrl);
-  }
-
-  /**
-   * Connect to the wallet
-   */
-  async connectWallet(): Promise<WalletInfo> {
-    try {
-      // In a real implementation, we would use:
-      // - Partisia Wallet browser extension
-      // - partisia-sdk for wallet connection
-      
-      // For now, we'll create a mock wallet
-      const mockAddress = `0x${Math.random().toString(16).substring(2, 12)}`;
-      
-      return {
-        address: mockAddress,
-        signAndSendTransaction: async (payload, gas = 100000) => {
-          console.log("Signing and sending transaction:", payload, "with gas:", gas);
-          
-          // Mock transaction result
-          return {
-            transactionHash: `tx_${Date.now().toString(36)}`,
-            success: true
-          };
-        }
-      };
-    } catch (error) {
-      console.error("Error connecting to wallet:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get contract state and parse it into project data
-   */
-  async getProject(contractAddress: string): Promise<ProjectData> {
-    try {
-      if (!contractAddress) {
-        throw new Error("Contract address not provided");
-      }
-      
-      // For development, always return mock data
-      if (config.testMode) {
-        return this.getMockProjectData();
-      }
-      
-      throw new Error("API connection not implemented in this simplified version");
-    } catch (error) {
-      console.error("Error fetching project data:", error);
-      return this.getMockProjectData();
-    }
-  }
+  private client: ChainControllerApi;
   
-  /**
-   * Get mock project data for testing
-   */
-  private getMockProjectData(): ProjectData {
+  constructor() {
+    this.client = new ChainControllerApi(
+      new Configuration({ basePath: config.blockchain.rpcNodeUrl })
+    );
+    console.log("Initialized BlockchainService with connection to:", config.blockchain.rpcNodeUrl);
+  }
+
+  // For development, always return mock data
+  async getProject(contractAddress: string): Promise<ProjectData> {
     return {
       title: "Privacy-Preserving Research Project",
       description: "Funding research on advanced privacy techniques in blockchain applications",
@@ -109,203 +49,43 @@ class BlockchainService {
     };
   }
 
-  /**
-   * Submit a contribution to the crowdfunding project
-   */
-  async contribute(
-    contractAddress: string,
-    amount: number,
-    wallet: WalletInfo
-  ): Promise<ContributionResult> {
-    try {
-      if (!contractAddress) {
-        throw new Error("Contract address not provided");
-      }
-      
-      if (!wallet) {
-        throw new Error("Wallet not connected");
-      }
-      
-      if (isNaN(amount) || amount <= 0) {
-        throw new Error("Invalid contribution amount");
-      }
-      
-      // For development, return mock success
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      
-      // In a real implementation, this would use:
-      // - Proper encoding for contract calls
-      // - Real transaction signing and submission
-      
-      throw new Error("API connection not implemented in this simplified version");
-    } catch (error) {
-      console.error("Error submitting contribution:", error);
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      return {
-        success: false,
-        error: `Failed to submit contribution: ${error instanceof Error ? error.message : String(error)}`
-      };
-    }
+  // All the other methods will be minimal stubs for now
+  async connectWallet(privateKey: string): Promise<WalletInfo> {
+    return {
+      address: `0x${privateKey.substring(0, 8)}`
+    };
   }
 
-  /**
-   * Start the crowdfunding campaign
-   */
-  async startCampaign(
-    contractAddress: string,
-    wallet: WalletInfo
-  ): Promise<ContributionResult> {
-    try {
-      if (!contractAddress) {
-        throw new Error("Contract address not provided");
-      }
-      
-      if (!wallet) {
-        throw new Error("Wallet not connected");
-      }
-      
-      // For development, return mock success
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      
-      throw new Error("API connection not implemented in this simplified version");
-    } catch (error) {
-      console.error("Error starting campaign:", error);
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      return {
-        success: false,
-        error: `Failed to start campaign: ${error instanceof Error ? error.message : String(error)}`
-      };
-    }
+  async contribute(amount: number): Promise<ContributionResult> {
+    return {
+      success: true,
+      txId: `tx_${Date.now().toString(36)}`
+    };
   }
 
-  /**
-   * End the campaign and start computation
-   */
-  async endCampaign(
-    contractAddress: string,
-    wallet: WalletInfo
-  ): Promise<CampaignEndResult> {
-    try {
-      if (!contractAddress) {
-        throw new Error("Contract address not provided");
-      }
-      
-      if (!wallet) {
-        throw new Error("Wallet not connected");
-      }
-      
-      // For development, return mock success
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      
-      throw new Error("API connection not implemented in this simplified version");
-    } catch (error) {
-      console.error("Error ending campaign:", error);
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      return {
-        success: false,
-        error: `Failed to end campaign: ${error instanceof Error ? error.message : String(error)}`
-      };
-    }
+  async startCampaign(): Promise<ContributionResult> {
+    return {
+      success: true,
+      txId: `tx_${Date.now().toString(36)}`
+    };
   }
 
-  /**
-   * Withdraw funds from successful campaign
-   */
-  async withdrawFunds(
-    contractAddress: string,
-    wallet: WalletInfo
-  ): Promise<WithdrawalResult> {
-    try {
-      if (!contractAddress) {
-        throw new Error("Contract address not provided");
-      }
-      
-      if (!wallet) {
-        throw new Error("Wallet not connected");
-      }
-      
-      // For development, return mock success
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      
-      throw new Error("API connection not implemented in this simplified version");
-    } catch (error) {
-      console.error("Error withdrawing funds:", error);
-      if (config.testMode) {
-        return {
-          success: true,
-          txId: `tx_${Date.now().toString(36)}`
-        };
-      }
-      return {
-        success: false,
-        error: `Failed to withdraw funds: ${error instanceof Error ? error.message : String(error)}`
-      };
-    }
+  async endCampaign(): Promise<ContributionResult> {
+    return {
+      success: true,
+      txId: `tx_${Date.now().toString(36)}`
+    };
   }
 
-  /**
-   * Check if an address is the project owner
-   */
-  async isProjectOwner(
-    contractAddress: string,
-    address: string
-  ): Promise<boolean> {
-    try {
-      if (!contractAddress) {
-        return false;
-      }
-      
-      // For development, return mock true
-      if (config.testMode) {
-        return true;
-      }
-      
-      throw new Error("API connection not implemented in this simplified version");
-    } catch (error) {
-      console.error("Error checking project ownership:", error);
-      
-      // For testing
-      if (config.testMode) {
-        return true;
-      }
-      
-      return false;
-    }
+  async withdrawFunds(): Promise<ContributionResult> {
+    return {
+      success: true,
+      txId: `tx_${Date.now().toString(36)}`
+    };
+  }
+
+  async isProjectOwner(): Promise<boolean> {
+    return true;
   }
 }
 
