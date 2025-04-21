@@ -3,21 +3,23 @@ import BlockchainService, {
   ProjectData, 
   ContributionResult, 
   CampaignEndResult, 
-  WithdrawalResult 
+  WithdrawalResult,
+  WalletInfo
 } from '../services/BlockchainService';
 
 interface UseBlockchainProps {
   contractAddress: string;
-  privateKey: string;
   refreshInterval?: number; // Refresh interval in milliseconds
 }
 
 export interface UseBlockchainReturn {
   project: ProjectData | null;
-  userAddress: string;
+  wallet: WalletInfo | null;
   isOwner: boolean;
   loading: boolean;
   error: string | null;
+  connectWallet: () => Promise<WalletInfo | null>;
+  disconnectWallet: () => void;
   refreshProject: () => Promise<void>;
   contribute: (amount: number) => Promise<ContributionResult>;
   startCampaign: () => Promise<ContributionResult>;
@@ -27,40 +29,51 @@ export interface UseBlockchainReturn {
 
 export function useBlockchain({
   contractAddress,
-  privateKey,
   refreshInterval = 10000 // Default to 10 seconds
 }: UseBlockchainProps): UseBlockchainReturn {
   const [project, setProject] = useState<ProjectData | null>(null);
-  const [userAddress, setUserAddress] = useState<string>('');
+  const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [isOwner, setIsOwner] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   
-  // Parse the private key and get the user address
-  useEffect(() => {
-    if (!privateKey) {
-      setUserAddress('');
-      setIsOwner(false);
-      return;
-    }
+  // Clear error message
+  const clearError = () => setError(null);
+  
+  // Connect wallet
+  const connectWallet = useCallback(async (): Promise<WalletInfo | null> => {
+    clearError();
+    setLoading(true);
     
-    async function parseKey() {
-      try {
-        const keyInfo = await BlockchainService.parsePrivateKey(privateKey);
-        setUserAddress(keyInfo.address);
-        
-        if (contractAddress) {
-          const ownerStatus = await BlockchainService.isProjectOwner(contractAddress, keyInfo.address);
-          setIsOwner(ownerStatus);
-        }
-      } catch (err) {
-        setError(`Failed to parse private key: ${err instanceof Error ? err.message : "Unknown error"}`);
+    try {
+      const connectedWallet = await BlockchainService.connectWallet();
+      setWallet(connectedWallet);
+      
+      // Check if user is the owner
+      if (contractAddress) {
+        const ownerStatus = await BlockchainService.isProjectOwner(
+          contractAddress, 
+          connectedWallet.address
+        );
+        setIsOwner(ownerStatus);
       }
+      
+      return connectedWallet;
+    } catch (err) {
+      const errorMessage = `Failed to connect wallet: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      return null;
+    } finally {
+      setLoading(false);
     }
-    
-    parseKey();
-  }, [privateKey, contractAddress]);
+  }, [contractAddress]);
+  
+  // Disconnect wallet
+  const disconnectWallet = useCallback(() => {
+    setWallet(null);
+    setIsOwner(false);
+  }, []);
   
   // Load project data
   const refreshProject = useCallback(async () => {
@@ -69,8 +82,8 @@ export function useBlockchain({
       return;
     }
     
+    clearError();
     setLoading(true);
-    setError(null);
     
     try {
       const projectData = await BlockchainService.getProject(contractAddress);
@@ -79,18 +92,22 @@ export function useBlockchain({
       // Enable auto-refresh when project is in Computing state
       setAutoRefresh(projectData.status === 'Computing');
       
-      // Update owner status if user is logged in
-      if (userAddress) {
-        const ownerStatus = await BlockchainService.isProjectOwner(contractAddress, userAddress);
+      // Update owner status if wallet is connected
+      if (wallet) {
+        const ownerStatus = await BlockchainService.isProjectOwner(
+          contractAddress, 
+          wallet.address
+        );
         setIsOwner(ownerStatus);
       }
     } catch (err) {
-      setError(`Failed to load project: ${err instanceof Error ? err.message : "Unknown error"}`);
+      const errorMessage = `Failed to load project: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
       setProject(null);
     } finally {
       setLoading(false);
     }
-  }, [contractAddress, userAddress]);
+  }, [contractAddress, wallet]);
   
   // Auto-refresh when needed
   useEffect(() => {
@@ -110,122 +127,200 @@ export function useBlockchain({
     }
   }, [contractAddress, refreshProject]);
   
-  // Contribute function
+  // Make a contribution
   const contribute = useCallback(async (amount: number): Promise<ContributionResult> => {
-    if (!contractAddress || !privateKey) {
+    if (!contractAddress) {
       return { 
         success: false, 
-        error: 'Contract address or private key not provided' 
+        error: 'Contract address not provided' 
       };
     }
     
+    if (!wallet) {
+      return { 
+        success: false, 
+        error: 'Wallet not connected' 
+      };
+    }
+    
+    clearError();
     setLoading(true);
+    
     try {
-      const result = await BlockchainService.contribute(contractAddress, amount, privateKey);
+      const result = await BlockchainService.contribute(
+        contractAddress, 
+        amount, 
+        wallet
+      );
+      
       if (result.success) {
         // Schedule a refresh after a short delay to allow transaction to be processed
         setTimeout(() => refreshProject(), 5000);
       }
+      
       return result;
     } catch (err) {
+      const errorMessage = `Error during contribution: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
       return { 
         success: false, 
-        error: `Error during contribution: ${err instanceof Error ? err.message : "Unknown error"}` 
+        error: errorMessage
       };
     } finally {
       setLoading(false);
     }
-  }, [contractAddress, privateKey, refreshProject]);
+  }, [contractAddress, wallet, refreshProject]);
   
-  // Start campaign function
+  // Start the campaign
   const startCampaign = useCallback(async (): Promise<ContributionResult> => {
-    if (!contractAddress || !privateKey) {
+    if (!contractAddress) {
       return { 
         success: false, 
-        error: 'Contract address or private key not provided' 
+        error: 'Contract address not provided' 
       };
     }
     
+    if (!wallet) {
+      return { 
+        success: false, 
+        error: 'Wallet not connected' 
+      };
+    }
+    
+    clearError();
     setLoading(true);
+    
     try {
-      const result = await BlockchainService.startCampaign(contractAddress, privateKey);
+      const result = await BlockchainService.startCampaign(
+        contractAddress, 
+        wallet
+      );
+      
       if (result.success) {
         // Schedule a refresh after a short delay
         setTimeout(() => refreshProject(), 5000);
       }
+      
       return result;
     } catch (err) {
+      const errorMessage = `Error starting campaign: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
       return { 
         success: false, 
-        error: `Error starting campaign: ${err instanceof Error ? err.message : "Unknown error"}` 
+        error: errorMessage
       };
     } finally {
       setLoading(false);
     }
-  }, [contractAddress, privateKey, refreshProject]);
+  }, [contractAddress, wallet, refreshProject]);
   
-  // End campaign function
+  // End the campaign
   const endCampaign = useCallback(async (): Promise<CampaignEndResult> => {
-    if (!contractAddress || !privateKey) {
+    if (!contractAddress) {
       return { 
         success: false, 
-        error: 'Contract address or private key not provided' 
+        error: 'Contract address not provided' 
       };
     }
     
+    if (!wallet) {
+      return { 
+        success: false, 
+        error: 'Wallet not connected' 
+      };
+    }
+    
+    clearError();
     setLoading(true);
+    
     try {
-      const result = await BlockchainService.endCampaign(contractAddress, privateKey);
+      const result = await BlockchainService.endCampaign(
+        contractAddress, 
+        wallet
+      );
+      
       if (result.success) {
         // Enable auto-refresh since computation will be in progress
         setAutoRefresh(true);
         // Schedule a refresh after a short delay
         setTimeout(() => refreshProject(), 5000);
       }
+      
       return result;
     } catch (err) {
+      const errorMessage = `Error ending campaign: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
       return { 
         success: false, 
-        error: `Error ending campaign: ${err instanceof Error ? err.message : "Unknown error"}` 
+        error: errorMessage
       };
     } finally {
       setLoading(false);
     }
-  }, [contractAddress, privateKey, refreshProject]);
+  }, [contractAddress, wallet, refreshProject]);
   
-  // Withdraw funds function
+  // Withdraw funds
   const withdrawFunds = useCallback(async (): Promise<WithdrawalResult> => {
-    if (!contractAddress || !privateKey || !isOwner) {
+    if (!contractAddress) {
       return { 
         success: false, 
-        error: 'Contract address, private key not provided or not owner' 
+        error: 'Contract address not provided' 
       };
     }
     
+    if (!wallet) {
+      return { 
+        success: false, 
+        error: 'Wallet not connected' 
+      };
+    }
+    
+    if (!isOwner) {
+      return {
+        success: false,
+        error: 'Only the project owner can withdraw funds'
+      };
+    }
+    
+    clearError();
     setLoading(true);
+    
     try {
-      const result = await BlockchainService.withdrawFunds(contractAddress, privateKey);
+      const result = await BlockchainService.withdrawFunds(
+        contractAddress, 
+        wallet
+      );
+      
       if (result.success) {
         // Schedule a refresh after a short delay
         setTimeout(() => refreshProject(), 5000);
       }
+      
       return result;
     } catch (err) {
+      const errorMessage = `Error withdrawing funds: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
       return { 
         success: false, 
-        error: `Error withdrawing funds: ${err instanceof Error ? err.message : "Unknown error"}` 
+        error: errorMessage
       };
     } finally {
       setLoading(false);
     }
-  }, [contractAddress, privateKey, isOwner, refreshProject]);
+  }, [contractAddress, wallet, isOwner, refreshProject]);
   
   return {
     project,
-    userAddress,
+    wallet,
     isOwner,
     loading,
     error,
+    connectWallet,
+    disconnectWallet,
     refreshProject,
     contribute,
     startCampaign,

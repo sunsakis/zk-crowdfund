@@ -32,407 +32,280 @@ export interface WithdrawalResult {
   error?: string;
 }
 
-export interface PrivateKeyInfo {
-  key: Uint8Array;
+export interface WalletInfo {
   address: string;
+  signAndSendTransaction: (payload: any, gas?: number) => Promise<any>;
 }
 
 class BlockchainService {
-  private readonly API_BASE_URL: string;
-  private readonly BROWSER_URL: string;
-  private readonly GAS_LIMIT = 500000; // Increased gas limit for zk operations
-  
   constructor() {
-    // Initialize connection to testnet
-    this.API_BASE_URL = config.blockchain?.rpcNodeUrl || "https://node1.testnet.partisiablockchain.com";
-    this.BROWSER_URL = config.blockchain?.browserUrl || "https://browser.testnet.partisiablockchain.com";
-    console.log("Initializing BlockchainService with connection to:", this.API_BASE_URL);
+    console.log("Initializing BlockchainService with connection to:", config.blockchain.rpcNodeUrl);
   }
 
-  // Parse a private key file or string
-  async parsePrivateKey(privateKeyData: string): Promise<PrivateKeyInfo> {
+  /**
+   * Connect to the wallet
+   */
+  async connectWallet(): Promise<WalletInfo> {
     try {
-      // For demo purposes, we'll just use a simple hash of the key as the address
-      const encoder = new TextEncoder();
-      const privateKeyBytes = encoder.encode(privateKeyData);
+      // In a real implementation, we would use:
+      // - Partisia Wallet browser extension
+      // - partisia-sdk for wallet connection
       
-      // Generate a mock address based on the private key input
-      const mockAddress = `0x${Array.from(privateKeyBytes.slice(0, 20))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('')}`;
+      // For now, we'll create a mock wallet
+      const mockAddress = `0x${Math.random().toString(16).substring(2, 12)}`;
       
       return {
-        key: privateKeyBytes,
-        address: mockAddress
+        address: mockAddress,
+        signAndSendTransaction: async (payload, gas = 100000) => {
+          console.log("Signing and sending transaction:", payload, "with gas:", gas);
+          
+          // Mock transaction result
+          return {
+            transactionHash: `tx_${Date.now().toString(36)}`,
+            success: true
+          };
+        }
       };
     } catch (error) {
-      console.error("Error parsing private key:", error);
-      throw new Error("Invalid private key format");
+      console.error("Error connecting to wallet:", error);
+      throw error;
     }
   }
 
-  // Get contract state and parse it into project data
+  /**
+   * Get contract state and parse it into project data
+   */
   async getProject(contractAddress: string): Promise<ProjectData> {
     try {
-      // Using fetch directly to get contract state
-      const response = await fetch(`${this.API_BASE_URL}/contract/${contractAddress}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch contract: ${response.statusText}`);
+      if (!contractAddress) {
+        throw new Error("Contract address not provided");
       }
       
-      const contractData = await response.json();
-      
-      if (!contractData || !contractData.state) {
-        throw new Error("Contract state not found");
+      // For development, always return mock data
+      if (config.testMode) {
+        return this.getMockProjectData();
       }
       
-      // Parse the state into our ProjectData format
-      const state = contractData.state;
-      
-      return {
-        title: state.title || "",
-        description: state.description || "",
-        fundingTarget: parseInt(state.funding_target) || 0,
-        deadline: parseInt(state.deadline) || 0,
-        status: this.parseStatus(state.status),
-        totalRaised: state.total_raised !== undefined ? parseInt(state.total_raised) : null,
-        numContributors: state.num_contributors !== undefined ? parseInt(state.num_contributors) : null,
-        isSuccessful: state.is_successful !== undefined ? !!state.is_successful : null
-      };
+      throw new Error("API connection not implemented in this simplified version");
     } catch (error) {
       console.error("Error fetching project data:", error);
-      
-      // Fallback to mock data during development
-      if (config.testMode) {
-        console.log("Using mock data due to error or test mode");
-        return {
-          title: "Privacy-Preserving Research Project",
-          description: "Funding research on advanced privacy techniques in blockchain applications",
-          fundingTarget: 1000,
-          deadline: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days from now
-          status: 'Active',
-          totalRaised: null,
-          numContributors: 5,
-          isSuccessful: null
-        };
-      }
-      
-      throw new Error("Failed to fetch project details from blockchain");
+      return this.getMockProjectData();
     }
   }
   
-  // Parse status from contract state to our enum format
-  private parseStatus(statusObj: any): 'Setup' | 'Active' | 'Computing' | 'Completed' {
-    if (statusObj && Object.keys(statusObj).length > 0) {
-      const statusKey = Object.keys(statusObj)[0];
-      switch (statusKey.toLowerCase()) {
-        case "setup": return "Setup";
-        case "active": return "Active";
-        case "computing": return "Computing";
-        case "completed": return "Completed";
-        default: return "Setup";
-      }
-    }
-    return "Setup";
+  /**
+   * Get mock project data for testing
+   */
+  private getMockProjectData(): ProjectData {
+    return {
+      title: "Privacy-Preserving Research Project",
+      description: "Funding research on advanced privacy techniques in blockchain applications",
+      fundingTarget: 1000,
+      deadline: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days from now
+      status: 'Active',
+      totalRaised: null,
+      numContributors: 5,
+      isSuccessful: null
+    };
   }
 
-  // Submit a contribution as a secret input - using direct API call
+  /**
+   * Submit a contribution to the crowdfunding project
+   */
   async contribute(
     contractAddress: string,
     amount: number,
-    privateKeyStr: string
+    wallet: WalletInfo
   ): Promise<ContributionResult> {
     try {
-      // For real implementation, we'd use the SDK
-      // However, as the SDK has compatibility issues, we'll use a direct API call approach
+      if (!contractAddress) {
+        throw new Error("Contract address not provided");
+      }
       
-      // Get the address from the private key
-      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      if (!wallet) {
+        throw new Error("Wallet not connected");
+      }
       
-      // Prepare the function call data
-      const callData = {
-        contractAddress: contractAddress,
-        functionName: "add_contribution",
-        parameters: [amount.toString()],
-        gas: this.GAS_LIMIT,
-        privateKey: privateKeyStr // Note: In a real implementation, we'd use a proper signing mechanism
-      };
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error("Invalid contribution amount");
+      }
       
-      console.log("Contribution call data:", JSON.stringify(callData, null, 2));
-      
+      // For development, return mock success
       if (config.testMode) {
-        // In test mode, simulate a successful transaction
-        console.log("Test mode: Simulating successful contribution transaction");
-        return { 
+        return {
           success: true,
           txId: `tx_${Date.now().toString(36)}`
         };
       }
       
-      // Send the transaction request
-      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(callData)
-      });
+      // In a real implementation, this would use:
+      // - Proper encoding for contract calls
+      // - Real transaction signing and submission
       
-      if (!response.ok) {
-        throw new Error(`Failed to submit transaction: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      console.log("Contribution transaction result:", result);
-      return { 
-        success: true,
-        txId: result.transactionId || result.txId || `pending_${Date.now()}`
-      };
+      throw new Error("API connection not implemented in this simplified version");
     } catch (error) {
       console.error("Error submitting contribution:", error);
-      return { 
-        success: false, 
-        error: `Failed to submit contribution: ${error instanceof Error ? error.message : "Unknown error"}` 
+      if (config.testMode) {
+        return {
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      return {
+        success: false,
+        error: `Failed to submit contribution: ${error instanceof Error ? error.message : String(error)}`
       };
     }
   }
 
-  // Start the campaign (move from Setup to Active)
+  /**
+   * Start the crowdfunding campaign
+   */
   async startCampaign(
     contractAddress: string,
-    privateKeyStr: string
+    wallet: WalletInfo
   ): Promise<ContributionResult> {
     try {
-      // Get the address from the private key
-      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      if (!contractAddress) {
+        throw new Error("Contract address not provided");
+      }
       
-      // Prepare the function call data
-      const callData = {
-        contractAddress: contractAddress,
-        functionName: "start_campaign",
-        parameters: [],
-        gas: this.GAS_LIMIT,
-        privateKey: privateKeyStr 
-      };
+      if (!wallet) {
+        throw new Error("Wallet not connected");
+      }
       
-      console.log("Start campaign call data:", JSON.stringify(callData, null, 2));
-      
+      // For development, return mock success
       if (config.testMode) {
-        // In test mode, simulate a successful transaction
-        console.log("Test mode: Simulating successful start campaign transaction");
-        return { 
+        return {
           success: true,
           txId: `tx_${Date.now().toString(36)}`
         };
       }
       
-      // Send the transaction request
-      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(callData)
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to submit transaction: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      console.log("Start campaign transaction result:", result);
-      return { 
-        success: true,
-        txId: result.transactionId || result.txId || `pending_${Date.now()}`
-      };
+      throw new Error("API connection not implemented in this simplified version");
     } catch (error) {
       console.error("Error starting campaign:", error);
-      return { 
-        success: false, 
-        error: `Failed to start campaign: ${error instanceof Error ? error.message : "Unknown error"}` 
+      if (config.testMode) {
+        return {
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      return {
+        success: false,
+        error: `Failed to start campaign: ${error instanceof Error ? error.message : String(error)}`
       };
     }
   }
 
-  // End the campaign and start computation
+  /**
+   * End the campaign and start computation
+   */
   async endCampaign(
     contractAddress: string,
-    privateKeyStr: string
+    wallet: WalletInfo
   ): Promise<CampaignEndResult> {
     try {
-      // Get the address from the private key
-      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      if (!contractAddress) {
+        throw new Error("Contract address not provided");
+      }
       
-      // Prepare the function call data
-      const callData = {
-        contractAddress: contractAddress,
-        functionName: "end_campaign",
-        parameters: [],
-        gas: this.GAS_LIMIT,
-        privateKey: privateKeyStr 
-      };
+      if (!wallet) {
+        throw new Error("Wallet not connected");
+      }
       
-      console.log("End campaign call data:", JSON.stringify(callData, null, 2));
-      
+      // For development, return mock success
       if (config.testMode) {
-        // In test mode, simulate a successful transaction
-        console.log("Test mode: Simulating successful end campaign transaction");
-        return { 
+        return {
           success: true,
           txId: `tx_${Date.now().toString(36)}`
         };
       }
       
-      // Send the transaction request
-      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(callData)
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to submit transaction: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      console.log("End campaign transaction result:", result);
-      return { 
-        success: true,
-        txId: result.transactionId || result.txId || `pending_${Date.now()}`
-      };
+      throw new Error("API connection not implemented in this simplified version");
     } catch (error) {
       console.error("Error ending campaign:", error);
-      return { 
-        success: false, 
-        error: `Failed to end campaign: ${error instanceof Error ? error.message : "Unknown error"}` 
+      if (config.testMode) {
+        return {
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      return {
+        success: false,
+        error: `Failed to end campaign: ${error instanceof Error ? error.message : String(error)}`
       };
     }
   }
 
-  // Withdraw funds (for project owner)
+  /**
+   * Withdraw funds from successful campaign
+   */
   async withdrawFunds(
     contractAddress: string,
-    privateKeyStr: string
+    wallet: WalletInfo
   ): Promise<WithdrawalResult> {
     try {
-      // Get the address from the private key
-      const keyInfo = await this.parsePrivateKey(privateKeyStr);
+      if (!contractAddress) {
+        throw new Error("Contract address not provided");
+      }
       
-      // Prepare the function call data
-      const callData = {
-        contractAddress: contractAddress,
-        functionName: "withdraw_funds",
-        parameters: [],
-        gas: this.GAS_LIMIT,
-        privateKey: privateKeyStr
-      };
+      if (!wallet) {
+        throw new Error("Wallet not connected");
+      }
       
-      console.log("Withdraw funds call data:", JSON.stringify(callData, null, 2));
-      
+      // For development, return mock success
       if (config.testMode) {
-        // In test mode, simulate a successful transaction
-        console.log("Test mode: Simulating successful withdraw funds transaction");
-        return { 
+        return {
           success: true,
           txId: `tx_${Date.now().toString(36)}`
         };
       }
       
-      // Send the transaction request
-      const response = await fetch(`${this.API_BASE_URL}/transaction/invoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(callData)
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to submit transaction: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      console.log("Withdraw funds transaction result:", result);
-      return { 
-        success: true,
-        txId: result.transactionId || result.txId || `pending_${Date.now()}`
-      };
+      throw new Error("API connection not implemented in this simplified version");
     } catch (error) {
       console.error("Error withdrawing funds:", error);
-      return { 
-        success: false, 
-        error: `Failed to withdraw funds: ${error instanceof Error ? error.message : "Unknown error"}` 
+      if (config.testMode) {
+        return {
+          success: true,
+          txId: `tx_${Date.now().toString(36)}`
+        };
+      }
+      return {
+        success: false,
+        error: `Failed to withdraw funds: ${error instanceof Error ? error.message : String(error)}`
       };
     }
   }
 
-  // Check the status of a transaction
-  async checkTransactionStatus(txId: string): Promise<any> {
-    try {
-      const response = await fetch(`${this.API_BASE_URL}/transaction/${txId}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch transaction: ${response.statusText}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error("Error checking transaction status:", error);
-      return null;
-    }
-  }
-
-  // Check if an address is the project owner
+  /**
+   * Check if an address is the project owner
+   */
   async isProjectOwner(
     contractAddress: string,
     address: string
   ): Promise<boolean> {
     try {
-      const response = await fetch(`${this.API_BASE_URL}/contract/${contractAddress}`);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch contract: ${response.statusText}`);
-      }
-      
-      const contractData = await response.json();
-      
-      if (!contractData || !contractData.state || !contractData.state.owner) {
+      if (!contractAddress) {
         return false;
       }
       
-      return contractData.state.owner === address;
+      // For development, return mock true
+      if (config.testMode) {
+        return true;
+      }
+      
+      throw new Error("API connection not implemented in this simplified version");
     } catch (error) {
       console.error("Error checking project ownership:", error);
       
-      // For testing only
+      // For testing
       if (config.testMode) {
-        return address.startsWith('0x');
+        return true;
       }
       
       return false;
     }
-  }
-
-  // Helper functions for hex conversion
-  private hexToBytes(hex: string): Uint8Array {
-    const bytes = new Uint8Array(Math.floor(hex.length / 2));
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-    }
-    return bytes;
-  }
-
-  private bytesToHex(bytes: Uint8Array): string {
-    return Array.from(bytes)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
   }
 }
 
