@@ -1,5 +1,4 @@
 import { ChainControllerApi, Configuration } from "@partisiablockchain/blockchain-api-transaction-client";
-import { ZkCrowdfundingContract } from '../contract/ZkCrowdfundingContract';
 import config from '../config';
 
 // Project data structure
