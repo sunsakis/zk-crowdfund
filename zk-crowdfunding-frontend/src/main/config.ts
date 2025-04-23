@@ -33,7 +33,7 @@ const config: AppConfig = {
     browserUrl: getEnvVar('REACT_APP_BROWSER_URL') || "https://browser.testnet.partisiablockchain.com"
   },
   contractAddress: getEnvVar('CONTRACT_ADDRESS') || getSavedContractAddress() || undefined,
-  testMode: getEnvVar('REACT_APP_TEST_MODE') === 'true' || true
+  testMode: getEnvVar('REACT_APP_TEST_MODE') === 'true' || false
 };
 
 // Override with settings from window.config if available (for runtime configuration)

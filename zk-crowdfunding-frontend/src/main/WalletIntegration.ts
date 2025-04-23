@@ -45,14 +45,28 @@ export const connectMpcWalletClick = () => {
   // Call Partisia SDK to initiate connection
   handleWalletConnect(connectMpcWallet());
 };
+
 /**
- * Connect to the blockchain using a private key. Reads the private key from the form.
+ * Connect to the blockchain using a private key.
+ * @param privateKeyValue The private key string value
  */
-export const connectPrivateKeyWalletClick = () => {
-  const privateKey = <HTMLInputElement>document.querySelector("#private-key-value");
-  const keyPair = CryptoUtils.privateKeyToKeypair(privateKey.value);
-  const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
-  handleWalletConnect(connectPrivateKey(sender, keyPair));
+export const connectPrivateKeyWalletClick = (privateKeyValue?: string) => {
+  const privateKeyInput = privateKeyValue || 
+    (<HTMLInputElement>document.querySelector("#private-key-value"))?.value;
+  
+  if (!privateKeyInput) {
+    console.error("No private key provided");
+    return;
+  }
+  
+  try {
+    const keyPair = CryptoUtils.privateKeyToKeypair(privateKeyInput);
+    const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
+    handleWalletConnect(connectPrivateKey(sender, keyPair));
+  } catch (error) {
+    console.error("Error connecting with private key:", error);
+    setConnectionStatus(`Error connecting wallet: ${error.message || error}`);
+  }
 };
 
 /**
@@ -74,6 +88,11 @@ const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
       toggleVisibility("#private-key-connect");
       toggleVisibility("#wallet-disconnect");
       updateInteractionVisibility();
+      
+      // Update state if contract address is set
+      if (getContractAddress()) {
+        updateContractState();
+      }
     })
     .catch((error) => {
       if ("message" in error) {
@@ -125,125 +144,218 @@ interface ZkVariable {
 }
 
 /**
- * Write some of the state to the UI.
+ * Update contract state and UI
  */
 export const updateContractState = () => {
   const address = getContractAddress();
   if (address === undefined) {
-    throw new Error("No address provided");
+    console.error("No address provided");
+    return;
   }
 
   const refreshLoader = <HTMLInputElement>document.querySelector("#refresh-loader");
-  refreshLoader.classList.remove("hidden");
-
-  CLIENT.getContractData<RawZkContractData>(address).then((contract) => {
-    if (contract != null) {
-      // Reads the state of the contract
-      const stateBuffer = Buffer.from(
-        contract.serializedContract.openState.openState.data,
-        "base64"
-      );
-
-      const state = deserializeState(stateBuffer);
-
-      // Update the UI with contract state
-      const ownerValue = <HTMLElement>document.querySelector("#owner-value");
-      ownerValue.innerHTML = `Project Owner: ${state.owner.asString()}`;
-
-      const titleValue = <HTMLElement>document.querySelector("#title-value");
-      titleValue.innerHTML = `<h4>${state.title}</h4>`;
-
-      const descriptionValue = <HTMLElement>document.querySelector("#description-value");
-      descriptionValue.innerHTML = `<p>${state.description}</p>`;
-
-      const statusValue = <HTMLElement>document.querySelector("#status-value");
-      const statusBadgeClass = getStatusBadgeClass(state.status);
-      statusValue.innerHTML = `Status: <span class="badge ${statusBadgeClass}">${CampaignStatus[state.status]}</span>`;
-
-      const fundingTargetValue = <HTMLElement>document.querySelector("#funding-target-value");
-      fundingTargetValue.innerHTML = `Funding Target: ${state.fundingTarget}`;
-
-      const deadlineValue = <HTMLElement>document.querySelector("#deadline-value");
-      const deadlineDate = new Date(state.deadline);
-      deadlineValue.innerHTML = `Deadline: ${deadlineDate.toLocaleString()}`;
-
-      const numContributors = <HTMLElement>document.querySelector("#num-contributors");
-      numContributors.innerHTML = `Number of Contributors: ${state.numContributors ?? "None"}`;
-
-      const totalRaised = <HTMLElement>document.querySelector("#total-raised");
-      totalRaised.innerHTML = `Total Raised: ${state.totalRaised ?? "Not yet revealed"}`;
-
-      const campaignResult = <HTMLElement>document.querySelector("#campaign-result");
-      if (state.status === CampaignStatus.Completed) {
-        const resultClass = state.isSuccessful ? "result-success" : "result-failure";
-        campaignResult.innerHTML = `Campaign Result: <span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
-      } else {
-        campaignResult.innerHTML = "Campaign Result: Not yet determined";
-      }
-
-      // Update action visibility based on state
-      const startCampaignSection = <HTMLElement>document.querySelector("#start-campaign-section");
-      const addContributionSection = <HTMLElement>document.querySelector("#add-contribution-section");
-      const endCampaignSection = <HTMLElement>document.querySelector("#end-campaign-section");
-      const withdrawFundsSection = <HTMLElement>document.querySelector("#withdraw-funds-section");
-
-      // Reset all to hidden
-      startCampaignSection.classList.add("hidden");
-      addContributionSection.classList.add("hidden");
-      endCampaignSection.classList.add("hidden");
-      withdrawFundsSection.classList.add("hidden");
-
-      // Show appropriate sections based on state
-      if (state.status === CampaignStatus.Setup) {
-        // Only project owner can start campaign
-        if (isConnected()) {
-          startCampaignSection.classList.remove("hidden");
-        }
-      } else if (state.status === CampaignStatus.Active) {
-        // Anyone can contribute
-        if (isConnected()) {
-          addContributionSection.classList.remove("hidden");
-          endCampaignSection.classList.remove("hidden");
-        }
-      } else if (state.status === CampaignStatus.Completed && state.isSuccessful) {
-        // Only project owner can withdraw funds
-        if (isConnected()) {
-          withdrawFundsSection.classList.remove("hidden");
-        }
-      }
-
-      const contractState = <HTMLElement>document.querySelector("#contract-state");
-      contractState.classList.remove("hidden");
-      refreshLoader.classList.add("hidden");
-    } else {
-      throw new Error("Could not find data for contract");
-    }
-  });
-};
-
-// Helper function to get the CSS class for status badges
-const getStatusBadgeClass = (status: CampaignStatus): string => {
-  switch (status) {
-    case CampaignStatus.Setup:
-      return "badge-setup";
-    case CampaignStatus.Active:
-      return "badge-active";
-    case CampaignStatus.Computing:
-      return "badge-computing";
-    case CampaignStatus.Completed:
-      return "badge-completed";
-    default:
-      return "badge-setup";
+  if (refreshLoader) {
+    refreshLoader.classList.remove("hidden");
   }
+
+  // Clear any previous error messages
+  const errorContainers = document.querySelectorAll(".error-message");
+  errorContainers.forEach(container => container.remove());
+
+  CLIENT.getContractData<RawZkContractData>(address)
+    .then((contract) => {
+      if (contract != null && contract.serializedContract?.openState?.openState?.data) {
+        try {
+          console.log("Raw state data:", contract.serializedContract.openState.openState.data);
+          
+          // Reads the state of the contract
+          const stateBuffer = Buffer.from(
+            contract.serializedContract.openState.openState.data,
+            "base64"
+          );
+          
+          console.log("State buffer:", stateBuffer);
+          console.log("Buffer.isBuffer(stateBuffer):", Buffer.isBuffer(stateBuffer));
+          
+          // Try to deserialize with additional error handling
+          let state;
+          try {
+            state = deserializeState(stateBuffer);
+            console.log("Deserialized state:", state);
+          } catch (err) {
+            console.error("Deserialization error:", err);
+            showErrorMessage(`Error deserializing state: ${err.message}`);
+            return;
+          }
+
+          // Update the UI with contract state
+          updateUIWithContractState(state);
+          
+          // Update action visibility based on state
+          updateActionVisibility(state);
+
+          const contractState = <HTMLElement>document.querySelector("#contract-state");
+          if (contractState) {
+            contractState.classList.remove("hidden");
+          }
+        } catch (err) {
+          console.error("Error processing contract state:", err);
+          showErrorMessage(`Error processing contract state: ${err.message}`);
+        }
+      } else {
+        showErrorMessage("Could not find data for contract. Make sure the contract is deployed correctly.");
+      }
+    })
+    .catch(err => {
+      console.error("Error fetching contract data:", err);
+      showErrorMessage(`Error fetching contract data: ${err.message}`);
+    })
+    .finally(() => {
+      if (refreshLoader) {
+        refreshLoader.classList.add("hidden");
+      }
+    });
 };
 
-// Count contributions (variables with type 0)
-const countContributions = (variables: Array<{ key: number; value: ZkVariable }>) => {
-  return Array.from(variables.values()).filter(
-    (v) => Buffer.from(v.value.information.data, "base64").readUInt8() == 0
-  ).length;
-};
+/**
+ * Update UI elements with contract state
+ */
+function updateUIWithContractState(state) {
+  // Update owner
+  const ownerValue = <HTMLElement>document.querySelector("#owner-value");
+  if (ownerValue) {
+    ownerValue.innerHTML = `Project Owner: ${state.owner.asString()}`;
+  }
+  
+  // Update title
+  const titleValue = <HTMLElement>document.querySelector("#title-value");
+  if (titleValue) {
+    titleValue.innerHTML = `<h4>${state.title}</h4>`;
+  }
+  
+  // Update description
+  const descriptionValue = <HTMLElement>document.querySelector("#description-value");
+  if (descriptionValue) {
+    descriptionValue.innerHTML = `<p>${state.description}</p>`;
+  }
+  
+  // Update status
+  const statusValue = <HTMLElement>document.querySelector("#status-value");
+  if (statusValue) {
+    const statusText = CampaignStatus[state.status];
+    statusValue.innerHTML = `Status: <span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
+  }
+  
+  // Update funding target
+  const fundingTargetValue = <HTMLElement>document.querySelector("#funding-target-value");
+  if (fundingTargetValue) {
+    fundingTargetValue.innerHTML = `Funding Target: ${state.fundingTarget}`;
+  }
+  
+  // Update deadline
+  const deadlineValue = <HTMLElement>document.querySelector("#deadline-value");
+  if (deadlineValue) {
+    const deadlineDate = new Date(state.deadline);
+    deadlineValue.innerHTML = `Deadline: ${deadlineDate.toLocaleString()}`;
+  }
+  
+  // Update contributors
+  const numContributors = <HTMLElement>document.querySelector("#num-contributors");
+  if (numContributors) {
+    numContributors.innerHTML = `Number of Contributors: ${state.numContributors ?? "None"}`;
+  }
+  
+  // Update total raised
+  const totalRaised = <HTMLElement>document.querySelector("#total-raised");
+  if (totalRaised) {
+    totalRaised.innerHTML = `Total Raised: ${state.totalRaised ?? "Not yet revealed"}`;
+  }
+  
+  // Update campaign result
+  const campaignResult = <HTMLElement>document.querySelector("#campaign-result");
+  if (campaignResult) {
+    if (state.status === CampaignStatus.Completed) {
+      const resultClass = state.isSuccessful ? "result-success" : "result-failure";
+      campaignResult.innerHTML = `Campaign Result: <span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
+    } else {
+      campaignResult.innerHTML = "Campaign Result: Not yet determined";
+    }
+  }
+}
 
+/**
+ * Update action visibility based on contract state
+ */
+function updateActionVisibility(state) {
+  const startCampaignSection = <HTMLElement>document.querySelector("#start-campaign-section");
+  const addContributionSection = <HTMLElement>document.querySelector("#add-contribution-section");
+  const endCampaignSection = <HTMLElement>document.querySelector("#end-campaign-section");
+  const withdrawFundsSection = <HTMLElement>document.querySelector("#withdraw-funds-section");
+
+  // Reset all to hidden
+  if (startCampaignSection) startCampaignSection.classList.add("hidden");
+  if (addContributionSection) addContributionSection.classList.add("hidden");
+  if (endCampaignSection) endCampaignSection.classList.add("hidden");
+  if (withdrawFundsSection) withdrawFundsSection.classList.add("hidden");
+
+  // Only show actions if user is connected
+  if (!isConnected()) {
+    return;
+  }
+
+  // Show appropriate sections based on state
+  if (state.status === CampaignStatus.Setup) {
+    // Only project owner can start campaign
+    if (startCampaignSection) {
+      startCampaignSection.classList.remove("hidden");
+    }
+  } else if (state.status === CampaignStatus.Active) {
+    // Anyone can contribute
+    if (addContributionSection) {
+      addContributionSection.classList.remove("hidden");
+    }
+    // Anyone can end campaign
+    if (endCampaignSection) {
+      endCampaignSection.classList.remove("hidden");
+    }
+  } else if (state.status === CampaignStatus.Completed && state.isSuccessful) {
+    // Only project owner can withdraw funds
+    if (withdrawFundsSection) {
+      withdrawFundsSection.classList.remove("hidden");
+    }
+  }
+}
+
+/**
+ * Show error message in UI
+ */
+function showErrorMessage(message) {
+  console.error(message);
+  
+  const errorElement = document.createElement("div");
+  errorElement.className = "error-message";
+  errorElement.style.color = "red";
+  errorElement.style.padding = "10px";
+  errorElement.style.marginTop = "10px";
+  errorElement.style.border = "1px solid red";
+  errorElement.style.borderRadius = "5px";
+  errorElement.textContent = message;
+  
+  const contractState = document.querySelector("#contract-state");
+  if (contractState) {
+    contractState.appendChild(errorElement);
+  } else {
+    // If contract state section doesn't exist yet, add to the main content
+    const mainContent = document.querySelector(".pure-u-1-1");
+    if (mainContent) {
+      mainContent.appendChild(errorElement);
+    }
+  }
+}
+
+/**
+ * Update connection status in UI
+ */
 const setConnectionStatus = (status: string) => {
   const statusText = document.querySelector("#connection-status p");
   if (statusText != null) {
@@ -251,6 +363,9 @@ const setConnectionStatus = (status: string) => {
   }
 };
 
+/**
+ * Toggle element visibility
+ */
 const toggleVisibility = (selector: string) => {
   const element = document.querySelector(selector);
   if (element != null) {
@@ -258,11 +373,27 @@ const toggleVisibility = (selector: string) => {
   }
 };
 
+/**
+ * Update contract interaction visibility
+ */
 export const updateInteractionVisibility = () => {
   const contractInteraction = <HTMLElement>document.querySelector("#contract-interaction");
   if (isConnected() && getContractAddress() !== undefined) {
-    contractInteraction.classList.remove("hidden");
+    if (contractInteraction) {
+      contractInteraction.classList.remove("hidden");
+    }
   } else {
-    contractInteraction.classList.add("hidden");
+    if (contractInteraction) {
+      contractInteraction.classList.add("hidden");
+    }
   }
+};
+
+/**
+ * Count contributions (variables with type 0)
+ */
+const countContributions = (variables: Array<{ key: number; value: ZkVariable }>) => {
+  return Array.from(variables.values()).filter(
+    (v) => Buffer.from(v.value.information.data, "base64").readUInt8() == 0
+  ).length;
 };

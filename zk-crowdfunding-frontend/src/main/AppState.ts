@@ -23,8 +23,9 @@ import {
   BlockchainTransactionClient,
   SenderAuthentication,
 } from "@partisiablockchain/blockchain-api-transaction-client";
+import config from "./config";
 
-export const TESTNET_URL = "https://node1.testnet.partisiablockchain.com";
+export const TESTNET_URL = config.blockchain.rpcNodeUrl || "https://node1.testnet.partisiablockchain.com";
 
 export const CLIENT = new ShardedClient(TESTNET_URL, ["Shard0", "Shard1", "Shard2"]);
 
@@ -69,5 +70,16 @@ export const getContractAddress = () => {
 
 export const setContractAddress = (address: string) => {
   contractAddress = address;
+  localStorage.setItem('contractAddress', address); // Save to localStorage for persistence
   setCrowdfundingApi();
 };
+
+// Initialize contract address from saved value if available
+if (typeof window !== 'undefined' && window.localStorage) {
+  const savedAddress = localStorage.getItem('contractAddress');
+  if (savedAddress) {
+    contractAddress = savedAddress;
+  } else if (config.contractAddress) {
+    contractAddress = config.contractAddress;
+  }
+}

@@ -1,6 +1,7 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const webpack = require('webpack');
+const Dotenv = require('dotenv-webpack');
 
 module.exports = (env) => {
   const port = env.PORT || 8081;
@@ -8,7 +9,7 @@ module.exports = (env) => {
   return {
     mode: "development",
     devtool: "eval-cheap-module-source-map",
-    entry: './src/index.tsx',
+    entry: './src/main/Main.ts',
     output: {
       path: path.resolve(__dirname, 'dist'),
       filename: '[name].[contenthash].js',
@@ -31,7 +32,7 @@ module.exports = (env) => {
       rules: [
         {
           test: /\.(ts|tsx)$/,
-          exclude: /node_modules/,
+          include: path.resolve(__dirname, 'src'),
           use: {
             loader: 'babel-loader',
             options: {
@@ -55,36 +56,30 @@ module.exports = (env) => {
     },
     plugins: [
       new HtmlWebpackPlugin({
-        template: './public/index.html',
-        favicon: path.resolve(__dirname, 'public/favicon.ico')
+        template: './src/main/index.html',
+        filename: 'index.html'
       }),
       new webpack.ProvidePlugin({
         Buffer: ['buffer', 'Buffer'],
         process: 'process/browser'
+      }),
+      new Dotenv({
+        systemvars: true, // Load all system variables
+        defaults: true
       })
     ],
     devServer: {
       static: {
         directory: path.join(__dirname, 'public'),
         publicPath: '/',
-        serveIndex: true,
-        watch: true,
       },
       port: port,
       hot: true,
       historyApiFallback: true,
-      setupMiddlewares: (middlewares, devServer) => {
-        if (!devServer) {
-          throw new Error('webpack-dev-server is not defined');
-        }
-        
-        // Serve the HTML template from src/main
-        devServer.app.get('/src/main/index.html', (req, res) => {
-          console.log('Serving src/main/index.html');
-          res.sendFile(path.resolve(__dirname, 'src/main/index.html'));
-        });
-        
-        return middlewares;
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+        "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization"
       }
     }
   };

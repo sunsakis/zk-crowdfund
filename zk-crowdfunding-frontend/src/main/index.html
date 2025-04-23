@@ -4,8 +4,6 @@
     <title>ZK Crowdfunding Platform</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-    <script src="/conf/config.js"></script>
     <style>
       .hidden {
         display: none;
@@ -90,6 +88,31 @@
         padding: 15px;
         margin-bottom: 15px;
       }
+
+      /* Message sections */
+      .message-section {
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+      }
+
+      .message-section.success {
+        background-color: rgba(40, 167, 69, 0.1);
+        border-left: 4px solid #28a745;
+        color: #155724;
+      }
+
+      .message-section.error {
+        background-color: rgba(220, 53, 69, 0.1);
+        border-left: 4px solid #dc3545;
+        color: #721c24;
+      }
+
+      .message-section.info {
+        background-color: rgba(0, 123, 255, 0.1);
+        border-left: 4px solid #007bff;
+        color: #004085;
+      }
     </style>
     <link
       rel="stylesheet"
@@ -117,7 +140,7 @@
                 id="private-key-connect-btn"
                 type="submit"
                 value="Login using private key" />
-              <input id="private-key-value" name="private-key-value" type="password" />
+              <input id="private-key-value" name="private-key-value" type="password" placeholder="Enter private key" />
             </form>
           </div>
 
@@ -155,7 +178,7 @@
         <h2 id="current-address">Crowdfunding Contract Address: None</h2>
         <div id="address">
           <form onSubmit="return false;" class="pure-form">
-            <input id="address-value" name="address-value" type="text" />
+            <input id="address-value" name="address-value" type="text" placeholder="Enter contract address" />
             <input
               id="address-btn"
               type="submit"
@@ -186,7 +209,7 @@
             <h2>Add Contribution</h2>
             <p>Submit a private contribution to the crowdfunding campaign.</p>
             <form class="pure-form" name="add-contribution-form" onSubmit="return false;">
-              <input id="contribution" name="contribution" type="number" />
+              <input id="contribution" name="contribution" type="number" placeholder="Enter amount" />
               <input
                 class="pure-button pure-button-primary"
                 id="add-contribution-btn"
@@ -272,6 +295,9 @@
             </ul>
           </div>
         </div>
+        
+        <!-- Container for dynamic messages -->
+        <div id="messages-container"></div>
       </div>
     </div>
   </body>
