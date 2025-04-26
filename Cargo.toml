@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "zk-crowdfunding",
+    "zk-crowdfunding-factory",
     "zk-average-salary"
 ]
 
