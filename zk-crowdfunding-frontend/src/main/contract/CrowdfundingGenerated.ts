@@ -24,11 +24,11 @@ import {
 
 type Option<K> = K | undefined;
 
+// Updated CampaignStatus enum without Setup (0)
 export enum CampaignStatus {
-  Setup = 0,
-  Active = 1,
-  Computing = 2,
-  Completed = 3,
+  Active = 0,    // Status directly starts from Active (0)
+  Computing = 1,
+  Completed = 2,
 }
 
 export class CrowdfundingContract {
@@ -111,11 +111,7 @@ export function initialize(title: string, description: string, fundingTarget: nu
   });
 }
 
-export function startCampaign(): Buffer {
-  return AbiByteOutput.serializeBigEndian((_out) => {
-    _out.writeBytes(Buffer.from("010000000f", "hex"));
-  });
-}
+// Removed startCampaign function as it's no longer needed
 
 export function endCampaign(): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {

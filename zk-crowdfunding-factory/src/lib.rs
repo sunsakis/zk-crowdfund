@@ -74,7 +74,7 @@ fn initialize(ctx: ContractContext) -> ContractState {
     }
 }
 
-/// Create a new crowdfunding campaign
+/// Create a new crowdfunding campaign that starts directly in Active state
 #[action]
 fn create_campaign(
     ctx: ContractContext,

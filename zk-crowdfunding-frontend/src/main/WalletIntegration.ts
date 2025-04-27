@@ -239,7 +239,7 @@ function updateUIWithContractState(state) {
     descriptionValue.innerHTML = `<p>${state.description}</p>`;
   }
   
-  // Update status
+  // Update status (now without Setup state)
   const statusValue = <HTMLElement>document.querySelector("#status-value");
   if (statusValue) {
     const statusText = CampaignStatus[state.status];
@@ -284,16 +284,14 @@ function updateUIWithContractState(state) {
 }
 
 /**
- * Update action visibility based on contract state
+ * Update action visibility based on contract state (without Setup state)
  */
 function updateActionVisibility(state) {
-  const startCampaignSection = <HTMLElement>document.querySelector("#start-campaign-section");
   const addContributionSection = <HTMLElement>document.querySelector("#add-contribution-section");
   const endCampaignSection = <HTMLElement>document.querySelector("#end-campaign-section");
   const withdrawFundsSection = <HTMLElement>document.querySelector("#withdraw-funds-section");
 
   // Reset all to hidden
-  if (startCampaignSection) startCampaignSection.classList.add("hidden");
   if (addContributionSection) addContributionSection.classList.add("hidden");
   if (endCampaignSection) endCampaignSection.classList.add("hidden");
   if (withdrawFundsSection) withdrawFundsSection.classList.add("hidden");
@@ -304,17 +302,12 @@ function updateActionVisibility(state) {
   }
 
   // Show appropriate sections based on state
-  if (state.status === CampaignStatus.Setup) {
-    // Only project owner can start campaign
-    if (startCampaignSection) {
-      startCampaignSection.classList.remove("hidden");
-    }
-  } else if (state.status === CampaignStatus.Active) {
-    // Anyone can contribute
+  if (state.status === CampaignStatus.Active) {
+    // Anyone can contribute when campaign is active
     if (addContributionSection) {
       addContributionSection.classList.remove("hidden");
     }
-    // Anyone can end campaign
+    // Anyone can end campaign (owner or anyone after deadline)
     if (endCampaignSection) {
       endCampaignSection.classList.remove("hidden");
     }
@@ -324,6 +317,7 @@ function updateActionVisibility(state) {
       withdrawFundsSection.classList.remove("hidden");
     }
   }
+  // Computing state doesn't have any specific actions
 }
 
 /**

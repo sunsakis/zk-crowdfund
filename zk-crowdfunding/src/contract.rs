@@ -31,7 +31,7 @@ enum SecretVarType {
 /// This contract's state
 #[state]
 struct ContractState {
-    /// Project owner (can set details, start/end campaign, withdraw funds)
+    /// Project owner (can end campaign, withdraw funds)
     owner: Address,
     /// Project title
     title: String,
@@ -51,21 +51,19 @@ struct ContractState {
     is_successful: bool,
 }
 
-/// Status of the crowdfunding campaign
+/// Status of the crowdfunding campaign (removed Setup state)
 #[derive(ReadWriteState, ReadWriteRPC, Debug, PartialEq, create_type_spec_derive::CreateTypeSpec)]
 #[repr(u8)]
 enum CampaignStatus {
     #[discriminant(0)]
-    Setup {},
-    #[discriminant(1)]
     Active {},
-    #[discriminant(2)]
+    #[discriminant(1)]
     Computing {},
-    #[discriminant(3)]
+    #[discriminant(2)]
     Completed {},
 }
 
-/// Initializes contract
+/// Initializes contract - starts directly in Active state
 #[init(zk = true)]
 fn initialize(
     ctx: ContractContext,
@@ -90,42 +88,11 @@ fn initialize(
         description,
         funding_target,
         deadline,
-        status: CampaignStatus::Setup {},
+        status: CampaignStatus::Active {}, // Start directly in Active state
         total_raised: None,
         num_contributors: None,
         is_successful: false,
     }
-}
-
-/// Start the campaign (transition from Setup to Active)
-#[action(shortname = 0x01, zk = true)]
-fn start_campaign(
-    context: ContractContext,
-    mut state: ContractState,
-    zk_state: ZkState<SecretVarType>,
-) -> ContractState {
-    // Check permissions
-    assert_eq!(
-        context.sender, state.owner,
-        "Only owner can start the campaign"
-    );
-    
-    // Check current state
-    assert_eq!(
-        state.status, CampaignStatus::Setup {},
-        "Campaign can only be started from Setup state"
-    );
-    
-    // Check that deadline is still in the future
-    assert!(
-        state.deadline > context.block_production_time.try_into().unwrap(),
-        "Deadline must be in the future"
-    );
-    
-    // Update state to Active
-    state.status = CampaignStatus::Active {};
-    
-    state
 }
 
 /// Add a contribution as a secret input

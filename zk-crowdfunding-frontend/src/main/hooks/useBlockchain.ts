@@ -88,7 +88,7 @@ export function useBlockchain({
     }
   }, [contractAddress]);
   
-  // Create new campaign using the factory contract
+  // Create new campaign using the factory contract (starts immediately in Active state)
   const createCampaign = useCallback(async (params: CreateCampaignParams): Promise<ContributionResult> => {
     if (!wallet) {
       return { 
@@ -180,39 +180,6 @@ export function useBlockchain({
       return result;
     } catch (err) {
       const errorMessage = `Error during contribution: ${err instanceof Error ? err.message : String(err)}`;
-      setError(errorMessage);
-      
-      return { 
-        success: false, 
-        error: errorMessage
-      };
-    } finally {
-      setLoading(false);
-    }
-  }, [contractAddress, refreshProject]);
-  
-  // Start the current campaign
-  const startCampaign = useCallback(async (): Promise<ContributionResult> => {
-    if (!contractAddress) {
-      return { 
-        success: false, 
-        error: 'No campaign selected' 
-      };
-    }
-    
-    setLoading(true);
-    
-    try {
-      const result = await BlockchainService.startCampaign();
-      
-      if (result.success) {
-        // Refresh after a short delay
-        setTimeout(() => refreshProject(), 500);
-      }
-      
-      return result;
-    } catch (err) {
-      const errorMessage = `Error starting campaign: ${err instanceof Error ? err.message : String(err)}`;
       setError(errorMessage);
       
       return { 
@@ -323,7 +290,6 @@ export function useBlockchain({
     disconnectWallet,
     refreshProject,
     contribute,
-    startCampaign,
     endCampaign,
     withdrawFunds,
     createCampaign,

@@ -1,12 +1,11 @@
 // zk-crowdfunding-frontend/src/contract/ZkCrowdfundingContract.ts
 import { BlockchainAddress } from "@partisiablockchain/abi-client";
 
-// Campaign status enum that matches the contract's enum
+// Campaign status enum that matches the updated contract's enum (without Setup)
 export enum CampaignStatus {
-  Setup = 0,
-  Active = 1,
-  Computing = 2,
-  Completed = 3
+  Active = 0,
+  Computing = 1,
+  Completed = 2
 }
 
 // Contract state interface based on the smart contract design
@@ -30,10 +29,8 @@ export class ZkCrowdfundingContract {
   /**
    * Converts the contract status enum value to the string representation
    */
-  static statusToString(status: CampaignStatus): 'Setup' | 'Active' | 'Computing' | 'Completed' {
+  static statusToString(status: CampaignStatus): 'Active' | 'Computing' | 'Completed' {
     switch (status) {
-      case CampaignStatus.Setup:
-        return 'Setup';
       case CampaignStatus.Active:
         return 'Active';
       case CampaignStatus.Computing:
@@ -41,16 +38,8 @@ export class ZkCrowdfundingContract {
       case CampaignStatus.Completed:
         return 'Completed';
       default:
-        return 'Setup';
+        return 'Active';
     }
-  }
-  
-  /**
-   * Create an RPC payload for start_campaign
-   */
-  static startCampaignRpc(): Buffer {
-    // Simple placeholder - in real implementation would use proper encoding
-    return Buffer.from([0x01]);
   }
   
   /**
