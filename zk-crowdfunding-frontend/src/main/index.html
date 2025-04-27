@@ -4,6 +4,7 @@
     <title>ZK Crowdfunding Platform</title>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="/public/conf/config.js"></script>
     <style>
       .hidden {
         display: none;
@@ -20,8 +21,8 @@
       }
 
       .loader {
-        border: 4px solid #f3f3f3; /* Light grey */
-        border-top: 4px solid #3498db; /* Blue */
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
         border-radius: 50%;
         width: 20px;
         height: 20px;
@@ -29,12 +30,8 @@
       }
 
       @keyframes spin {
-        0% {
-          transform: rotate(0deg);
-        }
-        100% {
-          transform: rotate(360deg);
-        }
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
       }
 
       .badge {
@@ -46,34 +43,14 @@
         color: white;
       }
 
-      .badge-setup {
-        background-color: #6c757d;
-      }
+      .badge-setup { background-color: #6c757d; }
+      .badge-active { background-color: #28a745; }
+      .badge-computing { background-color: #ffc107; color: #212529; }
+      .badge-completed { background-color: #007bff; }
 
-      .badge-active {
-        background-color: #28a745;
-      }
-
-      .badge-computing {
-        background-color: #ffc107;
-        color: #212529;
-      }
-
-      .badge-completed {
-        background-color: #007bff;
-      }
-
-      .result-indicator {
-        font-weight: bold;
-      }
-
-      .result-success {
-        color: #28a745;
-      }
-
-      .result-failure {
-        color: #dc3545;
-      }
+      .result-indicator { font-weight: bold; }
+      .result-success { color: #28a745; }
+      .result-failure { color: #dc3545; }
 
       .info-panel {
         background-color: #f8f9fa;
@@ -89,7 +66,6 @@
         margin-bottom: 15px;
       }
 
-      /* Message sections */
       .message-section {
         padding: 15px;
         border-radius: 5px;
@@ -113,6 +89,102 @@
         border-left: 4px solid #007bff;
         color: #004085;
       }
+
+      .form-group {
+        margin-bottom: 15px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+
+      .form-group input[type="text"],
+      .form-group input[type="number"],
+      .form-group input[type="datetime-local"],
+      .form-group textarea {
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
+
+      .separate-section {
+        border: 1px solid #ddd;
+        padding: 20px;
+        margin: 20px 0;
+        border-radius: 5px;
+        background-color: #f8f9fa;
+      }
+
+      .section-title {
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+      }
+
+      .deployment-steps {
+        background-color: #e8f4f8;
+        border: 1px solid #bee5eb;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 20px 0;
+      }
+
+      .step-list {
+        list-style-type: none;
+        padding-left: 0;
+      }
+
+      .step-list li {
+        background-color: white;
+        margin: 10px 0;
+        padding: 15px;
+        border-radius: 5px;
+        border-left: 4px solid #007bff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      }
+
+      .step-list li.completed {
+        border-left-color: #28a745;
+        background-color: #f8fff8;
+      }
+
+      .step-number {
+        font-weight: bold;
+        color: #007bff;
+        margin-right: 10px;
+      }
+
+      .deployment-command {
+        background-color: #f8f9fa;
+        border: 1px solid #ddd;
+        padding: 10px;
+        margin: 10px 0;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .campaign-item {
+        border: 1px solid #ddd;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .campaign-item:hover {
+        background-color: #f0f0f0;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+      }
     </style>
     <link
       rel="stylesheet"
@@ -126,6 +198,20 @@
       <div class="pure-u-1-1">
         <h1>ZK Crowdfunding Platform</h1>
         <p>Privacy-preserving crowdfunding with threshold-based reveal using MPC on Partisia Blockchain</p>
+
+        <!-- Factory Contract Section -->
+        <div class="separate-section">
+          <h2 class="section-title">Campaign Registry Contract</h2>
+          <p>This contract maintains a registry of all crowdfunding campaigns. It doesn't deploy campaigns, but tracks them after they're manually deployed.</p>
+          <form onSubmit="return false;" class="pure-form">
+            <input id="factory-address-value" name="factory-address-value" type="text" placeholder="Enter registry contract address" />
+            <input
+              id="factory-address-btn"
+              type="submit"
+              value="Set Registry Address"
+              class="pure-button pure-button-primary" />
+          </form>
+        </div>
 
         <div>
           <h2>Account</h2>
@@ -175,19 +261,100 @@
           </div>
         </div>
 
-        <h2 id="current-address">Crowdfunding Contract Address: None</h2>
-        <div id="address">
-          <form onSubmit="return false;" class="pure-form">
-            <input id="address-value" name="address-value" type="text" placeholder="Enter contract address" />
-            <input
-              id="address-btn"
-              type="submit"
-              value="Set address"
-              class="pure-button pure-button-primary" />
-          </form>
+        <!-- Deploy New Campaign Section -->
+        <div class="separate-section" id="deploy-campaign-section">
+          <h2 class="section-title">Deploy New Campaign</h2>
+          <p>Follow these steps to deploy and register a new crowdfunding campaign:</p>
+          
+          <div class="deployment-steps">
+            <ol class="step-list">
+              <li id="step-1">
+                <span class="step-number">Step 1:</span>
+                <strong>Prepare Campaign Details</strong>
+                <div id="campaign-details-form">
+                  <form class="pure-form pure-form-stacked" onSubmit="return false;">
+                    <div class="form-group">
+                      <label for="campaign-title">Campaign Title</label>
+                      <input id="campaign-title" type="text" placeholder="Enter campaign title" required />
+                    </div>
+                    
+                    <div class="form-group">
+                      <label for="campaign-description">Description</label>
+                      <textarea id="campaign-description" rows="3" placeholder="Enter campaign description" required></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                      <label for="campaign-target">Funding Target</label>
+                      <input id="campaign-target" type="number" placeholder="Enter target amount" min="1" required />
+                    </div>
+                    
+                    <div class="form-group">
+                      <label for="campaign-deadline">Deadline</label>
+                      <input id="campaign-deadline" type="datetime-local" required />
+                    </div>
+                    
+                    <button id="generate-deploy-command-btn" class="pure-button pure-button-primary" type="submit">
+                      Generate Deploy Command
+                    </button>
+                  </form>
+                </div>
+              </li>
+              
+              <li id="step-2" class="hidden">
+                <span class="step-number">Step 2:</span>
+                <strong>Deploy Contract</strong>
+                <p>Run this command in your terminal to deploy the campaign contract:</p>
+                <div id="deployment-command" class="deployment-command"></div>
+                <button id="deployed-btn" class="pure-button pure-button-primary">I've Deployed the Contract</button>
+              </li>
+              
+              <li id="step-3" class="hidden">
+                <span class="step-number">Step 3:</span>
+                <strong>Register Campaign</strong>
+                <p>Enter the deployed contract address to register it with the factory:</p>
+                <form onSubmit="return false;" class="pure-form">
+                  <input id="register-address" type="text" placeholder="Enter deployed campaign contract address" />
+                  <button id="register-campaign-btn" class="pure-button pure-button-primary">Register Campaign</button>
+                </form>
+              </li>
+            </ol>
+          </div>
         </div>
-        <br />
-        <div id="browser-link"></div>
+
+        <!-- Browse Campaigns Section -->
+        <div class="separate-section" id="browse-campaigns-section">
+          <h2 class="section-title">Browse All Campaigns</h2>
+          <div class="button-group">
+            <button id="refresh-campaigns-btn" class="pure-button pure-button-primary">Refresh Campaign List</button>
+          </div>
+          <div id="all-campaigns-list"></div>
+        </div>
+
+        <!-- My Campaigns Section -->
+        <div id="my-campaigns-section" class="separate-section hidden">
+          <h2 class="section-title">My Campaigns</h2>
+          <div id="my-campaigns-list"></div>
+        </div>
+
+        <!-- View Individual Campaign Section -->
+        <div class="separate-section">
+          <h2 class="section-title">View Individual Campaign</h2>
+          <p>Enter the address of a specific crowdfunding campaign to view details and interact with it</p>
+          
+          <h3 id="current-address">Campaign Contract Address: None</h3>
+          <div id="address">
+            <form onSubmit="return false;" class="pure-form">
+              <input id="address-value" name="address-value" type="text" placeholder="Enter campaign contract address" />
+              <input
+                id="address-btn"
+                type="submit"
+                value="View Campaign"
+                class="pure-button pure-button-primary" />
+            </form>
+          </div>
+          <br />
+          <div id="browser-link"></div>
+        </div>
 
         <div id="contract-interaction" class="hidden">
           <!-- Start Campaign Section -->

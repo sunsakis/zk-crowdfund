@@ -2,14 +2,18 @@ import { useState, useCallback, useEffect } from 'react';
 import BlockchainService, { 
   ProjectData, 
   ContributionResult,
-  WalletInfo
+  WalletInfo,
+  CampaignInfo,
+  CreateCampaignParams
 } from '../services/BlockchainService';
 
 export function useBlockchain({ 
   contractAddress, 
+  factoryAddress,
   refreshInterval = 10000 
 }: { 
   contractAddress: string; 
+  factoryAddress?: string;
   refreshInterval?: number 
 }) {
   const [project, setProject] = useState<ProjectData | null>(null);
@@ -17,6 +21,14 @@ export function useBlockchain({
   const [isOwner, setIsOwner] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Update the current campaign address in the service
+  useEffect(() => {
+    if (contractAddress) {
+      console.log(`Setting current campaign address to: ${contractAddress}`);
+      BlockchainService.setCurrentCampaignAddress(contractAddress);
+    }
+  }, [contractAddress]);
   
   // Load project data
   const refreshProject = useCallback(async () => {
@@ -37,7 +49,7 @@ export function useBlockchain({
         setIsOwner(ownerStatus);
       }
     } catch (err) {
-      const errorMessage = `Failed to load project: ${err instanceof Error ? err.message : String(err)}`;
+      const errorMessage = `Failed to load campaign: ${err instanceof Error ? err.message : String(err)}`;
       setError(errorMessage);
       setProject(null);
     } finally {
@@ -45,7 +57,7 @@ export function useBlockchain({
     }
   }, [contractAddress, wallet]);
   
-  // Initial load
+  // Initial load and refresh when contract address changes
   useEffect(() => {
     if (contractAddress) {
       refreshProject();
@@ -76,8 +88,85 @@ export function useBlockchain({
     }
   }, [contractAddress]);
   
-  // Make a contribution
+  // Create new campaign using the factory contract
+  const createCampaign = useCallback(async (params: CreateCampaignParams): Promise<ContributionResult> => {
+    if (!wallet) {
+      return { 
+        success: false, 
+        error: 'Wallet not connected' 
+      };
+    }
+    
+    if (!factoryAddress) {
+      return { 
+        success: false, 
+        error: 'Factory contract address not configured' 
+      };
+    }
+    
+    setLoading(true);
+    
+    try {
+      const result = await BlockchainService.createCampaign(params);
+      return result;
+    } catch (err) {
+      const errorMessage = `Error creating campaign: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
+      return { 
+        success: false, 
+        error: errorMessage
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [wallet, factoryAddress]);
+  
+  // Get user's campaigns from the factory contract
+  const getMyCampaigns = useCallback(async (): Promise<CampaignInfo[]> => {
+    if (!wallet) {
+      return [];
+    }
+    
+    if (!factoryAddress) {
+      console.warn('Factory address not configured');
+      return [];
+    }
+    
+    try {
+      return await BlockchainService.getMyCampaigns();
+    } catch (err) {
+      const errorMessage = `Error fetching campaigns: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      return [];
+    }
+  }, [wallet, factoryAddress]);
+  
+  // Get all campaigns from the factory contract
+  const getAllCampaigns = useCallback(async (): Promise<CampaignInfo[]> => {
+    if (!factoryAddress) {
+      console.warn('Factory address not configured');
+      return [];
+    }
+    
+    try {
+      return await BlockchainService.getAllCampaigns();
+    } catch (err) {
+      const errorMessage = `Error fetching campaigns: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      return [];
+    }
+  }, [factoryAddress]);
+  
+  // Make a contribution to the current campaign
   const contribute = useCallback(async (amount: number): Promise<ContributionResult> => {
+    if (!contractAddress) {
+      return { 
+        success: false, 
+        error: 'No campaign selected' 
+      };
+    }
+    
     setLoading(true);
     
     try {
@@ -100,9 +189,129 @@ export function useBlockchain({
     } finally {
       setLoading(false);
     }
-  }, [refreshProject]);
+  }, [contractAddress, refreshProject]);
   
-  // Other methods similarly simplified
+  // Start the current campaign
+  const startCampaign = useCallback(async (): Promise<ContributionResult> => {
+    if (!contractAddress) {
+      return { 
+        success: false, 
+        error: 'No campaign selected' 
+      };
+    }
+    
+    setLoading(true);
+    
+    try {
+      const result = await BlockchainService.startCampaign();
+      
+      if (result.success) {
+        // Refresh after a short delay
+        setTimeout(() => refreshProject(), 500);
+      }
+      
+      return result;
+    } catch (err) {
+      const errorMessage = `Error starting campaign: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
+      return { 
+        success: false, 
+        error: errorMessage
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [contractAddress, refreshProject]);
+  
+  // End the current campaign  
+  const endCampaign = useCallback(async (): Promise<ContributionResult> => {
+    if (!contractAddress) {
+      return { 
+        success: false, 
+        error: 'No campaign selected' 
+      };
+    }
+    
+    setLoading(true);
+    
+    try {
+      const result = await BlockchainService.endCampaign();
+      
+      if (result.success) {
+        // Refresh after a short delay
+        setTimeout(() => refreshProject(), 500);
+      }
+      
+      return result;
+    } catch (err) {
+      const errorMessage = `Error ending campaign: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
+      return { 
+        success: false, 
+        error: errorMessage
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [contractAddress, refreshProject]);
+  
+  // Withdraw funds from the current campaign
+  const withdrawFunds = useCallback(async (): Promise<ContributionResult> => {
+    if (!contractAddress) {
+      return { 
+        success: false, 
+        error: 'No campaign selected' 
+      };
+    }
+    
+    setLoading(true);
+    
+    try {
+      const result = await BlockchainService.withdrawFunds();
+      
+      if (result.success) {
+        // Refresh after a short delay
+        setTimeout(() => refreshProject(), 500);
+      }
+      
+      return result;
+    } catch (err) {
+      const errorMessage = `Error withdrawing funds: ${err instanceof Error ? err.message : String(err)}`;
+      setError(errorMessage);
+      
+      return { 
+        success: false, 
+        error: errorMessage
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [contractAddress, refreshProject]);
+  
+  // Disconnect wallet
+  const disconnectWallet = useCallback(() => {
+    setWallet(null);
+    setIsOwner(false);
+  }, []);
+  
+  // Auto-refresh for computing status
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    
+    if (project?.status === 'Computing' && refreshInterval) {
+      intervalId = setInterval(() => {
+        refreshProject();
+      }, refreshInterval);
+    }
+    
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [project?.status, refreshProject, refreshInterval]);
   
   return {
     project,
@@ -111,11 +320,14 @@ export function useBlockchain({
     loading,
     error,
     connectWallet,
+    disconnectWallet,
     refreshProject,
     contribute,
-    startCampaign: async () => BlockchainService.startCampaign(),
-    endCampaign: async () => BlockchainService.endCampaign(),
-    withdrawFunds: async () => BlockchainService.withdrawFunds(),
-    disconnectWallet: () => setWallet(null)
+    startCampaign,
+    endCampaign,
+    withdrawFunds,
+    createCampaign,
+    getMyCampaigns,
+    getAllCampaigns
   };
 }

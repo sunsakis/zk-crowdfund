@@ -22,7 +22,9 @@ import {
   resetAccount,
   setAccount,
   getContractAddress,
-  isConnected
+  getFactoryAddress,
+  isConnected,
+  getCrowdfundingApi
 } from "./AppState";
 import { CryptoUtils } from "@partisiablockchain/zk-client";
 import { SenderAuthentication } from "@partisiablockchain/blockchain-api-transaction-client";
@@ -93,6 +95,15 @@ const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
       if (getContractAddress()) {
         updateContractState();
       }
+      
+      // Show campaign creation section if connected
+      const campaignCreationSection = document.querySelector("#campaign-creation-section");
+      if (campaignCreationSection && getFactoryAddress()) {
+        campaignCreationSection.classList.remove("hidden");
+      }
+      
+      // Load user's campaigns
+      loadMyCampaigns();
     })
     .catch((error) => {
       if ("message" in error) {
@@ -114,6 +125,79 @@ export const disconnectWalletClick = () => {
   toggleVisibility("#private-key-connect");
   toggleVisibility("#wallet-disconnect");
   updateInteractionVisibility();
+  
+  // Hide campaign creation section
+  const campaignCreationSection = document.querySelector("#campaign-creation-section");
+  if (campaignCreationSection) {
+    campaignCreationSection.classList.add("hidden");
+  }
+  
+  // Hide my campaigns section
+  const myCampaignsSection = document.querySelector("#my-campaigns-section");
+  if (myCampaignsSection) {
+    myCampaignsSection.classList.add("hidden");
+  }
+};
+
+/**
+ * Load user's campaigns from the factory
+ */
+const loadMyCampaigns = async () => {
+  if (!isConnected() || !getFactoryAddress()) {
+    return;
+  }
+  
+  const api = getCrowdfundingApi();
+  if (!api) return;
+  
+  try {
+    // This would normally call the factory contract to get user's campaigns
+    // For now, we'll simulate it with mock data
+    const campaigns = [
+      {
+        address: "0xabc...def",
+        title: "My Test Campaign",
+        description: "This is a test campaign",
+        funding_target: 1000,
+        deadline: Date.now() + 86400000 * 7 // 7 days from now
+      }
+    ];
+    
+    // Update the UI with campaigns
+    const myCampaignsSection = document.querySelector("#my-campaigns-section");
+    const myCampaignsList = document.querySelector("#my-campaigns-list");
+    
+    if (myCampaignsSection && myCampaignsList) {
+      if (campaigns.length > 0) {
+        myCampaignsSection.classList.remove("hidden");
+        myCampaignsList.innerHTML = campaigns.map(campaign => `
+          <div class="campaign-item" style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px; cursor: pointer;"
+               onclick="window.selectCampaign('${campaign.address}')">
+            <h4>${campaign.title}</h4>
+            <p>${campaign.description}</p>
+            <p><strong>Target:</strong> ${campaign.funding_target}</p>
+            <p><strong>Deadline:</strong> ${new Date(campaign.deadline).toLocaleString()}</p>
+            <p><strong>Address:</strong> ${campaign.address}</p>
+          </div>
+        `).join('');
+      } else {
+        myCampaignsList.innerHTML = "<p>No campaigns found</p>";
+      }
+    }
+  } catch (error) {
+    console.error("Error loading campaigns:", error);
+  }
+};
+
+// Add global function to select a campaign
+window.selectCampaign = (address: string) => {
+  const addressInput = document.querySelector("#address-value") as HTMLInputElement;
+  const addressBtn = document.querySelector("#address-btn") as HTMLButtonElement;
+  
+  if (addressInput && addressBtn) {
+    addressInput.value = address;
+    addressBtn.click();
+  }
 };
 
 /**
@@ -158,35 +242,17 @@ export const updateContractState = () => {
     refreshLoader.classList.remove("hidden");
   }
 
-  // Clear any previous error messages
-  const errorContainers = document.querySelectorAll(".error-message");
-  errorContainers.forEach(container => container.remove());
-
   CLIENT.getContractData<RawZkContractData>(address)
     .then((contract) => {
       if (contract != null && contract.serializedContract?.openState?.openState?.data) {
         try {
-          console.log("Raw state data:", contract.serializedContract.openState.openState.data);
-          
           // Reads the state of the contract
           const stateBuffer = Buffer.from(
             contract.serializedContract.openState.openState.data,
             "base64"
           );
           
-          console.log("State buffer:", stateBuffer);
-          console.log("Buffer.isBuffer(stateBuffer):", Buffer.isBuffer(stateBuffer));
-          
-          // Try to deserialize with additional error handling
-          let state;
-          try {
-            state = deserializeState(stateBuffer);
-            console.log("Deserialized state:", state);
-          } catch (err) {
-            console.error("Deserialization error:", err);
-            showErrorMessage(`Error deserializing state: ${err.message}`);
-            return;
-          }
+          const state = deserializeState(stateBuffer);
 
           // Update the UI with contract state
           updateUIWithContractState(state);
@@ -305,21 +371,17 @@ function updateActionVisibility(state) {
 
   // Show appropriate sections based on state
   if (state.status === CampaignStatus.Setup) {
-    // Only project owner can start campaign
     if (startCampaignSection) {
       startCampaignSection.classList.remove("hidden");
     }
   } else if (state.status === CampaignStatus.Active) {
-    // Anyone can contribute
     if (addContributionSection) {
       addContributionSection.classList.remove("hidden");
     }
-    // Anyone can end campaign
     if (endCampaignSection) {
       endCampaignSection.classList.remove("hidden");
     }
   } else if (state.status === CampaignStatus.Completed && state.isSuccessful) {
-    // Only project owner can withdraw funds
     if (withdrawFundsSection) {
       withdrawFundsSection.classList.remove("hidden");
     }
@@ -345,7 +407,6 @@ function showErrorMessage(message) {
   if (contractState) {
     contractState.appendChild(errorElement);
   } else {
-    // If contract state section doesn't exist yet, add to the main content
     const mainContent = document.querySelector(".pure-u-1-1");
     if (mainContent) {
       mainContent.appendChild(errorElement);
@@ -387,13 +448,4 @@ export const updateInteractionVisibility = () => {
       contractInteraction.classList.add("hidden");
     }
   }
-};
-
-/**
- * Count contributions (variables with type 0)
- */
-const countContributions = (variables: Array<{ key: number; value: ZkVariable }>) => {
-  return Array.from(variables.values()).filter(
-    (v) => Buffer.from(v.value.information.data, "base64").readUInt8() == 0
-  ).length;
 };

@@ -22,7 +22,9 @@ import {
 
 import { RealZkClient } from "@partisiablockchain/zk-client";
 import { addContribution, startCampaign, endCampaign, withdrawFunds } from "./CrowdfundingGenerated";
-import { getContractAddress } from "../AppState";
+import { getContractAddress, getFactoryAddress, CLIENT } from "../AppState";
+import { AbiByteOutput, AbiByteInput } from "@partisiablockchain/abi-client";
+import { Buffer } from "buffer";
 
 export enum CampaignStatus {
   SETUP = 0,
@@ -43,24 +45,134 @@ export interface CrowdfundingBasicState {
   isSuccessful: boolean;
 }
 
+export interface CampaignInfo {
+  address: string;
+  owner: string;
+  title: string;
+  description: string;
+  creation_time: number;
+  target: number;
+  deadline: number;
+}
+
 /**
- * API for the crowdfunding contract.
- * This implementation allows for adding contributions, starting/ending campaigns,
- * and withdrawing funds if the campaign was successful.
+ * API for the crowdfunding contract and registry.
+ * This implementation uses real blockchain calls.
  */
 export class CrowdfundingApi {
   private readonly transactionClient: BlockchainTransactionClient | undefined;
   private readonly zkClient: RealZkClient;
   readonly sender: BlockchainAddress;
+  private readonly factoryAddress: string | undefined;
 
   constructor(
     transactionClient: BlockchainTransactionClient | undefined,
     zkClient: RealZkClient,
-    sender: BlockchainAddress
+    sender: BlockchainAddress,
+    factoryAddress?: string
   ) {
     this.transactionClient = transactionClient;
     this.zkClient = zkClient;
     this.sender = sender;
+    this.factoryAddress = factoryAddress;
+  }
+
+  /**
+   * Register a manually deployed campaign with the factory/registry
+   */
+  readonly registerCampaign = async (campaignAddress: string) => {
+    if (this.transactionClient === undefined) {
+      throw new Error("No account logged in");
+    }
+    if (this.factoryAddress === undefined) {
+      throw new Error("Factory/registry address not set");
+    }
+
+    // Build the register campaign RPC using proper ABI encoding
+    // Based on the factory contract, register_campaign takes:
+    // - campaign_address: Address
+    // - owner: Address
+    // - index: u32 (which we'll set to 0 for auto-increment behavior)
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      // register_campaign action
+      _out.writeBytes(Buffer.from([0x09])); // Action selector for actions
+      _out.writeU8(0x00); // Discriminant for register_campaign
+      _out.writeBytes(Buffer.from(campaignAddress, "hex")); // Campaign address
+      _out.writeBytes(this.sender.toBuffer()); // Owner address
+      _out.writeU32(0); // Index (0 for auto-increment)
+    });
+    
+    // Send transaction to the factory/registry contract
+    return this.transactionClient.signAndSend({ address: this.factoryAddress, rpc }, 100_000);
+  };
+
+  /**
+   * Get all campaigns from the factory/registry
+   */
+  readonly getAllCampaigns = async (): Promise<CampaignInfo[]> => {
+    if (this.factoryAddress === undefined) {
+      throw new Error("Factory/registry address not set");
+    }
+
+    try {
+      // Get the factory contract state
+      const contractData = await CLIENT.getContractData(this.factoryAddress);
+      
+      if (contractData && contractData.serializedContract) {
+        const stateBuffer = Buffer.from(
+          contractData.serializedContract.openState.openState.data,
+          "base64"
+        );
+        
+        // Parse the factory contract state
+        const input = AbiByteInput.createLittleEndian(stateBuffer);
+        
+        // The factory contract state contains:
+        // - admin: Address
+        // - campaigns: Vec<CampaignInfo>
+        
+        // Read admin address
+        input.readAddress();
+        
+        // Read campaigns vector
+        const campaignsLength = input.readU32();
+        const campaigns: CampaignInfo[] = [];
+        
+        for (let i = 0; i < campaignsLength; i++) {
+          campaigns.push(this.parseCampaignInfo(input));
+        }
+        
+        return campaigns;
+      }
+      
+      return [];
+    } catch (error) {
+      console.error("Error getting all campaigns:", error);
+      return [];
+    }
+  };
+
+  /**
+   * Get campaigns owned by the current user from the factory/registry
+   */
+  readonly getMyCampaigns = async (): Promise<CampaignInfo[]> => {
+    const allCampaigns = await this.getAllCampaigns();
+    return allCampaigns.filter(campaign => campaign.owner === this.sender.asString());
+  };
+
+  /**
+   * Parse CampaignInfo from AbiInput
+   */
+  private parseCampaignInfo(input: AbiByteInput): CampaignInfo {
+    return {
+      address: input.readAddress().asString(),
+      owner: input.readAddress().asString(),
+      title: input.readString(),
+      description: input.readString(),
+      creation_time: input.readU64().toNumber(),
+      target: input.readU32(),
+      deadline: input.readU64().toNumber()
+    };
   }
 
   /**
