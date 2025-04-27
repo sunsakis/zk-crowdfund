@@ -1,165 +1,362 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <title>ZK Crowdfunding - Minimal MVP</title>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      line-height: 1.5;
-    }
-    .section {
-      margin-bottom: 30px;
-      padding: 20px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-    }
-    .hidden {
-      display: none;
-    }
-    input, button {
-      padding: 8px;
-      margin: 5px 0;
-    }
-    button {
-      background: #0066cc;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #ccc;
-    }
-    .message-info {
-      color: #0066cc;
-      padding: 10px;
-      margin: 10px 0;
-      border-left: 4px solid #0066cc;
-      background: #f0f7ff;
-    }
-    .message-success {
-      color: #008000;
-      padding: 10px;
-      margin: 10px 0;
-      border-left: 4px solid #008000;
-      background: #f0fff0;
-    }
-    .message-error {
-      color: #cc0000;
-      padding: 10px;
-      margin: 10px 0;
-      border-left: 4px solid #cc0000;
-      background: #fff0f0;
-    }
-    .loader {
-      border: 3px solid #f3f3f3;
-      border-top: 3px solid #0066cc;
-      border-radius: 50%;
-      width: 20px;
-      height: 20px;
-      animation: spin 1s linear infinite;
-      display: inline-block;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-    .badge {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: bold;
-    }
-    .badge-setup { background: #6c757d; color: white; }
-    .badge-active { background: #28a745; color: white; }
-    .badge-computing { background: #ffc107; color: black; }
-    .badge-completed { background: #007bff; color: white; }
-  </style>
-</head>
-<body>
-  <h1>ZK Crowdfunding Platform</h1>
-  <p>Minimal MVP for privacy-preserving crowdfunding on Partisia Blockchain</p>
+  <head>
+    <title>ZK Crowdfunding Platform</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="/public/conf/config.js"></script>
+    <style>
+      .hidden {
+        display: none;
+      }
 
-  <!-- Factory Section -->
-  <div class="section">
-    <h2>Factory Contract</h2>
-    <input id="factory-address-value" type="text" placeholder="Factory contract address" style="width: 300px">
-    <button id="factory-address-btn">Set Factory</button>
-  </div>
+      body > .pure-g {
+        max-width: 1200px;
+        width: 1200px;
+        margin: auto;
+      }
 
-  <!-- Wallet Section -->
-  <div class="section">
-    <h2>Wallet</h2>
-    <div id="connection-status">Not connected</div>
-    <div id="private-key-connect">
-      <input id="private-key-value" type="password" placeholder="Private key">
-      <button id="private-key-connect-btn">Connect</button>
-    </div>
-    <div id="wallet-disconnect" class="hidden">
-      <button id="wallet-disconnect-btn">Disconnect</button>
-    </div>
-  </div>
+      div {
+        margin-bottom: 5px;
+      }
 
-  <!-- Register Campaign Section -->
-  <div class="section">
-    <h2>Register Campaign</h2>
-    <input id="register-address" type="text" placeholder="Deployed campaign address" style="width: 300px">
-    <button id="register-campaign-btn">Register</button>
-  </div>
+      .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 2s linear infinite;
+      }
 
-  <!-- View Campaign Section -->
-  <div class="section">
-    <h2>Campaign Interaction</h2>
-    <input id="address-value" type="text" placeholder="Campaign address" style="width: 300px">
-    <button id="address-btn">Load Campaign</button>
-    
-    <div id="contract-interaction" class="hidden">
-      <div id="contract-state">
-        <button id="update-state-btn">Refresh</button>
-        <div id="refresh-loader" class="loader hidden"></div>
-        
-        <div id="campaign-info" style="margin-top: 20px;">
-          <h3>Campaign Details</h3>
-          <div id="title-value"></div>
-          <div id="description-value"></div>
-          <div id="status-value"></div>
-          <div id="funding-target-value"></div>
-          <div id="deadline-value"></div>
-          <div id="num-contributors"></div>
-          <div id="total-raised"></div>
-          <div id="campaign-result"></div>
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 3px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        color: white;
+      }
+
+      .badge-setup { background-color: #6c757d; }
+      .badge-active { background-color: #28a745; }
+      .badge-computing { background-color: #ffc107; color: #212529; }
+      .badge-completed { background-color: #007bff; }
+
+      .result-indicator { font-weight: bold; }
+      .result-success { color: #28a745; }
+      .result-failure { color: #dc3545; }
+
+      .info-panel {
+        background-color: #f8f9fa;
+        border-left: 4px solid #17a2b8;
+        padding: 10px;
+        margin-top: 10px;
+      }
+
+      .status-panel {
+        background-color: #e9ecef;
+        border-radius: 5px;
+        padding: 15px;
+        margin-bottom: 15px;
+      }
+
+      .message-section {
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+      }
+
+      .message-section.success {
+        background-color: rgba(40, 167, 69, 0.1);
+        border-left: 4px solid #28a745;
+        color: #155724;
+      }
+
+      .message-section.error {
+        background-color: rgba(220, 53, 69, 0.1);
+        border-left: 4px solid #dc3545;
+        color: #721c24;
+      }
+
+      .message-section.info {
+        background-color: rgba(0, 123, 255, 0.1);
+        border-left: 4px solid #007bff;
+        color: #004085;
+      }
+
+      .form-group {
+        margin-bottom: 15px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+
+      .form-group input[type="text"],
+      .form-group input[type="number"],
+      .form-group input[type="datetime-local"],
+      .form-group textarea {
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
+
+      .separate-section {
+        border: 1px solid #ddd;
+        padding: 20px;
+        margin: 20px 0;
+        border-radius: 5px;
+        background-color: #f8f9fa;
+      }
+
+      .section-title {
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+      }
+
+      .deployment-steps {
+        background-color: #e8f4f8;
+        border: 1px solid #bee5eb;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 20px 0;
+      }
+
+      .step-list {
+        list-style-type: none;
+        padding-left: 0;
+      }
+
+      .step-list li {
+        background-color: white;
+        margin: 10px 0;
+        padding: 15px;
+        border-radius: 5px;
+        border-left: 4px solid #007bff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      }
+
+      .step-list li.completed {
+        border-left-color: #28a745;
+        background-color: #f8fff8;
+      }
+
+      .step-number {
+        font-weight: bold;
+        color: #007bff;
+        margin-right: 10px;
+      }
+
+      .deployment-command {
+        background-color: #f8f9fa;
+        border: 1px solid #ddd;
+        padding: 10px;
+        margin: 10px 0;
+        font-family: monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .campaign-item {
+        border: 1px solid #ddd;
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .campaign-item:hover {
+        background-color: #f0f0f0;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+      }
+    </style>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/purecss@3.0.0/build/pure-min.css"
+      integrity="sha384-X38yfunGUhNzHpBaEBsWLO+A0HDYOQi8ufWDkZ0k9e0eXz/tH3II7uKZ9msv++Ls"
+      crossorigin="anonymous" />
+  </head>
+
+  <body>
+    <div class="pure-g">
+      <div class="pure-u-1-1">
+        <h1>ZK Crowdfunding Platform</h1>
+        <p>Privacy-preserving crowdfunding with threshold-based reveal using MPC on Partisia Blockchain</p>
+
+        <div>
+          <h2>Account</h2>
+          <div id="connection-status">
+            <p>Currently not logged in.</p>
+          </div>
+
+          <div id="private-key-connect">
+            <form onSubmit="return false;" class="pure-form">
+              <input
+                class="pure-button pure-button-primary"
+                id="private-key-connect-btn"
+                type="submit"
+                value="Login using private key" />
+              <input id="private-key-value" name="private-key-value" type="password" placeholder="Enter private key" />
+            </form>
+          </div>
+
+          <div id="wallet-disconnect" class="hidden">
+            <form>
+              <input
+                class="pure-button pure-button-primary"
+                id="wallet-disconnect-btn"
+                type="button"
+                value="Logout" />
+            </form>
+          </div>
         </div>
+
+        <!-- View Individual Campaign Section -->
+        <div class="separate-section">
+          <h2 class="section-title">View Individual Campaign</h2>
+          <p>Enter the address of a specific crowdfunding campaign to view details and interact with it</p>
+          
+          <h3 id="current-address">Campaign Contract Address: None</h3>
+          <div id="address">
+            <form onSubmit="return false;" class="pure-form">
+              <input id="address-value" name="address-value" type="text" placeholder="Enter campaign contract address" />
+              <input
+                id="address-btn"
+                type="submit"
+                value="View Campaign"
+                class="pure-button pure-button-primary" />
+            </form>
+          </div>
+          <br />
+          <div id="browser-link"></div>
+        </div>
+
+        <div id="contract-interaction" class="hidden">
+          <!-- Start Campaign Section -->
+          <div id="start-campaign-section" class="hidden">
+            <h2>Start Campaign</h2>
+            <p>Transition the campaign from Setup state to Active state to allow contributions.</p>
+            <form>
+              <input
+                class="pure-button pure-button-primary"
+                id="start-campaign-btn"
+                type="button"
+                value="Start Campaign" />
+            </form>
+            <div id="start-campaign-transaction-link"></div>
+          </div>
+
+          <!-- Add Contribution Section -->
+          <div id="add-contribution-section" class="hidden">
+            <h2>Add Contribution</h2>
+            <p>Submit a private contribution to the crowdfunding campaign.</p>
+            <form class="pure-form" name="add-contribution-form" onSubmit="return false;">
+              <input id="contribution" name="contribution" type="number" placeholder="Enter amount" />
+              <input
+                class="pure-button pure-button-primary"
+                id="add-contribution-btn"
+                type="submit"
+                value="Add Contribution" />
+            </form>
+            <div id="add-contribution-transaction-link"></div>
+          </div>
+
+          <!-- End Campaign Section -->
+          <div id="end-campaign-section" class="hidden">
+            <h2>End Campaign</h2>
+            <p>End the campaign and start the computation to tally all contributions.</p>
+            <form>
+              <input
+                class="pure-button pure-button-primary"
+                id="end-campaign-btn"
+                type="button"
+                value="End Campaign" />
+            </form>
+            <div id="end-campaign-transaction-link"></div>
+          </div>
+
+          <!-- Withdraw Funds Section -->
+          <div id="withdraw-funds-section" class="hidden">
+            <h2>Withdraw Funds</h2>
+            <p>Withdraw funds if the campaign was successful (reached funding target).</p>
+            <form>
+              <input
+                class="pure-button pure-button-primary"
+                id="withdraw-funds-btn"
+                type="button"
+                value="Withdraw Funds" />
+            </form>
+            <div id="withdraw-funds-transaction-link"></div>
+          </div>
+        </div>
+
+        <div id="contract-state" class="hidden">
+          <h2 id="state-header">Crowdfunding Project State</h2>
+          <div id="update-state">
+            <form>
+              <input
+                class="pure-button pure-button-primary"
+                id="update-state-btn"
+                type="button"
+                value="Refresh State" />
+              <input id="refresh-loader" class="loader hidden" />
+            </form>
+          </div>
+
+          <div class="status-panel">
+            <h3>Project Details</h3>
+            <div id="title-value"></div>
+            <div id="description-value"></div>
+            <div id="status-value"></div>
+            <div id="funding-target-value"></div>
+            <div id="deadline-value"></div>
+          </div>
+
+          <div class="status-panel">
+            <h3>Campaign Progress</h3>
+            <div id="num-contributors"></div>
+            <div id="total-raised"></div>
+            <div id="campaign-result"></div>
+          </div>
+
+          <div class="status-panel">
+            <h3>Project Owner</h3>
+            <div id="owner-value"></div>
+          </div>
+
+          <div class="info-panel">
+            <h3>About Privacy-Preserving Crowdfunding</h3>
+            <p>
+              This platform uses zero-knowledge proofs to keep individual contributions private 
+              while ensuring transparency in the overall funding outcome.
+            </p>
+            <ul>
+              <li><strong>Private Contributions:</strong> Individual contribution amounts are never revealed</li>
+              <li><strong>Threshold-Based Reveal:</strong> The total amount raised is only revealed after the campaign has ended</li>
+              <li><strong>Multi-Party Computation:</strong> Secure MPC is used to tally contributions without exposing individual data</li>
+            </ul>
+          </div>
+        </div>
+        
+        <!-- Container for dynamic messages -->
+        <div id="messages-container"></div>
       </div>
-
-      <!-- Campaign Actions -->
-      <div id="campaign-actions" style="margin-top: 20px;">
-        <div id="start-campaign-section" class="hidden">
-          <button id="start-campaign-btn">Start Campaign</button>
-        </div>
-        
-        <div id="add-contribution-section" class="hidden">
-          <input id="contribution" type="number" placeholder="Amount">
-          <button id="add-contribution-btn">Contribute</button>
-        </div>
-        
-        <div id="end-campaign-section" class="hidden">
-          <button id="end-campaign-btn">End Campaign</button>
-        </div>
-        
-        <div id="withdraw-funds-section" class="hidden">
-          <button id="withdraw-funds-btn">Withdraw Funds</button>
-        </div>
-      </div>
     </div>
-  </div>
-
-  <!-- Messages Section -->
-  <div id="messages"></div>
-</body>
+  </body>
 </html>

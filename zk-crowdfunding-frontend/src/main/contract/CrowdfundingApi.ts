@@ -8,15 +8,7 @@ import {
 } from "@partisiablockchain/blockchain-api-transaction-client";
 
 import { RealZkClient } from "@partisiablockchain/zk-client";
-import { CLIENT } from "../AppState";
 import { Buffer } from "buffer";
-
-export enum CampaignStatus {
-  SETUP = 0,
-  ACTIVE = 1, 
-  COMPUTING = 2,
-  COMPLETED = 3,
-}
 
 export interface CrowdfundingBasicState {
   owner: BlockchainAddress;
@@ -24,34 +16,24 @@ export interface CrowdfundingBasicState {
   description: string;
   fundingTarget: number;
   deadline: number;
-  status: CampaignStatus;
+  status: number; // CampaignStatus enum value
   totalRaised: number | undefined;
   numContributors: number | undefined;
   isSuccessful: boolean;
 }
 
-export interface CampaignInfo {
-  address: string;
-  owner: string;
-  title: string;
-  description: string;
-  creation_time: number;
-  target: number;
-  deadline: number;
-}
-
 /**
- * API for the crowdfunding contract and registry.
+ * API for the crowdfunding contract and factory.
  */
 export class CrowdfundingApi {
   private readonly transactionClient: BlockchainTransactionClient | undefined;
-  private readonly zkClient: RealZkClient;
-  readonly sender: BlockchainAddress;
+  private readonly zkClient: RealZkClient | undefined;
+  private readonly sender: BlockchainAddress;
   private readonly factoryAddress: string | undefined;
 
   constructor(
     transactionClient: BlockchainTransactionClient | undefined,
-    zkClient: RealZkClient,
+    zkClient: RealZkClient | undefined,
     sender: BlockchainAddress,
     factoryAddress?: string
   ) {
@@ -62,83 +44,80 @@ export class CrowdfundingApi {
   }
 
   /**
-   * Register a manually deployed campaign with the factory/registry
+   * Register a deployed campaign with the factory
    */
   readonly registerCampaign = async (campaignAddress: string) => {
-    if (this.transactionClient === undefined) {
+    if (!this.transactionClient) {
       throw new Error("No account logged in");
     }
-    if (this.factoryAddress === undefined) {
-      throw new Error("Factory/registry address not set");
+    if (!this.factoryAddress) {
+      throw new Error("Factory address not set");
     }
 
-    // Build the register campaign RPC using proper ABI encoding
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      // Action selector for register_campaign
-      _out.writeU8(9); // Action selector for actions
-      _out.writeU8(1); // Discriminant for register_campaign (based on ordering in contract)
+      // Action shortname for register_campaign from FactoryGenerated
+      _out.writeBytes(Buffer.from("fba986d10f", "hex"));
       
       // Campaign address parameter
-      _out.writeBytes(Buffer.from(campaignAddress, "hex"));
+      _out.writeBytes(Buffer.from(campaignAddress.replace("0x", ""), "hex"));
       
-      // Owner address - use the asString() method instead of toBuffer()
-      const ownerAddressHex = this.sender.asString().replace('00', ''); // Remove '00' prefix if present
+      // Owner address parameter (sender)
+      const ownerAddressHex = this.sender.asString();
       _out.writeBytes(Buffer.from(ownerAddressHex, "hex"));
       
       // Index parameter - set to 0 for automatic assignment
       _out.writeU32(0);
     });
     
-    // Send transaction to the factory/registry contract
     return this.transactionClient.signAndSend({ address: this.factoryAddress, rpc }, 100_000);
   };
 
   /**
-   * Get all campaigns from the factory/registry
+   * Get campaigns from the factory
    */
-  readonly getAllCampaigns = async (): Promise<CampaignInfo[]> => {
-    if (this.factoryAddress === undefined) {
-      throw new Error("Factory/registry address not set");
+  readonly getCampaigns = async () => {
+    if (!this.factoryAddress) {
+      throw new Error("Factory address not set");
     }
 
-    try {
-      // Prepare RPC call for get_campaigns action
-      const getRpc = AbiByteOutput.serializeBigEndian((_out) => {
-        _out.writeU8(9); // Action selector
-        _out.writeU8(2); // Discriminant for get_campaigns (0x01 as defined in contract)
-      });
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      // Action shortname for get_campaigns from FactoryGenerated
+      _out.writeBytes(Buffer.from("01", "hex"));
+    });
 
-      // Create a pseudo-sender for this read-only operation
-      const pseudoSender = BlockchainAddress.fromString("0000000000000000000000000000000000000000");
-      
-      // Send the transaction to get campaigns
-      const result = await this.transactionClient?.signAndSend(
-        { address: this.factoryAddress, rpc: getRpc }, 
-        20_000
-      );
-
-      // For now, we'll return an empty array since we need to wait for the transaction to execute
-      // In a real implementation, you'd need to listen for the transaction result
-      return [];
-    } catch (error) {
-      console.error("Error getting all campaigns:", error);
-      return [];
-    }
+    // For RPC read operations, we need to use a different approach
+    // This is just a placeholder for a proper implementation
+    return [];
   };
 
   /**
-   * Build and send add contribution secret input transaction.
+   * Start a campaign
    */
-  readonly addContribution = async (amount: number) => {
-    if (this.transactionClient === undefined) {
+  readonly startCampaign = async (campaignAddress: string) => {
+    if (!this.transactionClient) {
       throw new Error("No account logged in");
     }
-
-    // Build the RPC for add_contribution
+    
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x40); // Shortname for add_contribution
+      // Action bytes for start_campaign (based on contract)
+      _out.writeBytes(Buffer.from("010000000f", "hex"));
     });
+    
+    return this.transactionClient.signAndSend({ address: campaignAddress, rpc }, 20_000);
+  };
 
+  /**
+   * Add contribution to campaign (ZK input)
+   */
+  readonly addContribution = async (campaignAddress: string, amount: number) => {
+    if (!this.transactionClient || !this.zkClient) {
+      throw new Error("No account logged in or ZK client not available");
+    }
+
+    // Public RPC for add_contribution
+    const publicRpc = Buffer.from([0x40]); // Shortname from contract
+    
+    // Secret input
     const secretInput = AbiByteOutput.serializeBigEndian((_out) => {
       _out.writeI32(amount);
     });
@@ -146,52 +125,37 @@ export class CrowdfundingApi {
     const transaction = await this.zkClient.buildOnChainInputTransaction(
       this.sender,
       secretInput,
-      rpc
+      publicRpc
     );
 
     return this.transactionClient.signAndSend(transaction, 100_000);
   };
 
   /**
-   * Build and send start campaign transaction
-   */
-  readonly startCampaign = async (campaignAddress: string) => {
-    if (this.transactionClient === undefined) {
-      throw new Error("No account logged in");
-    }
-    
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x01); // Shortname for start_campaign
-    });
-    
-    return this.transactionClient.signAndSend({ address: campaignAddress, rpc }, 20_000);
-  };
-
-  /**
-   * Build and send end campaign transaction
+   * End campaign
    */
   readonly endCampaign = async (campaignAddress: string) => {
-    if (this.transactionClient === undefined) {
+    if (!this.transactionClient) {
       throw new Error("No account logged in");
     }
     
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x02); // Shortname for end_campaign
+      _out.writeBytes(Buffer.from("020000000f", "hex"));
     });
     
     return this.transactionClient.signAndSend({ address: campaignAddress, rpc }, 20_000);
   };
 
   /**
-   * Build and send withdraw funds transaction
+   * Withdraw funds
    */
   readonly withdrawFunds = async (campaignAddress: string) => {
-    if (this.transactionClient === undefined) {
+    if (!this.transactionClient) {
       throw new Error("No account logged in");
     }
     
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x03); // Shortname for withdraw_funds
+      _out.writeBytes(Buffer.from("030000000f", "hex"));
     });
     
     return this.transactionClient.signAndSend({ address: campaignAddress, rpc }, 20_000);
