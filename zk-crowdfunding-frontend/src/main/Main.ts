@@ -5,6 +5,7 @@ import {
   updateContractState,
   updateInteractionVisibility,
 } from "./WalletIntegration";
+import { addContributionFormAction } from "./ContributionHandler";
 
 // Event handlers
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,6 +20,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   setupEventListeners();
+  
+  // Debug message to confirm script execution
+  console.log("ZK Crowdfunding Main.ts loaded successfully");
 });
 
 function setupEventListeners() {
@@ -31,12 +35,16 @@ function setupEventListeners() {
         connectPrivateKeyWalletClick(privateKeyInput.value);
       }
     });
+    console.log("Private key connect button listener attached");
+  } else {
+    console.warn("Private key connect button not found");
   }
 
   // Disconnect wallet
   const disconnectWallet = document.querySelector("#wallet-disconnect-btn");
   if (disconnectWallet) {
     disconnectWallet.addEventListener("click", disconnectWalletClick);
+    console.log("Disconnect wallet button listener attached");
   }
 
   // Set factory address
@@ -55,12 +63,16 @@ function setupEventListeners() {
   const addressBtn = document.querySelector("#address-btn");
   if (addressBtn) {
     addressBtn.addEventListener("click", contractAddressClick);
+    console.log("Address button listener attached");
+  } else {
+    console.warn("Address button not found");
   }
 
   // Refresh state
   const updateStateBtn = document.querySelector("#update-state-btn");
   if (updateStateBtn) {
     updateStateBtn.addEventListener("click", updateContractState);
+    console.log("Update state button listener attached");
   }
 
   // Campaign actions
@@ -69,9 +81,17 @@ function setupEventListeners() {
     startCampaignBtn.addEventListener("click", startCampaignAction);
   }
 
+  // Add contribution - THIS IS THE KEY PART
   const addContributionBtn = document.querySelector("#add-contribution-btn");
   if (addContributionBtn) {
-    addContributionBtn.addEventListener("click", addContributionFormAction);
+    addContributionBtn.addEventListener("click", (event) => {
+      event.preventDefault(); // Prevent form submission
+      console.log("Add contribution button clicked");
+      addContributionFormAction();
+    });
+    console.log("Add contribution button listener attached");
+  } else {
+    console.warn("Add contribution button not found");
   }
 
   const endCampaignBtn = document.querySelector("#end-campaign-btn");
@@ -121,7 +141,7 @@ function registerCampaignAction() {
         showMessage(`Campaign registered! TX: ${result.transactionPointer.identifier}`, "success");
       })
       .catch((error) => {
-        showMessage(`Registration failed: ${error.message}`, "error");
+        showMessage(`Registration failed: ${error.message || error}`, "error");
       });
   }
 }
@@ -159,36 +179,7 @@ function startCampaignAction() {
         setTimeout(updateContractState, 5000);
       })
       .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
-      });
-  }
-}
-
-function addContributionFormAction() {
-  if (!isConnected()) {
-    showMessage("Connect wallet first", "error");
-    return;
-  }
-  
-  const contribution = document.querySelector("#contribution") as HTMLInputElement;
-  const amount = parseInt(contribution?.value, 10);
-  
-  if (isNaN(amount) || amount <= 0) {
-    showMessage("Invalid amount", "error");
-    return;
-  }
-  
-  const api = getCrowdfundingApi();
-  if (api) {
-    showMessage("Submitting contribution...", "info");
-    
-    api.addContribution(amount)
-      .then((result) => {
-        showMessage(`Contribution submitted! TX: ${result.transactionPointer.identifier}`, "success");
-        setTimeout(updateContractState, 5000);
-      })
-      .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
+        showMessage(`Failed: ${error.message || error}`, "error");
       });
   }
 }
@@ -211,7 +202,7 @@ function endCampaignAction() {
         setTimeout(updateContractState, 5000);
       })
       .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
+        showMessage(`Failed: ${error.message || error}`, "error");
       });
   }
 }
@@ -234,19 +225,25 @@ function withdrawFundsAction() {
         setTimeout(updateContractState, 5000);
       })
       .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
+        showMessage(`Failed: ${error.message || error}`, "error");
       });
   }
 }
 
 function showMessage(message: string, type: "success" | "error" | "info") {
-  const messageEl = document.createElement("div");
-  messageEl.className = `message-${type}`;
-  messageEl.textContent = message;
+  console.log(`Message (${type}): ${message}`);
   
-  const container = document.querySelector("#messages");
-  if (container) {
-    container.appendChild(messageEl);
+  const messagesContainer = document.querySelector("#messages-container");
+  if (messagesContainer) {
+    const messageEl = document.createElement("div");
+    messageEl.className = `message-section ${type}`;
+    messageEl.textContent = message;
+    
+    messagesContainer.appendChild(messageEl);
+    
+    // Remove message after 5 seconds
     setTimeout(() => messageEl.remove(), 5000);
+  } else {
+    console.warn("Messages container not found");
   }
 }
