@@ -1,7 +1,5 @@
-// Import required libraries
 import { Buffer } from "buffer";
 import { AbiBitOutput } from "@partisiablockchain/abi-client";
-import { RealZkClient } from "@partisiablockchain/zk-client";
 import { getCrowdfundingApi, isConnected, getContractAddress } from "./AppState";
 
 /**
@@ -9,6 +7,8 @@ import { getCrowdfundingApi, isConnected, getContractAddress } from "./AppState"
  * This function validates inputs, creates a ZK secret input, and submits the transaction
  */
 export function addContributionFormAction() {
+  console.log("Processing contribution submission...");
+  
   // Get contribution input element
   const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
   
@@ -86,7 +86,7 @@ export function addContributionFormAction() {
       if (statusElement) {
         statusElement.innerHTML = `
           <div class="message-section error">
-            Error submitting contribution: ${error.message || error}
+            Error submitting contribution: ${error.message || String(error)}
           </div>
         `;
       }

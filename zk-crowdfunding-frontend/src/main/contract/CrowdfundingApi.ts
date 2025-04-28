@@ -3,13 +3,12 @@
  */
 import {
   BlockchainAddress,
-  BlockchainTransactionClient,
-  AbiByteOutput
+  BlockchainTransactionClient
 } from "@partisiablockchain/blockchain-api-transaction-client";
 
 import { RealZkClient } from "@partisiablockchain/zk-client";
 import { Buffer } from "buffer";
-import { AbiBitOutput } from "@partisiablockchain/abi-client";
+import { AbiBitOutput, AbiByteOutput } from "@partisiablockchain/abi-client"; // Fixed import for AbiByteOutput
 
 export interface CrowdfundingBasicState {
   owner: BlockchainAddress;
@@ -150,20 +149,35 @@ export class CrowdfundingApi {
     }
   };
 
-  /**
-   * End campaign
-   */
-  readonly endCampaign = async (campaignAddress: string) => {
-    if (!this.transactionClient) {
-      throw new Error("No account logged in");
-    }
-    
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeBytes(Buffer.from("020000000f", "hex"));
-    });
-    
-    return this.transactionClient.signAndSend({ address: campaignAddress, rpc }, 20_000);
-  };
+/**
+ * End campaign
+ * This function creates an RPC payload to end the crowdfunding campaign
+ * The payload matches the shortname format defined in the contract
+ */
+readonly endCampaign = async (campaignAddress: string) => {
+  if (!this.transactionClient) {
+    throw new Error("No account logged in");
+  }
+  
+  console.log(`Attempting to end campaign at address: ${campaignAddress}`);
+  
+  // Create RPC payload with just the action shortname (0x02)
+  // This format matches the contract's expected format for zk=true actions
+  const rpc = Buffer.from([0x02]);
+  
+  console.log("Sending end_campaign transaction with simplified RPC payload");
+  
+  try {
+    // Use higher gas limit for ZK operations
+    return await this.transactionClient.signAndSend({
+      address: campaignAddress,
+      rpc
+    }, 50_000); // Increased gas to handle ZK operations
+  } catch (error) {
+    console.error("Error ending campaign:", error);
+    throw error;
+  }
+}
 
   /**
    * Withdraw funds
