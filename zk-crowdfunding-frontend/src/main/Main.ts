@@ -148,57 +148,60 @@ function addContributionFormAction() {
     });
 }
 
-function endCampaignAction() {
-  if (!isConnected()) {
+// In Main.ts where you handle the end campaign button
+async function endCampaignAction() {
+  if (!isConnected) {
     showMessage("Please connect your wallet first", "error");
     return;
   }
   
-  const api = getCrowdfundingApi();
-  const address = getContractAddress();
-  
-  if (!api || !address) {
-    showMessage("No campaign selected", "error");
+  const contractAddress = getContractAddress();
+  if (!contractAddress) {
+    showMessage("No campaign address set", "error");
     return;
   }
   
-  const transactionLink = document.querySelector("#end-campaign-transaction-link");
+  const transactionLink = document.getElementById("end-campaign-transaction-link");
   if (transactionLink) {
     transactionLink.innerHTML = '<div class="loader"></div> Ending campaign...';
   }
   
-  api.endCampaign(address)
-    .then((result) => {
-      console.log("End campaign result:", result);
-      
-      if (transactionLink) {
-        const txId = result.transactionPointer.identifier;
-        transactionLink.innerHTML = `
-          <div class="message-section success">
-            Campaign end transaction submitted!
-          </div>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-             target="_blank">View transaction in browser</a>
-        `;
-      }
-      
-      // Show computing message
-      showMessage("Campaign is transitioning to Computing state. This may take a few minutes.", "info");
-      
-      // Refresh state after a short delay
-      setTimeout(updateContractState, 5000);
-    })
-    .catch((error) => {
-      console.error("End campaign error:", error);
-      
-      if (transactionLink) {
-        transactionLink.innerHTML = `
-          <div class="message-section error">
-            Error: ${error.message || String(error)}
-          </div>
-        `;
-      }
-    });
+  try {
+    // Get the API
+    const api = getCrowdfundingApi();
+    if (!api) {
+      throw new Error("API not initialized");
+    }
+    
+    // Call the fixed endCampaign method
+    const result = await api.endCampaign(contractAddress);
+    
+    // Show success message
+    if (transactionLink) {
+      transactionLink.innerHTML = `
+        <div class="message-section success">
+          Campaign end initiated successfully!
+        </div>
+        <a href="https://browser.testnet.partisiablockchain.com/transactions/${result.transactionPointer.identifier}" 
+           target="_blank">View transaction in explorer</a>
+      `;
+    }
+    
+    showMessage("Campaign end initiated - computing results", "success");
+    
+    // Refresh state after a delay
+    setTimeout(updateContractState, 5000);
+  } catch (error) {
+    if (transactionLink) {
+      transactionLink.innerHTML = `
+        <div class="message-section error">
+          Error: ${error instanceof Error ? error.message : String(error)}
+        </div>
+      `;
+    }
+    
+    showMessage(`Error ending campaign: ${error instanceof Error ? error.message : String(error)}`, "error");
+  }
 }
 
 function withdrawFundsAction() {

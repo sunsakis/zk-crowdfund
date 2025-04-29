@@ -1,4 +1,5 @@
-// zk-crowdfunding-frontend/src/main/contract/CrowdfundingApi.ts
+// Fixed CrowdfundingApi.ts
+
 import {
   BlockchainAddress,
   BlockchainTransactionClient
@@ -42,6 +43,13 @@ export class CrowdfundingApi {
   }
 
   /**
+   * Export transaction client for debugging
+   */
+  getTransactionClient() {
+    return this.transactionClient;
+  }
+
+  /**
    * Add contribution to campaign (ZK input)
    */
   readonly addContribution = async (amount: number) => {
@@ -60,10 +68,9 @@ export class CrowdfundingApi {
       _out.writeI32(amount);
     });
     
-    // Create the public RPC
-    const publicRpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeBytes(Buffer.from("40", "hex"));
-    });
+    // Create the public RPC - this is the key change!
+    // Just use a simple buffer with the shortname
+    const publicRpc = Buffer.from([0x40]);
     
     try {
       // Build the ZK transaction
@@ -82,7 +89,7 @@ export class CrowdfundingApi {
   };
 
   /**
-   * End campaign
+   * End campaign - FIXED VERSION
    */
   readonly endCampaign = async (address: string) => {
     if (!this.transactionClient) {
@@ -91,10 +98,10 @@ export class CrowdfundingApi {
     
     console.log(`Ending campaign at address: ${address}`);
     
-    // Create RPC payload with the end_campaign shortname
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeBytes(Buffer.from("01", "hex"));
-    });
+    // IMPORTANT: This is the critical change - use a simple Buffer with just the shortname
+    const rpc = Buffer.from([0x01]);
+    
+    console.log("RPC payload (hex):", rpc.toString('hex'));
     
     try {
       return await this.transactionClient.signAndSend({
@@ -103,6 +110,7 @@ export class CrowdfundingApi {
       }, 100_000); // Higher gas limit for ZK operations
     } catch (error) {
       console.error("Error ending campaign:", error);
+      console.error("Error details:", error);
       throw error;
     }
   };
@@ -115,9 +123,8 @@ export class CrowdfundingApi {
       throw new Error("No account logged in");
     }
     
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeBytes(Buffer.from("02", "hex"));
-    });
+    // Similar change here - use simple Buffer
+    const rpc = Buffer.from([0x02]);
     
     return this.transactionClient.signAndSend({ address, rpc }, 20_000);
   };
