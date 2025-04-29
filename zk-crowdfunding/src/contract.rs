@@ -103,17 +103,6 @@ fn add_contribution(
         "Contributions can only be made when campaign is active"
     );
     
-    // Check that this address hasn't already contributed
-    assert!(
-        zk_state
-            .secret_variables
-            .iter()
-            .chain(zk_state.pending_inputs.iter())
-            .all(|(_, v)| v.owner != context.sender),
-        "Each address is only allowed to contribute once. Sender: {:?}",
-        context.sender
-    );
-    
     // Create a new secret input definition
     let input_def =
         ZkInputDef::with_metadata(Some(SHORTNAME_INPUTTED_VARIABLE), SecretVarType::Contribution {});
