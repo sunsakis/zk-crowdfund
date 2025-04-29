@@ -1,7 +1,4 @@
-// This file is auto-generated from an abi-file using AbiCodegen.
-/* eslint-disable */
-// @ts-nocheck
-// noinspection ES6UnusedImports
+// zk-crowdfunding-frontend/src/main/contract/CrowdfundingGenerated.ts
 import {
   AbiBitInput,
   AbiBitOutput,
@@ -24,9 +21,9 @@ import {
 
 type Option<K> = K | undefined;
 
-// Updated CampaignStatus enum without Setup (0)
+// CampaignStatus enum
 export enum CampaignStatus {
-  Active = 0,    // Status directly starts from Active (0)
+  Active = 0,
   Computing = 1,
   Completed = 2,
 }
@@ -42,41 +39,45 @@ export class CrowdfundingContract {
     this._address = address;
     this._client = client;
   }
+  
   public deserializeContractState(_input: AbiInput): ContractState {
-    const owner: BlockchainAddress = _input.readAddress();
-    const title: string = _input.readString();
-    const description: string = _input.readString();
-    const fundingTarget: number = _input.readU32();
-    const deadline: number = _input.readU64().toNumber();
-    const status: CampaignStatus = _input.readU8();
-    
-    let totalRaised: Option<number> = undefined;
-    const totalRaised_isSome = _input.readBoolean();
-    if (totalRaised_isSome) {
-      const totalRaised_option: number = _input.readU32();
-      totalRaised = totalRaised_option;
+    try {
+      const owner: BlockchainAddress = _input.readAddress();
+      const title: string = _input.readString();
+      const description: string = _input.readString();
+      const fundingTarget: number = _input.readU32();
+      const status: CampaignStatus = _input.readU8();
+      
+      let totalRaised: Option<number> = undefined;
+      const totalRaised_isSome = _input.readBoolean();
+      if (totalRaised_isSome) {
+        const totalRaised_option: number = _input.readU32();
+        totalRaised = totalRaised_option;
+      }
+      
+      let numContributors: Option<number> = undefined;
+      const numContributors_isSome = _input.readBoolean();
+      if (numContributors_isSome) {
+        const numContributors_option: number = _input.readU32();
+        numContributors = numContributors_option;
+      }
+      
+      const isSuccessful: boolean = _input.readBoolean();
+      
+      return { 
+        owner, 
+        title, 
+        description, 
+        fundingTarget, 
+        status, 
+        totalRaised, 
+        numContributors, 
+        isSuccessful 
+      };
+    } catch (error) {
+      console.error("Error in deserializeContractState:", error);
+      throw error;
     }
-    
-    let numContributors: Option<number> = undefined;
-    const numContributors_isSome = _input.readBoolean();
-    if (numContributors_isSome) {
-      const numContributors_option: number = _input.readU32();
-      numContributors = numContributors_option;
-    }
-    
-    const isSuccessful: boolean = _input.readBoolean();
-    
-    return { 
-      owner, 
-      title, 
-      description, 
-      fundingTarget, 
-      deadline, 
-      status, 
-      totalRaised, 
-      numContributors, 
-      isSuccessful 
-    };
   }
   
   public async getState(): Promise<ContractState> {
@@ -94,34 +95,30 @@ export interface ContractState {
   title: string;
   description: string;
   fundingTarget: number;
-  deadline: number;
   status: CampaignStatus;
   totalRaised: Option<number>;
   numContributors: Option<number>;
   isSuccessful: boolean;
 }
 
-export function initialize(title: string, description: string, fundingTarget: number, deadline: BN): Buffer {
+export function initialize(title: string, description: string, fundingTarget: number): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeBytes(Buffer.from("ffffffff0f", "hex"));
     _out.writeString(title);
     _out.writeString(description);
     _out.writeU32(fundingTarget);
-    _out.writeU64(deadline);
   });
 }
 
-// Removed startCampaign function as it's no longer needed
-
 export function endCampaign(): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {
-    _out.writeBytes(Buffer.from("020000000f", "hex"));
+    _out.writeBytes(Buffer.from("01", "hex"));
   });
 }
 
 export function withdrawFunds(): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {
-    _out.writeBytes(Buffer.from("030000000f", "hex"));
+    _out.writeBytes(Buffer.from("02", "hex"));
   });
 }
 

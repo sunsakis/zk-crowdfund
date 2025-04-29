@@ -1,4 +1,5 @@
-import { getCrowdfundingApi, isConnected, setContractAddress, getContractAddress, setFactoryAddress, getFactoryAddress } from "./AppState";
+// zk-crowdfunding-frontend/src/main/Main.ts
+import { getCrowdfundingApi, isConnected, setContractAddress, getContractAddress } from "./AppState";
 import {
   connectPrivateKeyWalletClick,
   disconnectWalletClick,
@@ -8,16 +9,6 @@ import {
 
 // Event handlers
 document.addEventListener('DOMContentLoaded', () => {
-  // Set default factory address from environment
-  const defaultFactoryAddress = process.env.REACT_APP_FACTORY_ADDRESS || "0288d02df00d84c5f582eff9eb5c0ac34869c2be3c";
-  if (defaultFactoryAddress) {
-    const factoryAddressInput = document.querySelector("#factory-address-value") as HTMLInputElement;
-    if (factoryAddressInput) {
-      factoryAddressInput.value = defaultFactoryAddress;
-    }
-    setFactoryAddress(defaultFactoryAddress);
-  }
-  
   setupEventListeners();
 });
 
@@ -39,18 +30,6 @@ function setupEventListeners() {
     disconnectWallet.addEventListener("click", disconnectWalletClick);
   }
 
-  // Set factory address
-  const factoryAddressBtn = document.querySelector("#factory-address-btn");
-  if (factoryAddressBtn) {
-    factoryAddressBtn.addEventListener("click", factoryAddressClick);
-  }
-
-  // Register campaign
-  const registerCampaignBtn = document.querySelector("#register-campaign-btn");
-  if (registerCampaignBtn) {
-    registerCampaignBtn.addEventListener("click", registerCampaignAction);
-  }
-
   // Set campaign address
   const addressBtn = document.querySelector("#address-btn");
   if (addressBtn) {
@@ -64,11 +43,6 @@ function setupEventListeners() {
   }
 
   // Campaign actions
-  const startCampaignBtn = document.querySelector("#start-campaign-btn");
-  if (startCampaignBtn) {
-    startCampaignBtn.addEventListener("click", startCampaignAction);
-  }
-
   const addContributionBtn = document.querySelector("#add-contribution-btn");
   if (addContributionBtn) {
     addContributionBtn.addEventListener("click", addContributionFormAction);
@@ -85,47 +59,6 @@ function setupEventListeners() {
   }
 }
 
-function factoryAddressClick() {
-  const factoryAddressInput = document.querySelector("#factory-address-value") as HTMLInputElement;
-  const address = factoryAddressInput?.value;
-  
-  if (!address || address.length !== 42) {
-    showMessage("Invalid address format", "error");
-    return;
-  }
-  
-  setFactoryAddress(address);
-  showMessage("Factory address set", "success");
-}
-
-function registerCampaignAction() {
-  if (!isConnected()) {
-    showMessage("Please connect wallet first", "error");
-    return;
-  }
-  
-  const registerAddressInput = document.querySelector("#register-address") as HTMLInputElement;
-  const campaignAddress = registerAddressInput?.value;
-  
-  if (!campaignAddress || campaignAddress.length !== 42) {
-    showMessage("Invalid campaign address", "error");
-    return;
-  }
-  
-  const api = getCrowdfundingApi();
-  if (api) {
-    showMessage("Registering campaign...", "info");
-    
-    api.registerCampaign(campaignAddress)
-      .then((result) => {
-        showMessage(`Campaign registered! TX: ${result.transactionPointer.identifier}`, "success");
-      })
-      .catch((error) => {
-        showMessage(`Registration failed: ${error.message}`, "error");
-      });
-  }
-}
-
 function contractAddressClick() {
   const addressInput = document.querySelector("#address-value") as HTMLInputElement;
   const address = addressInput?.value;
@@ -138,115 +71,216 @@ function contractAddressClick() {
   setContractAddress(address);
   updateInteractionVisibility();
   updateContractState();
+  
+  // Update browser link
+  const browserLink = document.querySelector("#browser-link");
+  if (browserLink) {
+    browserLink.innerHTML = `<a href="https://browser.testnet.partisiablockchain.com/contracts/${address}" target="_blank">View in Partisia Explorer</a>`;
+  }
+  
+  // Update current address display
+  const currentAddress = document.querySelector("#current-address");
+  if (currentAddress) {
+    currentAddress.textContent = `Campaign Contract Address: ${address}`;
+  }
+  
   showMessage("Campaign address set", "success");
-}
-
-function startCampaignAction() {
-  if (!isConnected()) {
-    showMessage("Connect wallet first", "error");
-    return;
-  }
-  
-  const api = getCrowdfundingApi();
-  const address = getContractAddress();
-  
-  if (api && address) {
-    showMessage("Starting campaign...", "info");
-    
-    api.startCampaign(address)
-      .then((result) => {
-        showMessage(`Campaign started! TX: ${result.transactionPointer.identifier}`, "success");
-        setTimeout(updateContractState, 5000);
-      })
-      .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
-      });
-  }
 }
 
 function addContributionFormAction() {
   if (!isConnected()) {
-    showMessage("Connect wallet first", "error");
+    showMessage("Please connect your wallet first", "error");
     return;
   }
   
   const contribution = document.querySelector("#contribution") as HTMLInputElement;
-  const amount = parseInt(contribution?.value, 10);
+  if (!contribution?.value) {
+    showMessage("Please enter a contribution amount", "error");
+    return;
+  }
   
+  const amount = parseInt(contribution.value, 10);
   if (isNaN(amount) || amount <= 0) {
-    showMessage("Invalid amount", "error");
+    showMessage("Please enter a valid positive number", "error");
     return;
   }
   
   const api = getCrowdfundingApi();
-  if (api) {
-    showMessage("Submitting contribution...", "info");
-    
-    api.addContribution(amount)
-      .then((result) => {
-        showMessage(`Contribution submitted! TX: ${result.transactionPointer.identifier}`, "success");
-        setTimeout(updateContractState, 5000);
-      })
-      .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
-      });
+  if (!api) {
+    showMessage("API not initialized", "error");
+    return;
   }
+  
+  const transactionLink = document.querySelector("#add-contribution-transaction-link");
+  if (transactionLink) {
+    transactionLink.innerHTML = '<div class="loader"></div> Submitting contribution...';
+  }
+  
+  api.addContribution(amount)
+    .then((result) => {
+      console.log("Contribution result:", result);
+      contribution.value = ""; // Clear input on success
+      
+      if (transactionLink) {
+        const txId = result.transactionPointer.identifier;
+        transactionLink.innerHTML = `
+          <div class="message-section success">
+            Contribution submitted successfully!
+          </div>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+             target="_blank">View transaction in browser</a>
+        `;
+      }
+      
+      // Refresh state after a short delay
+      setTimeout(updateContractState, 5000);
+    })
+    .catch((error) => {
+      console.error("Contribution error:", error);
+      
+      if (transactionLink) {
+        transactionLink.innerHTML = `
+          <div class="message-section error">
+            Error: ${error.message || String(error)}
+          </div>
+        `;
+      }
+    });
 }
 
 function endCampaignAction() {
   if (!isConnected()) {
-    showMessage("Connect wallet first", "error");
+    showMessage("Please connect your wallet first", "error");
     return;
   }
   
   const api = getCrowdfundingApi();
   const address = getContractAddress();
   
-  if (api && address) {
-    showMessage("Ending campaign...", "info");
-    
-    api.endCampaign(address)
-      .then((result) => {
-        showMessage(`Campaign ended! TX: ${result.transactionPointer.identifier}`, "success");
-        setTimeout(updateContractState, 5000);
-      })
-      .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
-      });
+  if (!api || !address) {
+    showMessage("No campaign selected", "error");
+    return;
   }
+  
+  const transactionLink = document.querySelector("#end-campaign-transaction-link");
+  if (transactionLink) {
+    transactionLink.innerHTML = '<div class="loader"></div> Ending campaign...';
+  }
+  
+  api.endCampaign(address)
+    .then((result) => {
+      console.log("End campaign result:", result);
+      
+      if (transactionLink) {
+        const txId = result.transactionPointer.identifier;
+        transactionLink.innerHTML = `
+          <div class="message-section success">
+            Campaign end transaction submitted!
+          </div>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+             target="_blank">View transaction in browser</a>
+        `;
+      }
+      
+      // Show computing message
+      showMessage("Campaign is transitioning to Computing state. This may take a few minutes.", "info");
+      
+      // Refresh state after a short delay
+      setTimeout(updateContractState, 5000);
+    })
+    .catch((error) => {
+      console.error("End campaign error:", error);
+      
+      if (transactionLink) {
+        transactionLink.innerHTML = `
+          <div class="message-section error">
+            Error: ${error.message || String(error)}
+          </div>
+        `;
+      }
+    });
 }
 
 function withdrawFundsAction() {
   if (!isConnected()) {
-    showMessage("Connect wallet first", "error");
+    showMessage("Please connect your wallet first", "error");
     return;
   }
   
   const api = getCrowdfundingApi();
   const address = getContractAddress();
   
-  if (api && address) {
-    showMessage("Withdrawing funds...", "info");
-    
-    api.withdrawFunds(address)
-      .then((result) => {
-        showMessage(`Funds withdrawn! TX: ${result.transactionPointer.identifier}`, "success");
-        setTimeout(updateContractState, 5000);
-      })
-      .catch((error) => {
-        showMessage(`Failed: ${error.message}`, "error");
-      });
+  if (!api || !address) {
+    showMessage("No campaign selected", "error");
+    return;
+  }
+  
+  const transactionLink = document.querySelector("#withdraw-funds-transaction-link");
+  if (transactionLink) {
+    transactionLink.innerHTML = '<div class="loader"></div> Withdrawing funds...';
+  }
+  
+  api.withdrawFunds(address)
+    .then((result) => {
+      console.log("Withdraw funds result:", result);
+      
+      if (transactionLink) {
+        const txId = result.transactionPointer.identifier;
+        transactionLink.innerHTML = `
+          <div class="message-section success">
+            Funds withdrawal successful!
+          </div>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+             target="_blank">View transaction in browser</a>
+        `;
+      }
+      
+      // Refresh state
+      updateContractState();
+    })
+    .catch((error) => {
+      console.error("Withdraw funds error:", error);
+      
+      if (transactionLink) {
+        transactionLink.innerHTML = `
+          <div class="message-section error">
+            Error: ${error.message || String(error)}
+          </div>
+        `;
+      }
+    });
+}
+
+function showMessage(message, type) {
+  console.log(`${type.toUpperCase()}: ${message}`);
+  
+  const container = document.querySelector("#messages-container");
+  if (!container) return;
+  
+  const messageEl = document.createElement("div");
+  messageEl.className = `message-section ${type}`;
+  messageEl.textContent = message;
+  
+  container.appendChild(messageEl);
+  
+  // Auto-remove after 5 seconds
+  setTimeout(() => {
+    messageEl.remove();
+  }, 5000);
+}
+
+// Helper function to show the connection status
+function setConnectionStatus(status) {
+  const statusText = document.querySelector("#connection-status p");
+  if (statusText) {
+    statusText.textContent = status;
   }
 }
 
-function showMessage(message: string, type: "success" | "error" | "info") {
-  const messageEl = document.createElement("div");
-  messageEl.className = `message-${type}`;
-  messageEl.textContent = message;
-  
-  const container = document.querySelector("#messages");
-  if (container) {
-    container.appendChild(messageEl);
-    setTimeout(() => messageEl.remove(), 5000);
+// Helper function to toggle visibility
+function toggleVisibility(selector) {
+  const element = document.querySelector(selector);
+  if (element) {
+    element.classList.toggle("hidden");
   }
 }

@@ -3,14 +3,14 @@ use pbc_zk::*;
 #[allow(unused)]
 const CONTRIBUTION_VARIABLE_KIND: u8 = 0u8;
 
-/// Perform a zk computation to sum all the secret contributions.
+/// Perform a zk computation on secret-shared data to sum all the secret contributions.
 ///
 /// ### Returns:
 ///
 /// The sum of all contributions.
 #[zk_compute(shortname = 0x61)]
 pub fn sum_contributions() -> Sbi32 {
-    // Initialize total sum
+    // Initialize state
     let mut total_contributions: Sbi32 = Sbi32::from(0);
 
     // Sum each contribution

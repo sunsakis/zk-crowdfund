@@ -10,7 +10,6 @@ export const TESTNET_URL = "https://node1.testnet.partisiablockchain.com";
 export const CLIENT = new ShardedClient(TESTNET_URL, ["Shard0", "Shard1", "Shard2"]);
 
 let contractAddress: string | undefined;
-let factoryAddress: string | undefined;
 let currentAccount: SenderAuthentication | undefined;
 let crowdfundingApi: CrowdfundingApi | undefined;
 
@@ -28,15 +27,6 @@ export const isConnected = () => {
   return currentAccount != null;
 };
 
-export const setFactoryAddress = (address: string) => {
-  factoryAddress = address;
-  updateCrowdfundingApi();
-};
-
-export const getFactoryAddress = () => {
-  return factoryAddress;
-};
-
 export const setContractAddress = (address: string) => {
   contractAddress = address;
   updateCrowdfundingApi();
@@ -51,23 +41,24 @@ export const getCrowdfundingApi = () => {
 };
 
 function updateCrowdfundingApi() {
-  if (currentAccount) {
-    const transactionClient = BlockchainTransactionClient.create(
-      TESTNET_URL,
-      currentAccount
-    );
-    
-    let zkClient: RealZkClient | undefined;
-    if (contractAddress) {
-      zkClient = RealZkClient.create(contractAddress, new Client(TESTNET_URL));
+  if (currentAccount && contractAddress) {
+    try {
+      const transactionClient = BlockchainTransactionClient.create(
+        TESTNET_URL,
+        currentAccount
+      );
+      
+      const zkClient = RealZkClient.create(contractAddress, new Client(TESTNET_URL));
+      
+      crowdfundingApi = new CrowdfundingApi(
+        transactionClient, 
+        zkClient, 
+        currentAccount.getAddress()
+      );
+    } catch (error) {
+      console.error("Error updating crowdfunding API:", error);
+      crowdfundingApi = undefined;
     }
-    
-    crowdfundingApi = new CrowdfundingApi(
-      transactionClient, 
-      zkClient, 
-      currentAccount.getAddress(), 
-      factoryAddress
-    );
   } else {
     crowdfundingApi = undefined;
   }

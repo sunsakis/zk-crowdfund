@@ -1,7 +1,6 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const webpack = require('webpack');
-const Dotenv = require('dotenv-webpack');
 
 module.exports = (env) => {
   const port = env.PORT || 8081;
@@ -47,10 +46,6 @@ module.exports = (env) => {
         {
           test: /\.html$/,
           use: 'html-loader'
-        },
-        {
-          test: /\.(png|svg|jpg|jpeg|gif|ico)$/i,
-          type: 'asset/resource'
         }
       ]
     },
@@ -62,10 +57,6 @@ module.exports = (env) => {
       new webpack.ProvidePlugin({
         Buffer: ['buffer', 'Buffer'],
         process: 'process/browser'
-      }),
-      new Dotenv({
-        systemvars: true, // Load all system variables
-        defaults: true
       })
     ],
     devServer: {
@@ -75,12 +66,7 @@ module.exports = (env) => {
       },
       port: port,
       hot: true,
-      historyApiFallback: true,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization"
-      }
+      historyApiFallback: true
     }
   };
 };
