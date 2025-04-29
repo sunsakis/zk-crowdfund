@@ -1,4 +1,5 @@
-// zk-crowdfunding-frontend/src/main/Main.ts
+// Fixed Main.ts for ZK Crowdfunding Platform - with proper wallet connection
+
 import { getCrowdfundingApi, isConnected, setContractAddress, getContractAddress } from "./AppState";
 import {
   connectPrivateKeyWalletClick,
@@ -13,14 +14,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function setupEventListeners() {
-  // Connect using private key
+  // Connect using private key button - IMPORTANT: Don't directly call the function, just set it as the event handler
   const pkConnect = document.querySelector("#private-key-connect-btn");
   if (pkConnect) {
+    // This preserves all the context handling in the original WalletIntegration.ts
     pkConnect.addEventListener("click", () => {
-      const privateKeyInput = document.querySelector("#private-key-value") as HTMLInputElement;
-      if (privateKeyInput) {
-        connectPrivateKeyWalletClick(privateKeyInput.value);
-      }
+      // This just calls the existing function without passing parameters
+      // The function will read the value from the input field itself
+      connectPrivateKeyWalletClick();
     });
   }
 
@@ -63,227 +64,184 @@ function contractAddressClick() {
   const addressInput = document.querySelector("#address-value") as HTMLInputElement;
   const address = addressInput?.value;
   
-  if (!address || address.length !== 42) {
-    showMessage("Invalid address format", "error");
+  if (!address) {
+    setConnectionStatus("No address provided");
     return;
   }
   
+  // Validate that address is 21 bytes in hexadecimal format
+  const regex = /[0-9A-Fa-f]{42}/g;
+  if (address.length != 42 || address.match(regex) == null) {
+    setConnectionStatus(`${address} is not a valid PBC address`);
+    return;
+  }
+  
+  // Update the contract state
   setContractAddress(address);
   updateInteractionVisibility();
-  updateContractState();
   
-  // Update browser link
+  // Show address and link to the browser
+  const currentAddressElement = document.querySelector("#current-address");
+  if (currentAddressElement) {
+    currentAddressElement.innerHTML = `Campaign Contract Address: ${address}`;
+  }
+  
   const browserLink = document.querySelector("#browser-link");
   if (browserLink) {
-    browserLink.innerHTML = `<a href="https://browser.testnet.partisiablockchain.com/contracts/${address}" target="_blank">View in Partisia Explorer</a>`;
+    browserLink.innerHTML = `<a href="https://browser.testnet.partisiablockchain.com/contracts/${address}" target="_blank">Browser link</a>`;
   }
   
-  // Update current address display
-  const currentAddress = document.querySelector("#current-address");
-  if (currentAddress) {
-    currentAddress.textContent = `Campaign Contract Address: ${address}`;
-  }
-  
-  showMessage("Campaign address set", "success");
+  // Update the contract state
+  updateContractState();
 }
 
 function addContributionFormAction() {
+  // Test if a user has connected
   if (!isConnected()) {
-    showMessage("Please connect your wallet first", "error");
+    setConnectionStatus("Cannot contribute without a connected wallet!");
     return;
   }
   
   const contribution = document.querySelector("#contribution") as HTMLInputElement;
-  if (!contribution?.value) {
-    showMessage("Please enter a contribution amount", "error");
+  if (!contribution || isNaN(parseInt(contribution.value, 10))) {
+    setConnectionStatus("Contribution must be a number");
     return;
   }
   
-  const amount = parseInt(contribution.value, 10);
-  if (isNaN(amount) || amount <= 0) {
-    showMessage("Please enter a valid positive number", "error");
-    return;
-  }
-  
+  // All fields validated, add contribution
   const api = getCrowdfundingApi();
   if (!api) {
-    showMessage("API not initialized", "error");
+    setConnectionStatus("API not initialized");
     return;
   }
   
+  // Add contribution via API
   const transactionLink = document.querySelector("#add-contribution-transaction-link");
   if (transactionLink) {
-    transactionLink.innerHTML = '<div class="loader"></div> Submitting contribution...';
+    transactionLink.innerHTML = '<br><div class="loader"></div>';
   }
   
-  api.addContribution(amount)
+  api.addContribution(parseInt(contribution.value, 10))
     .then((result) => {
-      console.log("Contribution result:", result);
-      contribution.value = ""; // Clear input on success
-      
       if (transactionLink) {
-        const txId = result.transactionPointer.identifier;
-        transactionLink.innerHTML = `
-          <div class="message-section success">
-            Contribution submitted successfully!
-          </div>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-             target="_blank">View transaction in browser</a>
-        `;
+        transactionLink.innerHTML = `<br><a href="https://browser.testnet.partisiablockchain.com/transactions/${result.transactionPointer.identifier}" target="_blank">Transaction link in browser</a>`;
       }
       
-      // Refresh state after a short delay
+      // Clear input after successful contribution
+      contribution.value = "";
+      
+      // Update state after a delay to reflect new contribution
       setTimeout(updateContractState, 5000);
     })
     .catch((error) => {
-      console.error("Contribution error:", error);
-      
       if (transactionLink) {
-        transactionLink.innerHTML = `
-          <div class="message-section error">
-            Error: ${error.message || String(error)}
-          </div>
-        `;
+        transactionLink.innerHTML = `<br>Error: ${error.message || String(error)}`;
       }
     });
 }
 
-// In Main.ts where you handle the end campaign button
-async function endCampaignAction() {
-  if (!isConnected) {
-    showMessage("Please connect your wallet first", "error");
+function endCampaignAction() {
+  // User is connected
+  if (!isConnected()) {
+    setConnectionStatus("Cannot end campaign without a connected wallet!");
     return;
   }
   
-  const contractAddress = getContractAddress();
-  if (!contractAddress) {
-    showMessage("No campaign address set", "error");
+  // Get the contract address
+  const address = getContractAddress();
+  if (!address) {
+    setConnectionStatus("No contract address provided");
     return;
   }
   
-  const transactionLink = document.getElementById("end-campaign-transaction-link");
+  // Get API
+  const api = getCrowdfundingApi();
+  if (!api) {
+    setConnectionStatus("API not initialized");
+    return;
+  }
+  
+  const transactionLink = document.querySelector("#end-campaign-transaction-link");
   if (transactionLink) {
-    transactionLink.innerHTML = '<div class="loader"></div> Ending campaign...';
+    transactionLink.innerHTML = '<br><div class="loader"></div>';
   }
   
-  try {
-    // Get the API
-    const api = getCrowdfundingApi();
-    if (!api) {
-      throw new Error("API not initialized");
-    }
-    
-    // Call the fixed endCampaign method
-    const result = await api.endCampaign(contractAddress);
-    
-    // Show success message
-    if (transactionLink) {
-      transactionLink.innerHTML = `
-        <div class="message-section success">
-          Campaign end initiated successfully!
-        </div>
-        <a href="https://browser.testnet.partisiablockchain.com/transactions/${result.transactionPointer.identifier}" 
-           target="_blank">View transaction in explorer</a>
-      `;
-    }
-    
-    showMessage("Campaign end initiated - computing results", "success");
-    
-    // Refresh state after a delay
-    setTimeout(updateContractState, 5000);
-  } catch (error) {
-    if (transactionLink) {
-      transactionLink.innerHTML = `
-        <div class="message-section error">
-          Error: ${error instanceof Error ? error.message : String(error)}
-        </div>
-      `;
-    }
-    
-    showMessage(`Error ending campaign: ${error instanceof Error ? error.message : String(error)}`, "error");
-  }
+  // CRITICAL: Pass the address to endCampaign
+  api.endCampaign(address)
+    .then((result) => {
+      if (transactionLink) {
+        const txId = result.transactionPointer.identifier;
+        transactionLink.innerHTML = `<br><a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" target="_blank">Transaction link in browser</a>`;
+      }
+      
+      // Set status message
+      setConnectionStatus("Campaign end initiated successfully. Computing results...");
+      
+      // Update state after a delay to see computation status
+      setTimeout(updateContractState, 5000);
+    })
+    .catch((error) => {
+      if (transactionLink) {
+        transactionLink.innerHTML = `<br>Error: ${error.message || String(error)}`;
+      }
+      setConnectionStatus(`Error ending campaign: ${error.message || String(error)}`);
+    });
 }
 
 function withdrawFundsAction() {
+  // User is connected
   if (!isConnected()) {
-    showMessage("Please connect your wallet first", "error");
+    setConnectionStatus("Cannot withdraw funds without a connected wallet!");
     return;
   }
   
-  const api = getCrowdfundingApi();
+  // Get the contract address
   const address = getContractAddress();
+  if (!address) {
+    setConnectionStatus("No contract address provided");
+    return;
+  }
   
-  if (!api || !address) {
-    showMessage("No campaign selected", "error");
+  // Get API
+  const api = getCrowdfundingApi();
+  if (!api) {
+    setConnectionStatus("API not initialized");
     return;
   }
   
   const transactionLink = document.querySelector("#withdraw-funds-transaction-link");
   if (transactionLink) {
-    transactionLink.innerHTML = '<div class="loader"></div> Withdrawing funds...';
+    transactionLink.innerHTML = '<br><div class="loader"></div>';
   }
   
+  // IMPORTANT: Pass the address to withdrawFunds
   api.withdrawFunds(address)
     .then((result) => {
-      console.log("Withdraw funds result:", result);
-      
       if (transactionLink) {
         const txId = result.transactionPointer.identifier;
-        transactionLink.innerHTML = `
-          <div class="message-section success">
-            Funds withdrawal successful!
-          </div>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-             target="_blank">View transaction in browser</a>
-        `;
+        transactionLink.innerHTML = `<br><a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" target="_blank">Transaction link in browser</a>`;
       }
       
-      // Refresh state
+      // Set status message
+      setConnectionStatus("Funds withdrawn successfully");
+      
+      // Update state to reflect the withdrawal
       updateContractState();
     })
     .catch((error) => {
-      console.error("Withdraw funds error:", error);
-      
       if (transactionLink) {
-        transactionLink.innerHTML = `
-          <div class="message-section error">
-            Error: ${error.message || String(error)}
-          </div>
-        `;
+        transactionLink.innerHTML = `<br>Error: ${error.message || String(error)}`;
       }
+      setConnectionStatus(`Error withdrawing funds: ${error.message || String(error)}`);
     });
 }
 
-function showMessage(message, type) {
-  console.log(`${type.toUpperCase()}: ${message}`);
-  
-  const container = document.querySelector("#messages-container");
-  if (!container) return;
-  
-  const messageEl = document.createElement("div");
-  messageEl.className = `message-section ${type}`;
-  messageEl.textContent = message;
-  
-  container.appendChild(messageEl);
-  
-  // Auto-remove after 5 seconds
-  setTimeout(() => {
-    messageEl.remove();
-  }, 5000);
-}
-
-// Helper function to show the connection status
-function setConnectionStatus(status) {
+// Helper function to show connection status
+function setConnectionStatus(status: string) {
   const statusText = document.querySelector("#connection-status p");
   if (statusText) {
     statusText.textContent = status;
   }
-}
-
-// Helper function to toggle visibility
-function toggleVisibility(selector) {
-  const element = document.querySelector(selector);
-  if (element) {
-    element.classList.toggle("hidden");
-  }
+  
+  console.log(`Status: ${status}`);
 }

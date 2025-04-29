@@ -1,5 +1,3 @@
-// Fixed CrowdfundingApi.ts
-
 import {
   BlockchainAddress,
   BlockchainTransactionClient
@@ -9,122 +7,111 @@ import { RealZkClient } from "@partisiablockchain/zk-client";
 import { Buffer } from "buffer";
 import { AbiBitOutput, AbiByteOutput } from "@partisiablockchain/abi-client";
 
-export interface CrowdfundingBasicState {
-  owner: BlockchainAddress;
-  title: string;
-  description: string;
-  fundingTarget: number;
-  deadline: number;
-  status: number; // CampaignStatus enum value
-  totalRaised: number | undefined;
-  numContributors: number | undefined;
-  isSuccessful: boolean;
-}
-
 /**
- * API for the crowdfunding contract and factory.
+ * API for the crowdfunding contract.
+ * This implementation exactly matches the format used in average-salary.
  */
 export class CrowdfundingApi {
   private readonly transactionClient: BlockchainTransactionClient | undefined;
-  private readonly zkClient: RealZkClient | undefined;
+  private readonly zkClient: RealZkClient;
   private readonly sender: BlockchainAddress;
-  private readonly factoryAddress: string | undefined;
 
   constructor(
     transactionClient: BlockchainTransactionClient | undefined,
-    zkClient: RealZkClient | undefined,
-    sender: BlockchainAddress,
-    factoryAddress?: string
+    zkClient: RealZkClient,
+    sender: BlockchainAddress
   ) {
     this.transactionClient = transactionClient;
     this.zkClient = zkClient;
     this.sender = sender;
-    this.factoryAddress = factoryAddress;
   }
 
   /**
-   * Export transaction client for debugging
-   */
-  getTransactionClient() {
-    return this.transactionClient;
-  }
-
-  /**
-   * Add contribution to campaign (ZK input)
+   * Build and send add contribution secret input transaction.
+   * @param amount the contribution amount to input
    */
   readonly addContribution = async (amount: number) => {
-    if (!this.transactionClient) {
+    if (this.transactionClient === undefined) {
       throw new Error("No account logged in");
     }
 
-    if (!this.zkClient) {
-      throw new Error("ZK client not initialized");
-    }
-
-    console.log(`Adding contribution of ${amount}`);
-    
-    // Create the secret input for the amount
+    // Create secret input builder for the contribution amount
     const secretInput = AbiBitOutput.serialize((_out) => {
       _out.writeI32(amount);
     });
     
-    // Create the public RPC - this is the key change!
-    // Just use a simple buffer with the shortname
+    // Create public RPC for add_contribution (shortname 0x40)
     const publicRpc = Buffer.from([0x40]);
     
     try {
-      // Build the ZK transaction
+      // Build the ZK input transaction
       const transaction = await this.zkClient.buildOnChainInputTransaction(
         this.sender,
         secretInput,
         publicRpc
       );
       
-      // Sign and send the transaction
-      return await this.transactionClient.signAndSend(transaction, 100_000);
+      // Send the transaction
+      return this.transactionClient.signAndSend(transaction, 100_000);
     } catch (error) {
-      console.error("Error creating ZK transaction:", error);
-      throw new Error(`Failed to create contribution: ${error.message || error}`);
-    }
-  };
-
-  /**
-   * End campaign - FIXED VERSION
-   */
-  readonly endCampaign = async (address: string) => {
-    if (!this.transactionClient) {
-      throw new Error("No account logged in");
-    }
-    
-    console.log(`Ending campaign at address: ${address}`);
-    
-    // IMPORTANT: This is the critical change - use a simple Buffer with just the shortname
-    const rpc = Buffer.from([0x01]);
-    
-    console.log("RPC payload (hex):", rpc.toString('hex'));
-    
-    try {
-      return await this.transactionClient.signAndSend({
-        address,
-        rpc
-      }, 100_000); // Higher gas limit for ZK operations
-    } catch (error) {
-      console.error("Error ending campaign:", error);
-      console.error("Error details:", error);
+      console.error("Error adding contribution:", error);
       throw error;
     }
   };
 
   /**
-   * Withdraw funds
+   * Build and send end campaign transaction
+   * This starts the ZK computation to sum all contributions.
+   * @param address The contract address
+   */
+  readonly endCampaign = async (address: string) => {
+    if (!address) {
+      throw new Error("No contract address provided");
+    }
+
+    if (this.transactionClient === undefined) {
+      throw new Error("No account logged in");
+    }
+
+    // Create the RPC for ending campaign with EXACT same format as average-salary example
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      _out.writeU8(0x09);  // This is a format indicator used in average-salary
+      _out.writeBytes(Buffer.from("01", "hex"));  // The action shortname (0x01)
+    });
+
+    try {
+      console.log("Ending campaign with properly serialized RPC:", Buffer.from(rpc).toString('hex'));
+      
+      // Send the transaction with proper format
+      return this.transactionClient.signAndSend({ 
+        address, 
+        rpc 
+      }, 100_000);
+    } catch (error) {
+      console.error("Error ending campaign:", error);
+      throw error;
+    }
+  };
+
+  /**
+   * Build and send withdraw funds transaction.
+   * Only works if campaign was successful (target reached)
+   * @param address The contract address
    */
   readonly withdrawFunds = async (address: string) => {
-    if (!this.transactionClient) {
+    if (!address) {
+      throw new Error("No contract address provided");
+    }
+    
+    if (this.transactionClient === undefined) {
       throw new Error("No account logged in");
     }
     
-    // Similar change here - use simple Buffer
-    const rpc = Buffer.from([0x02]);
+    // Using same format as endCampaign with different shortname
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      _out.writeU8(0x09);
+      _out.writeBytes(Buffer.from("02", "hex"));
+    });
     
     return this.transactionClient.signAndSend({ address, rpc }, 20_000);
   };
