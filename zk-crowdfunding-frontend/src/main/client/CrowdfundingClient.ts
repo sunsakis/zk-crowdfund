@@ -1,4 +1,3 @@
-// src/CrowdfundingClient.ts
 import { 
   BlockchainAddress, 
   AbiByteInput
