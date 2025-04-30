@@ -273,17 +273,6 @@ const ZKCrowdfundingApp = () => {
           )}
         </div>
       )}
-      
-      {/* Privacy Information */}
-      <div className="mt-8 p-4 bg-gray-50 rounded text-sm">
-        <h3 className="font-semibold mb-2">🔒 Privacy Features</h3>
-        <ul className="space-y-2">
-          <li>• Individual contribution amounts remain private</li>
-          <li>• Total raised amount is only revealed after the campaign ends</li>
-          <li>• Zero-knowledge proofs ensure correct computation without revealing data</li>
-          <li>• All calculations are verified by the Partisia Blockchain network</li>
-        </ul>
-      </div>
     </div>
   );
 

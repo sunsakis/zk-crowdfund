@@ -5,343 +5,174 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script src="/public/config.js"></script>
-    <style>
-      .hidden {
-        display: none;
-      }
-
-      body > .pure-g {
-        max-width: 1200px;
-        width: 1200px;
-        margin: auto;
-      }
-
-      div {
-        margin-bottom: 5px;
-      }
-
-      .loader {
-        border: 4px solid #f3f3f3;
-        border-top: 4px solid #3498db;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        animation: spin 2s linear infinite;
-      }
-
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-
-      .badge {
-        display: inline-block;
-        padding: 3px 6px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: bold;
-        color: white;
-      }
-
-      .badge-setup { background-color: #6c757d; }
-      .badge-active { background-color: #28a745; }
-      .badge-computing { background-color: #ffc107; color: #212529; }
-      .badge-completed { background-color: #007bff; }
-
-      .result-indicator { font-weight: bold; }
-      .result-success { color: #28a745; }
-      .result-failure { color: #dc3545; }
-
-      .info-panel {
-        background-color: #f8f9fa;
-        border-left: 4px solid #17a2b8;
-        padding: 10px;
-        margin-top: 10px;
-      }
-
-      .status-panel {
-        background-color: #e9ecef;
-        border-radius: 5px;
-        padding: 15px;
-        margin-bottom: 15px;
-      }
-
-      .message-section {
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 15px;
-      }
-
-      .message-section.success {
-        background-color: rgba(40, 167, 69, 0.1);
-        border-left: 4px solid #28a745;
-        color: #155724;
-      }
-
-      .message-section.error {
-        background-color: rgba(220, 53, 69, 0.1);
-        border-left: 4px solid #dc3545;
-        color: #721c24;
-      }
-
-      .message-section.info {
-        background-color: rgba(0, 123, 255, 0.1);
-        border-left: 4px solid #007bff;
-        color: #004085;
-      }
-
-      .form-group {
-        margin-bottom: 15px;
-      }
-
-      .form-group label {
-        display: block;
-        margin-bottom: 5px;
-        font-weight: bold;
-      }
-
-      .form-group input[type="text"],
-      .form-group input[type="number"],
-      .form-group input[type="datetime-local"],
-      .form-group textarea {
-        width: 100%;
-        padding: 8px;
-        margin-bottom: 10px;
-        box-sizing: border-box;
-      }
-
-      .separate-section {
-        border: 1px solid #ddd;
-        padding: 20px;
-        margin: 20px 0;
-        border-radius: 5px;
-        background-color: #f8f9fa;
-      }
-
-      .section-title {
-        border-bottom: 1px solid #ddd;
-        padding-bottom: 10px;
-        margin-bottom: 20px;
-      }
-
-      .deployment-steps {
-        background-color: #e8f4f8;
-        border: 1px solid #bee5eb;
-        border-radius: 5px;
-        padding: 15px;
-        margin: 20px 0;
-      }
-
-      .step-list {
-        list-style-type: none;
-        padding-left: 0;
-      }
-
-      .step-list li {
-        background-color: white;
-        margin: 10px 0;
-        padding: 15px;
-        border-radius: 5px;
-        border-left: 4px solid #007bff;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      }
-
-      .step-list li.completed {
-        border-left-color: #28a745;
-        background-color: #f8fff8;
-      }
-
-      .step-number {
-        font-weight: bold;
-        color: #007bff;
-        margin-right: 10px;
-      }
-
-      .deployment-command {
-        background-color: #f8f9fa;
-        border: 1px solid #ddd;
-        padding: 10px;
-        margin: 10px 0;
-        font-family: monospace;
-        white-space: pre-wrap;
-        word-break: break-all;
-      }
-
-      .campaign-item {
-        border: 1px solid #ddd;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 5px;
-        cursor: pointer;
-        transition: background-color 0.2s;
-      }
-
-      .campaign-item:hover {
-        background-color: #f0f0f0;
-      }
-
-      .button-group {
-        display: flex;
-        gap: 10px;
-        margin-top: 10px;
-      }
-    </style>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/purecss@3.0.0/build/pure-min.css"
-      integrity="sha384-X38yfunGUhNzHpBaEBsWLO+A0HDYOQi8ufWDkZ0k9e0eXz/tH3II7uKZ9msv++Ls"
-      crossorigin="anonymous" />
+    <link rel="stylesheet" href="App.css">
   </head>
 
   <body>
-    <div class="pure-g">
-      <div class="pure-u-1-1">
+    <div class="App">
+      <header class="App-header">
         <h1>ZK Crowdfunding Platform</h1>
-        <p>Privacy-preserving crowdfunding with threshold-based reveal using MPC on Partisia Blockchain</p>
+        <p>Privacy-preserving crowdfunding with threshold-based reveal using zero-knowledge proofs on Partisia Blockchain</p>
+      </header>
 
-        <div>
-          <h2>Account</h2>
-          <div id="connection-status">
-            <p>Currently not logged in.</p>
-          </div>
+      <!-- Address & Login Card -->
+      <div class="card">
+        <h2 class="card-title">Connect Your Wallet</h2>
 
-          <div id="private-key-connect">
-            <form onSubmit="return false;" class="pure-form">
-              <input
-                class="pure-button pure-button-primary"
-                id="private-key-connect-btn"
-                type="submit"
-                value="Login using private key" />
-              <input id="private-key-value" name="private-key-value" type="password" placeholder="Enter private key" />
-            </form>
-          </div>
-
-          <div id="wallet-disconnect" class="hidden">
-            <form>
-              <input
-                class="pure-button pure-button-primary"
-                id="wallet-disconnect-btn"
-                type="button"
-                value="Logout" />
-            </form>
-          </div>
+        <!-- Connection Status -->
+        <div id="connection-status" class="mb-4">
+          <p>Currently not logged in.</p>
         </div>
 
-        <!-- View Individual Campaign Section -->
-        <div class="separate-section">
-          <h2 class="section-title">View Individual Campaign</h2>
-          <p>Enter the address of a specific crowdfunding campaign to view details and interact with it</p>
-          
-          <h3 id="current-address">Campaign Contract Address: None</h3>
-          <div id="address">
-            <form onSubmit="return false;" class="pure-form">
-              <input id="address-value" name="address-value" type="text" placeholder="Enter campaign contract address" />
-              <input
-                id="address-btn"
-                type="submit"
-                value="View Campaign"
-                class="pure-button pure-button-primary" />
-            </form>
-          </div>
-          <br />
-          <div id="browser-link"></div>
+        <!-- Private Key Login -->
+        <div id="private-key-connect">
+          <form onSubmit="return false;" class="d-flex flex-column">
+            <div class="input-group">
+              <label for="private-key-value">Private Key</label>
+              <div class="d-flex gap-2">
+                <input id="private-key-value" name="private-key-value" type="password" placeholder="Enter your private key" />
+                <button id="private-key-connect-btn" type="submit" class="btn btn-primary">
+                  Connect
+                </button>
+              </div>
+              <small class="mt-2" style="color: var(--muted-text);">Never share your private key. For testnet use only.</small>
+            </div>
+          </form>
         </div>
 
-        <div id="contract-interaction" class="hidden">
-          <!-- Start Campaign Section -->
-          <div id="start-campaign-section" class="hidden">
-            <h2>Start Campaign</h2>
-            <p>Transition the campaign from Setup state to Active state to allow contributions.</p>
-            <form>
-              <input
-                class="pure-button pure-button-primary"
-                id="start-campaign-btn"
-                type="button"
-                value="Start Campaign" />
-            </form>
-            <div id="start-campaign-transaction-link"></div>
-          </div>
-
-          <!-- Add Contribution Section -->
-          <div id="add-contribution-section" class="hidden">
-            <h2>Add Contribution</h2>
-            <p>Submit a private contribution to the crowdfunding campaign.</p>
-            <form class="pure-form" name="add-contribution-form" onSubmit="return false;">
-              <input id="contribution" name="contribution" type="number" placeholder="Enter amount" />
-              <input
-                class="pure-button pure-button-primary"
-                id="add-contribution-btn"
-                type="submit"
-                value="Add Contribution" />
-            </form>
-            <div id="add-contribution-transaction-link"></div>
-          </div>
-
-          <!-- End Campaign Section -->
-          <div id="end-campaign-section" class="hidden">
-            <h2>End Campaign</h2>
-            <p>End the campaign and start the computation to tally all contributions.</p>
-            <form>
-              <input
-                class="pure-button pure-button-primary"
-                id="end-campaign-btn"
-                type="button"
-                value="End Campaign" />
-            </form>
-            <div id="end-campaign-transaction-link"></div>
-          </div>
-
-          <!-- Withdraw Funds Section -->
-          <div id="withdraw-funds-section" class="hidden">
-            <h2>Withdraw Funds</h2>
-            <p>Withdraw funds if the campaign was successful (reached funding target).</p>
-            <form>
-              <input
-                class="pure-button pure-button-primary"
-                id="withdraw-funds-btn"
-                type="button"
-                value="Withdraw Funds" />
-            </form>
-            <div id="withdraw-funds-transaction-link"></div>
+        <!-- Wallet Disconnect (Hidden by default) -->
+        <div id="wallet-disconnect" class="hidden">
+          <div class="wallet-card">
+            <div class="wallet-info">
+              <strong>Connected Wallet</strong>
+              <span class="wallet-address" id="wallet-address-display">0x123...789</span>
+            </div>
+            <button id="wallet-disconnect-btn" class="btn btn-secondary">Disconnect</button>
           </div>
         </div>
+      </div>
 
-        <div id="contract-state" class="hidden">
-          <h2 id="state-header">Crowdfunding Project State</h2>
-          <div id="update-state">
-            <form>
-              <input
-                class="pure-button pure-button-primary"
-                id="update-state-btn"
-                type="button"
-                value="Refresh State" />
-              <input id="refresh-loader" class="loader hidden" />
-            </form>
-          </div>
-
-          <div class="status-panel">
-            <h3>Project Details</h3>
-            <div id="title-value"></div>
-            <div id="description-value"></div>
-            <div id="status-value"></div>
-            <div id="funding-target-value"></div>
-          </div>
-
-          <div class="status-panel">
-            <h3>Campaign Progress</h3>
-            <div id="num-contributors"></div>
-            <div id="total-raised"></div>
-            <div id="campaign-result"></div>
-          </div>
-
-          <div class="status-panel">
-            <h3>Project Owner</h3>
-            <div id="owner-value"></div>
-          </div>
+      <!-- Campaign Address Card -->
+      <div class="card">
+        <h2 class="card-title">View Campaign</h2>
+        <p id="current-address" class="mb-4">Enter a campaign contract address to view details and interact with it</p>
         
-        <!-- Container for dynamic messages -->
-        <div id="messages-container"></div>
+        <form onSubmit="return false;">
+          <div class="input-group">
+            <label for="address-value">Campaign Contract Address</label>
+            <div class="d-flex gap-2">
+              <input id="address-value" name="address-value" type="text" placeholder="Enter 0x... address" />
+              <button id="address-btn" type="submit" class="btn btn-primary">Load</button>
+            </div>
+          </div>
+        </form>
+        
+        <div id="browser-link" class="mt-4"></div>
+      </div>
+
+      <!-- Campaign State Card (Hidden by default) -->
+      <div id="contract-state" class="card hidden">
+        <div class="d-flex justify-between align-center mb-4">
+          <h2 class="card-title" id="state-header">Campaign Details</h2>
+          <div id="update-state">
+            <button id="update-state-btn" class="btn btn-secondary">
+              <span>Refresh</span>
+              <span id="refresh-loader" class="spinner hidden"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Project Details -->
+        <div class="project-details">
+          <div id="title-value"></div>
+          <div id="description-value" class="mb-4"></div>
+          
+          <div class="detail-item">
+            <span class="detail-label">Status</span>
+            <span id="status-value" class="detail-value"></span>
+          </div>
+          
+          <div class="detail-item">
+            <span class="detail-label">Funding Target</span>
+            <span id="funding-target-value" class="detail-value"></span>
+          </div>
+          
+          <div class="detail-item">
+            <span class="detail-label">Owner</span>
+            <span id="owner-value" class="detail-value"></span>
+          </div>
+          
+          <div class="detail-item">
+            <span class="detail-label">Contributors</span>
+            <span id="num-contributors" class="detail-value"></span>
+          </div>
+          
+          <div class="detail-item">
+            <span class="detail-label">Total Raised</span>
+            <span id="total-raised" class="detail-value"></span>
+          </div>
+        </div>
+
+        <!-- Campaign Result (shown when completed) -->
+        <div id="campaign-result-container" class="hidden">
+          <div class="result-box" id="result-box">
+            <div class="result-label">Campaign Result</div>
+            <div class="result-value" id="campaign-result">Successful</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interaction Section (Hidden by default) -->
+      <div id="contract-interaction" class="hidden">
+        <!-- Add Contribution Section -->
+        <div id="add-contribution-section" class="card hidden">
+          <h2 class="card-title">Make a Contribution</h2>
+          <p class="action-description">Your contribution amount will remain private until the campaign ends.</p>
+          
+          <form class="d-flex flex-column" name="add-contribution-form" onSubmit="return false;">
+            <div class="input-group">
+              <label for="contribution">Contribution Amount</label>
+              <div class="d-flex gap-2">
+                <input id="contribution" name="contribution" type="number" min="1" placeholder="Enter amount" />
+                <button id="add-contribution-btn" type="submit" class="btn btn-primary">Contribute</button>
+              </div>
+            </div>
+          </form>
+          
+          <div id="add-contribution-transaction-link" class="transaction-info hidden">
+            <span class="transaction-hash" id="contribution-tx-hash"></span>
+            <a href="#" class="transaction-link" id="contribution-tx-link" target="_blank">View in Explorer</a>
+          </div>
+        </div>
+
+        <!-- End Campaign Section -->
+        <div id="end-campaign-section" class="card hidden">
+          <h2 class="card-title">End Campaign & Calculate Results</h2>
+          <p class="action-description">This will end the campaign and start the zero-knowledge computation to reveal the total raised amount.</p>
+          
+          <button id="end-campaign-btn" class="btn btn-primary btn-full">End Campaign</button>
+          
+          <div id="end-campaign-transaction-link" class="transaction-info hidden">
+            <span class="transaction-hash" id="end-campaign-tx-hash"></span>
+            <a href="#" class="transaction-link" id="end-campaign-tx-link" target="_blank">View in Explorer</a>
+          </div>
+        </div>
+
+        <!-- Withdraw Funds Section -->
+        <div id="withdraw-funds-section" class="card hidden">
+          <h2 class="card-title">Withdraw Funds</h2>
+          <p class="action-description">As the campaign owner, you can now withdraw the raised funds since the target was reached.</p>
+          
+          <button id="withdraw-funds-btn" class="btn btn-success btn-full">Withdraw Funds</button>
+          
+          <div id="withdraw-funds-transaction-link" class="transaction-info hidden">
+            <span class="transaction-hash" id="withdraw-funds-tx-hash"></span>
+            <a href="#" class="transaction-link" id="withdraw-funds-tx-link" target="_blank">View in Explorer</a>
+          </div>
+        </div>
       </div>
     </div>
+
+    <script src="./Main.ts"></script>
   </body>
 </html>
