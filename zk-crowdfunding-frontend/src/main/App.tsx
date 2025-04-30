@@ -1,454 +1,778 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Buffer } from 'buffer';
+import { CrowdfundingClient, CampaignStatus } from './client/CrowdfundingClient';
 
 const ZKCrowdfunding = () => {
   // State
   const [privateKey, setPrivateKey] = useState('');
-  const [walletConnected, setWalletConnected] = useState(false);
+  const [connected, setConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
-  const [view, setView] = useState('connect'); // connect, create, view
-  const [campaignAddress, setCampaignAddress] = useState('');
-  const [contributionAmount, setContributionAmount] = useState('');
-  const [message, setMessage] = useState({ text: '', type: '' });
   const [loading, setLoading] = useState(false);
+  const [contractAddress, setContractAddress] = useState('');
+  const [message, setMessage] = useState({ text: '', type: '' });
+  const [contributionAmount, setContributionAmount] = useState('');
   const [campaign, setCampaign] = useState(null);
+  const [view, setView] = useState('connect');
+  const [txHash, setTxHash] = useState('');
   
-  // Campaign creation form
-  const [newCampaign, setNewCampaign] = useState({
-    title: '',
-    description: '',
-    target: '',
-    deadline: ''
-  });
+  // Create a ref for the client to persist between renders
+  const clientRef = useRef(new CrowdfundingClient());
   
-  // Show message notification
-  const showMessage = (text, type = 'info') => {
-    setMessage({ text, type });
-    setTimeout(() => setMessage({ text: '', type: '' }), 5000);
-  };
-  
-  // Connect wallet with private key
-  const connectWallet = () => {
-    if (!privateKey) {
-      showMessage('Please enter a private key', 'error');
+  // Connect wallet using private key
+  const connectWallet = async () => {
+    if (!privateKey.trim()) {
+      showMessage('Please enter your private key', 'error');
       return;
     }
     
     setLoading(true);
     
-    // In a real app, this would use the Partisia SDK
-    setTimeout(() => {
-      const truncatedAddress = `0x${privateKey.slice(0, 6)}...${privateKey.slice(-4)}`;
-      setWalletAddress(truncatedAddress);
-      setWalletConnected(true);
-      setView('create');
+    try {
+      // Connect wallet using our client
+      const address = await clientRef.current.connectWallet(privateKey);
+      
+      setWalletAddress(address);
+      setConnected(true);
+      setView('campaign');
+      showMessage(`Connected successfully as ${address.substring(0, 6)}...${address.substring(address.length - 4)}`, 'success');
+    } catch (error) {
+      showMessage(`Connection failed: ${error.message}`, 'error');
+    } finally {
       setLoading(false);
-      showMessage('Wallet connected successfully', 'success');
-    }, 1000);
-  };
-  
-  // Disconnect wallet
-  const disconnectWallet = () => {
-    setWalletConnected(false);
-    setWalletAddress('');
-    setPrivateKey('');
-    setView('connect');
-  };
-  
-  // Create new campaign
-  const createCampaign = () => {
-    if (!walletConnected) {
-      showMessage('Please connect your wallet first', 'error');
-      return;
     }
-    
-    if (!newCampaign.title || !newCampaign.description || !newCampaign.target) {
-      showMessage('Please fill all required fields', 'error');
-      return;
-    }
-    
-    setLoading(true);
-    
-    // In a real app, this would deploy a contract on Partisia
-    setTimeout(() => {
-      const campaignAddr = `0x${Math.random().toString(16).slice(2, 10)}...${Math.random().toString(16).slice(2, 6)}`;
-      setCampaignAddress(campaignAddr);
-      setCampaign({
-        address: campaignAddr,
-        title: newCampaign.title,
-        description: newCampaign.description,
-        owner: walletAddress,
-        target: parseInt(newCampaign.target),
-        deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        status: 'Active',
-        totalRaised: null,
-        contributors: 0,
-        isSuccessful: false
-      });
-      setView('view');
-      setLoading(false);
-      showMessage('Campaign created successfully!', 'success');
-    }, 1500);
   };
   
-  // Load existing campaign
-  const loadCampaign = () => {
-    if (!campaignAddress) {
+  // Load campaign data
+  const loadCampaign = async () => {
+    if (!contractAddress.trim()) {
       showMessage('Please enter a campaign address', 'error');
       return;
     }
     
+    // Validate contract address format
+    const regex = /^[0-9a-fA-F]{42}$/;
+    if (!regex.test(contractAddress)) {
+      showMessage('Invalid contract address format', 'error');
+      return;
+    }
+    
     setLoading(true);
     
-    // In a real app, this would query the contract
-    setTimeout(() => {
-      setCampaign({
-        address: campaignAddress,
-        title: 'Community Garden Project',
-        description: 'Help us build a sustainable community garden in the downtown area with eco-friendly materials and educational programs.',
-        owner: '0x7a3b...c45d',
-        target: 5000,
-        deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        status: 'Active',
-        totalRaised: null,
-        contributors: 8,
-        isSuccessful: false
-      });
-      setView('view');
+    try {
+      // Fetch campaign data from the blockchain using our client
+      const campaignData = await clientRef.current.getCampaignData(contractAddress);
+      
+      setCampaign(campaignData);
+      setView('campaign-details');
+      
+      // Add browser link
+      const browserLink = document.querySelector("#browser-link");
+      if (browserLink) {
+        const url = clientRef.current.getContractUrl(contractAddress);
+        browserLink.innerHTML = `<a href="${url}" target="_blank">View on blockchain explorer</a>`;
+      }
+      
+      showMessage('Campaign loaded successfully', 'success');
+    } catch (error) {
+      showMessage(`Error loading campaign: ${error.message}`, 'error');
+    } finally {
       setLoading(false);
-      showMessage('Campaign loaded successfully!', 'success');
-    }, 1000);
+    }
   };
   
-  // Make a contribution
-  const makeContribution = () => {
-    if (!walletConnected) {
+  // Contribute to campaign
+  const addContribution = async () => {
+    if (!connected) {
       showMessage('Please connect your wallet first', 'error');
       return;
     }
     
-    if (!contributionAmount || isNaN(parseInt(contributionAmount)) || parseInt(contributionAmount) <= 0) {
+    if (!contributionAmount || isNaN(Number(contributionAmount)) || Number(contributionAmount) <= 0) {
       showMessage('Please enter a valid contribution amount', 'error');
       return;
     }
     
     setLoading(true);
     
-    // In a real app, this would call the contract's ZK function
-    setTimeout(() => {
-      setCampaign({
-        ...campaign,
-        contributors: campaign.contributors + 1
-      });
+    try {
+      // Call the client to submit our ZK contribution
+      const amount = parseInt(contributionAmount);
+      const txId = await clientRef.current.addContribution(amount);
+      
+      // Set transaction hash for displaying a link
+      setTxHash(txId);
+      
+      // Display success message with link to transaction
+      const txUrl = clientRef.current.getTransactionUrl(txId);
+      
+      showMessage(
+        `Contribution of ${contributionAmount} submitted as a zero-knowledge input. ` + 
+        `<a href="${txUrl}" target="_blank">View transaction</a>`, 
+        'success'
+      );
+      
       setContributionAmount('');
+      
+      // Update local state to reflect the new contribution
+      setCampaign(prev => ({
+        ...prev,
+        numContributors: (prev.numContributors || 0) + 1
+      }));
+    } catch (error) {
+      showMessage(`Error submitting contribution: ${error.message}`, 'error');
+    } finally {
       setLoading(false);
-      showMessage(`Contribution of ${contributionAmount} submitted! Your contribution amount is private.`, 'success');
-    }, 1500);
+    }
   };
   
   // End campaign and compute results
-  const endCampaign = () => {
+  const endCampaign = async () => {
+    if (!connected) {
+      showMessage('Please connect your wallet first', 'error');
+      return;
+    }
+    
     setLoading(true);
     
-    // In a real app, this would trigger the ZK computation
-    setTimeout(() => {
-      setCampaign({
-        ...campaign,
-        status: 'Completed',
-        totalRaised: 6250,
-        isSuccessful: true
-      });
+    try {
+      // Call the client to end the campaign
+      const txId = await clientRef.current.endCampaign(contractAddress);
+      
+      // Set transaction hash for displaying a link
+      setTxHash(txId);
+      
+      // Display success message with link to transaction
+      const txUrl = clientRef.current.getTransactionUrl(txId);
+      
+      // Update campaign status to computing
+      setCampaign(prev => ({
+        ...prev,
+        status: CampaignStatus.COMPUTING
+      }));
+      
+      showMessage(
+        `Campaign end initiated. Computing results... ` +
+        `<a href="${txUrl}" target="_blank">View transaction</a>`,
+        'success'
+      );
+      
+      // Schedule a state refresh after a delay to show updated status
+      setTimeout(() => {
+        loadCampaign();
+      }, 10000);
+    } catch (error) {
+      showMessage(`Error ending campaign: ${error.message}`, 'error');
+    } finally {
       setLoading(false);
-      showMessage('Campaign ended and total funds revealed!', 'success');
-    }, 2000);
+    }
   };
   
   // Withdraw funds
-  const withdrawFunds = () => {
+  const withdrawFunds = async () => {
+    if (!connected) {
+      showMessage('Please connect your wallet first', 'error');
+      return;
+    }
+    
+    if (!campaign || !campaign.isSuccessful) {
+      showMessage('Can only withdraw funds from successful campaigns', 'error');
+      return;
+    }
+    
     setLoading(true);
     
-    // In a real app, this would call the contract
-    setTimeout(() => {
+    try {
+      // Call the client to withdraw funds
+      const txId = await clientRef.current.withdrawFunds(contractAddress);
+      
+      // Set transaction hash for displaying a link
+      setTxHash(txId);
+      
+      // Display success message with link to transaction
+      const txUrl = clientRef.current.getTransactionUrl(txId);
+      
+      showMessage(
+        `Funds withdrawal initiated. ` +
+        `<a href="${txUrl}" target="_blank">View transaction</a>`,
+        'success'
+      );
+    } catch (error) {
+      showMessage(`Error withdrawing funds: ${error.message}`, 'error');
+    } finally {
       setLoading(false);
-      showMessage('Funds withdrawn successfully!', 'success');
-    }, 1500);
+    }
   };
   
-  return (
-    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 min-h-screen flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="p-8">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold text-gray-800">🔒 ZK Crowdfunding</h1>
-            {walletConnected && (
-              <div className="bg-black text-white text-xs px-3 py-1 rounded-full">
-                {walletAddress}
-              </div>
-            )}
-          </div>
-          
-          {/* Messages */}
-          {message.text && (
-            <div className={`mb-4 p-3 rounded-md text-sm ${
-              message.type === 'success' ? 'bg-green-50 text-green-700 border-l-4 border-green-500' : 
-              message.type === 'error' ? 'bg-red-50 text-red-700 border-l-4 border-red-500' : 
-              'bg-blue-50 text-blue-700 border-l-4 border-blue-500'
-            }`}>
-              {message.text}
-            </div>
-          )}
-          
-          {/* Wallet Connection View */}
-          {view === 'connect' && (
-            <div>
-              <p className="text-gray-600 mb-4">Connect your wallet to create or contribute to privacy-preserving crowdfunding campaigns.</p>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Private Key
-                </label>
-                <input
-                  type="password"
-                  className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                  placeholder="Enter your private key"
-                  value={privateKey}
-                  onChange={(e) => setPrivateKey(e.target.value)}
-                  disabled={loading}
-                />
-                <p className="mt-1 text-xs text-gray-500">For demo only. Never share your actual private key.</p>
-              </div>
-              
-              <button
-                className="w-full bg-indigo-600 text-white py-2 px-4 rounded-md font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                onClick={connectWallet}
-                disabled={loading || !privateKey}
-              >
-                {loading ? 'Connecting...' : 'Connect Wallet'}
-              </button>
-            </div>
-          )}
-          
-          {/* Create Campaign View */}
-          {view === 'create' && (
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-gray-800">Create Campaign</h2>
-                <button 
-                  className="text-sm text-gray-500 hover:text-gray-700"
-                  onClick={disconnectWallet}
-                >
-                  Disconnect
-                </button>
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Title
-                </label>
-                <input
-                  type="text"
-                  className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                  placeholder="Campaign title"
-                  value={newCampaign.title}
-                  onChange={(e) => setNewCampaign({...newCampaign, title: e.target.value})}
-                  disabled={loading}
-                />
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
-                </label>
-                <textarea
-                  className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                  placeholder="Describe your campaign"
-                  rows={3}
-                  value={newCampaign.description}
-                  onChange={(e) => setNewCampaign({...newCampaign, description: e.target.value})}
-                  disabled={loading}
-                ></textarea>
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Funding Target
-                </label>
-                <input
-                  type="number"
-                  className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                  placeholder="Amount to raise"
-                  value={newCampaign.target}
-                  onChange={(e) => setNewCampaign({...newCampaign, target: e.target.value})}
-                  disabled={loading}
-                />
-              </div>
-              
-              <div className="flex space-x-2">
-                <button
-                  className="flex-1 bg-indigo-600 text-white py-2 px-4 rounded-md font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                  onClick={createCampaign}
-                  disabled={loading || !newCampaign.title || !newCampaign.description || !newCampaign.target}
-                >
-                  {loading ? 'Creating...' : 'Create Campaign'}
-                </button>
-                
-                <button
-                  className="flex-1 bg-gray-100 text-gray-700 py-2 px-4 rounded-md font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
-                  onClick={() => setView('load')}
-                  disabled={loading}
-                >
-                  Load Existing
-                </button>
-              </div>
-            </div>
-          )}
-          
-          {/* Load Campaign View */}
-          {view === 'load' && (
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-gray-800">Load Campaign</h2>
-                <button 
-                  className="text-sm text-gray-500 hover:text-gray-700"
-                  onClick={() => setView('create')}
-                >
-                  Back
-                </button>
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Campaign Address
-                </label>
-                <input
-                  type="text"
-                  className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                  placeholder="Enter campaign address"
-                  value={campaignAddress}
-                  onChange={(e) => setCampaignAddress(e.target.value)}
-                  disabled={loading}
-                />
-              </div>
-              
-              <button
-                className="w-full bg-indigo-600 text-white py-2 px-4 rounded-md font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                onClick={loadCampaign}
-                disabled={loading || !campaignAddress}
-              >
-                {loading ? 'Loading...' : 'Load Campaign'}
-              </button>
-            </div>
-          )}
-          
-          {/* View Campaign */}
-          {view === 'view' && campaign && (
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-gray-800">Campaign Details</h2>
-                <button 
-                  className="text-sm text-gray-500 hover:text-gray-700"
-                  onClick={() => setView('create')}
-                >
-                  Back
-                </button>
-              </div>
-              
-              <div className="bg-gray-50 rounded-md p-4 mb-4">
-                <h3 className="text-xl font-medium text-gray-800 mb-1">{campaign.title}</h3>
-                <p className="text-sm text-gray-500 mb-3">by {campaign.owner}</p>
-                <p className="text-gray-700 mb-4">{campaign.description}</p>
-                
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <p className="text-xs text-gray-500">Status</p>
-                    <p className={`font-medium ${campaign.status === 'Active' ? 'text-green-600' : 'text-blue-600'}`}>
-                      {campaign.status}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Target</p>
-                    <p className="font-medium text-gray-800">{campaign.target}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Deadline</p>
-                    <p className="font-medium text-gray-800">{campaign.deadline}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Contributors</p>
-                    <p className="font-medium text-gray-800">{campaign.contributors}</p>
-                  </div>
-                </div>
-                
-                {campaign.status === 'Completed' && (
-                  <div className={`mt-3 p-2 rounded-md text-sm ${campaign.isSuccessful ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                    {campaign.isSuccessful 
-                      ? `Campaign Successful! Raised ${campaign.totalRaised} of ${campaign.target} target.` 
-                      : `Campaign Unsuccessful. Only raised ${campaign.totalRaised} of ${campaign.target} needed.`}
-                  </div>
-                )}
-              </div>
-              
-              {/* Campaign actions */}
-              <div className="space-y-4">
-                {campaign.status === 'Active' && (
-                  <div className="bg-indigo-50 rounded-md p-4">
-                    <h4 className="font-medium text-indigo-800 mb-2">Make a Contribution</h4>
-                    <div className="flex space-x-2">
-                      <input
-                        type="number"
-                        className="flex-1 p-2 border border-gray-300 rounded-md text-sm"
-                        placeholder="Enter amount"
-                        value={contributionAmount}
-                        onChange={(e) => setContributionAmount(e.target.value)}
-                        disabled={loading}
-                      />
-                      <button
-                        className="bg-indigo-600 text-white py-2 px-4 rounded-md text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                        onClick={makeContribution}
-                        disabled={loading || !contributionAmount}
-                      >
-                        {loading ? '...' : 'Contribute'}
-                      </button>
-                    </div>
-                    <p className="mt-2 text-xs text-indigo-700">Your contribution amount will remain private until the campaign ends.</p>
-                  </div>
-                )}
-                
-                {campaign.status === 'Active' && campaign.owner === walletAddress && (
-                  <button
-                    className="w-full bg-yellow-500 text-white py-2 px-4 rounded-md font-medium hover:bg-yellow-600 transition-colors disabled:opacity-50"
-                    onClick={endCampaign}
-                    disabled={loading}
-                  >
-                    {loading ? 'Processing...' : 'End Campaign & Compute Results'}
-                  </button>
-                )}
-                
-                {campaign.status === 'Completed' && campaign.isSuccessful && campaign.owner === walletAddress && (
-                  <button
-                    className="w-full bg-green-600 text-white py-2 px-4 rounded-md font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
-                    onClick={withdrawFunds}
-                    disabled={loading}
-                  >
-                    {loading ? 'Processing...' : 'Withdraw Funds'}
-                  </button>
-                )}
-              </div>
-              
-              {/* Privacy information */}
-              <div className="mt-6 text-xs text-gray-500 bg-gray-50 p-3 rounded-md">
-                <p className="font-medium text-gray-700 mb-1">🔒 Privacy Features</p>
-                <ul className="space-y-1">
-                  <li>• Individual contribution amounts remain private</li>
-                  <li>• Total raised amount is only revealed after campaign ends</li>
-                  <li>• Powered by Partisia Blockchain's secure MPC technology</li>
-                </ul>
-              </div>
-            </div>
-          )}
+  // Display message with timeout
+  const showMessage = (text, type = 'info') => {
+    setMessage({ text, type });
+    
+    // Clear message after 5 seconds
+    setTimeout(() => {
+      setMessage({ text: '', type: '' });
+    }, 5000);
+  };
+  
+  // Disconnect wallet
+  const disconnectWallet = () => {
+    // Disconnect the client
+    clientRef.current.disconnect();
+    
+    // Reset state
+    setConnected(false);
+    setWalletAddress('');
+    setPrivateKey('');
+    setCampaign(null);
+    setView('connect');
+    showMessage('Wallet disconnected', 'info');
+  };
+  
+  // Auto-load campaign data if contractAddress is in URL or localStorage
+  useEffect(() => {
+    const savedAddress = localStorage.getItem('zk-crowdfunding-address');
+    if (savedAddress) {
+      setContractAddress(savedAddress);
+    }
+    
+    // Check URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const addressParam = urlParams.get('address');
+    if (addressParam) {
+      setContractAddress(addressParam);
+    }
+    
+    // If we have a contract address and wallet connected, load the campaign
+    if (contractAddress && connected) {
+      loadCampaign();
+    }
+  }, [connected]);
+  
+  // Render the wallet connection view
+  const renderConnectView = () => (
+    <div className="wallet-connect-container">
+      <h2>Connect Your Wallet</h2>
+      <p className="subtitle">Connect with your Partisia wallet to interact with ZK crowdfunding campaigns</p>
+      
+      <div className="input-group">
+        <input
+          type="password"
+          placeholder="Enter your private key"
+          value={privateKey}
+          onChange={(e) => setPrivateKey(e.target.value)}
+          disabled={loading}
+        />
+        <button 
+          onClick={connectWallet}
+          disabled={loading || !privateKey}
+          className="primary-button"
+        >
+          {loading ? "Connecting..." : "Connect Wallet"}
+        </button>
+      </div>
+      <p className="note">For demo purposes only. Never share your actual private key.</p>
+    </div>
+  );
+  
+  // Render campaign view
+  const renderCampaignView = () => (
+    <div className="campaign-view">
+      <div className="address-bar">
+        <span className="wallet-pill">
+          {walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}
+        </span>
+        <button className="text-button" onClick={disconnectWallet}>
+          Disconnect
+        </button>
+      </div>
+      
+      <div className="campaign-container">
+        <h2>View Campaign</h2>
+        <p className="subtitle">Enter a campaign address to view details and contribute</p>
+        
+        <div className="input-group">
+          <input
+            type="text"
+            placeholder="Enter campaign contract address"
+            value={contractAddress}
+            onChange={(e) => setContractAddress(e.target.value)}
+            disabled={loading}
+          />
+          <button 
+            onClick={loadCampaign}
+            disabled={loading || !contractAddress}
+            className="primary-button"
+          >
+            {loading ? "Loading..." : "View Campaign"}
+          </button>
         </div>
       </div>
     </div>
   );
+  
+  // Render campaign details
+  const renderCampaignDetails = () => {
+    if (!campaign) return null;
+    
+    return (
+      <div className="campaign-details">
+        <div className="address-bar">
+          <span className="wallet-pill">
+            {walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}
+          </span>
+          <button className="text-button" onClick={disconnectWallet}>
+            Disconnect
+          </button>
+        </div>
+        
+        <div className="back-link">
+          <button className="text-button" onClick={() => setView('campaign')}>
+            ← Back to search
+          </button>
+        </div>
+        
+        <div className="campaign-card">
+          <h2>{campaign.title}</h2>
+          <p className="campaign-description">{campaign.description}</p>
+          
+          <div className="campaign-meta">
+            <div className="meta-item">
+              <span className="meta-label">Status</span>
+              <span className={`status-badge status-${campaign.status === CampaignStatus.ACTIVE ? 'active' : campaign.status === CampaignStatus.COMPUTING ? 'computing' : 'completed'}`}>
+                {campaign.status === CampaignStatus.ACTIVE ? "Active" : 
+                 campaign.status === CampaignStatus.COMPUTING ? "Computing" : "Completed"}
+              </span>
+            </div>
+            
+            <div className="meta-item">
+              <span className="meta-label">Target</span>
+              <span className="meta-value">{campaign.fundingTarget}</span>
+            </div>
+            
+            <div className="meta-item">
+              <span className="meta-label">Contributors</span>
+              <span className="meta-value">{campaign.contributors}</span>
+            </div>
+            
+            <div className="meta-item">
+              <span className="meta-label">Total Raised</span>
+              <span className="meta-value">{campaign.totalRaised !== null ? campaign.totalRaised : "Hidden (ZK Protected)"}</span>
+            </div>
+          </div>
+          
+          {campaign.status === CampaignStatus.COMPLETED && (
+            <div className={`result-banner ${campaign.isSuccessful ? 'success' : 'failure'}`}>
+              {campaign.isSuccessful 
+                ? `Campaign Successful! Raised ${campaign.totalRaised} of ${campaign.fundingTarget} target.` 
+                : `Campaign Unsuccessful. Only raised ${campaign.totalRaised} of ${campaign.fundingTarget} needed.`}
+            </div>
+          )}
+          
+          <div className="campaign-actions">
+            {campaign.status === CampaignStatus.ACTIVE && (
+              <div className="contribution-form">
+                <h3>Make a Contribution</h3>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    placeholder="Enter amount"
+                    value={contributionAmount}
+                    onChange={(e) => setContributionAmount(e.target.value)}
+                    disabled={loading}
+                  />
+                  <button 
+                    onClick={addContribution}
+                    disabled={loading || !contributionAmount}
+                    className="primary-button"
+                  >
+                    {loading ? "Processing..." : "Contribute"}
+                  </button>
+                </div>
+                <p className="note privacy-note">Your contribution amount will remain private until the campaign ends.</p>
+              </div>
+            )}
+            
+            {campaign.status === CampaignStatus.ACTIVE && (
+              <button
+                onClick={endCampaign}
+                disabled={loading}
+                className="secondary-button"
+              >
+                {loading ? "Processing..." : "End Campaign & Compute Results"}
+              </button>
+            )}
+            
+            {campaign.status === CampaignStatus.COMPLETED && campaign.isSuccessful && (
+              <button
+                onClick={withdrawFunds}
+                disabled={loading}
+                className="primary-button"
+              >
+                {loading ? "Processing..." : "Withdraw Funds"}
+              </button>
+            )}
+          </div>
+        </div>
+        
+        <div className="privacy-card">
+          <h3>🔒 Zero-Knowledge Privacy</h3>
+          <ul>
+            <li>Individual contribution amounts remain confidential</li>
+            <li>Total is only revealed after campaign completes</li>
+            <li>Powered by Partisia Blockchain MPC technology</li>
+          </ul>
+        </div>
+      </div>
+    );
+  };
+  
+  return (
+    <div className="zk-crowdfunding-app">
+      <div className="app-container">
+        <div className="app-header">
+          <h1>ZK Crowdfunding</h1>
+          <p className="tagline">Privacy-preserving fundraising with zero-knowledge proofs</p>
+        </div>
+        
+        {message.text && (
+          <div 
+            className={`message ${message.type}`}
+            dangerouslySetInnerHTML={{ __html: message.text }}
+          />
+        )}
+        
+        {view === 'connect' && renderConnectView()}
+        {view === 'campaign' && renderCampaignView()}
+        {view === 'campaign-details' && renderCampaignDetails()}
+      </div>
+    </div>
+  );
 };
+
+// Add CSS styles
+const styles = `
+  :root {
+    --primary-color: #5f2eea;
+    --primary-light: #8466ef;
+    --primary-dark: #4921af;
+    --secondary-color: #38d1bd;
+    --dark-text: #161b37;
+    --light-text: #f5f5fa;
+    --background: #f2f2fa;
+    --card-bg: #ffffff;
+    --border-color: #e6e8f0;
+    --success: #38cb89;
+    --warning: #ffab00;
+    --error: #ef4444;
+    --border-radius: 8px;
+    --box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  .zk-crowdfunding-app {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, sans-serif;
+    color: var(--dark-text);
+    background: var(--background);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.5;
+  }
+
+  .app-container {
+    width: 100%;
+    max-width: 500px;
+    background: var(--card-bg);
+    border-radius: 20px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+    padding: 32px;
+  }
+
+  .app-header {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+
+  .app-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px 0;
+  }
+
+  .tagline {
+    color: #6e7191;
+    font-size: 16px;
+    margin: 0;
+    font-weight: 400;
+  }
+
+  .subtitle {
+    color: #6e7191;
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+
+  .wallet-connect-container, .campaign-container {
+    margin-top: 24px;
+  }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-top: 0;
+    margin-bottom: 12px;
+  }
+
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 16px;
+  }
+
+  .input-group input {
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    margin-bottom: 12px;
+    transition: border 0.2s;
+  }
+
+  .input-group input:focus {
+    border-color: var(--primary-color);
+    outline: none;
+  }
+
+  button {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 16px;
+    border: none;
+    border-radius: var(--border-radius);
+    transition: all 0.2s;
+  }
+
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .primary-button {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 12px 20px;
+    width: 100%;
+  }
+
+  .primary-button:hover:not(:disabled) {
+    background-color: var(--primary-dark);
+  }
+
+  .secondary-button {
+    background-color: var(--secondary-color);
+    color: var(--dark-text);
+    padding: 12px 20px;
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  .text-button {
+    background: none;
+    color: var(--primary-color);
+    padding: 4px 8px;
+    font-size: 14px;
+  }
+
+  .text-button:hover {
+    text-decoration: underline;
+  }
+
+  .note {
+    font-size: 12px;
+    color: #6e7191;
+    margin-top: 8px;
+  }
+
+  .privacy-note {
+    color: var(--primary-color);
+    font-style: italic;
+  }
+
+  .message {
+    padding: 12px 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+
+  .message.error {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--error);
+    border-left: 4px solid var(--error);
+  }
+
+  .message.success {
+    background-color: rgba(56, 203, 137, 0.1);
+    color: var(--success);
+    border-left: 4px solid var(--success);
+  }
+
+  .message.info {
+    background-color: rgba(95, 46, 234, 0.1);
+    color: var(--primary-color);
+    border-left: 4px solid var(--primary-color);
+  }
+
+  .address-bar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .wallet-pill {
+    background-color: #1e1e27;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 14px;
+    margin-right: 12px;
+  }
+
+  .back-link {
+    margin-bottom: 16px;
+  }
+
+  .campaign-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .campaign-card h2 {
+    font-size: 22px;
+    margin-bottom: 8px;
+  }
+
+  .campaign-description {
+    color: #6e7191;
+    font-size: 15px;
+    margin-bottom: 16px;
+  }
+
+  .campaign-meta {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .meta-item {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .meta-label {
+    font-size: 12px;
+    color: #6e7191;
+    margin-bottom: 4px;
+  }
+
+  .meta-value {
+    font-weight: 600;
+    font-size: 16px;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .status-active {
+    background-color: var(--success);
+    color: white;
+  }
+
+  .status-computing {
+    background-color: var(--warning);
+    color: var(--dark-text);
+  }
+
+  .status-completed {
+    background-color: #6e7191;
+    color: white;
+  }
+
+  .result-banner {
+    padding: 12px 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 20px;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .result-banner.success {
+    background-color: rgba(56, 203, 137, 0.1);
+    color: var(--success);
+    border: 1px solid var(--success);
+  }
+
+  .result-banner.failure {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--error);
+    border: 1px solid var(--error);
+  }
+
+  .contribution-form {
+    background-color: rgba(95, 46, 234, 0.05);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+  }
+
+  .contribution-form h3 {
+    font-size: 18px;
+    margin-top: 0;
+    margin-bottom: 12px;
+  }
+
+  .campaign-actions {
+    margin-top: 20px;
+  }
+
+  .privacy-card {
+    background-color: #f9f9ff;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 16px;
+  }
+
+  .privacy-card h3 {
+    font-size: 16px;
+    margin-top: 0;
+    margin-bottom: 12px;
+  }
+
+  .privacy-card ul {
+    margin: 0;
+    padding-left: 24px;
+  }
+
+  .privacy-card li {
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+`;
+
+// Apply the styles
+const styleElement = document.createElement('style');
+styleElement.innerText = styles;
+document.head.appendChild(styleElement);
 
 export default ZKCrowdfunding;
