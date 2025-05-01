@@ -1,13 +1,15 @@
+// zk-crowdfunding-frontend/webpack.config.js
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const webpack = require('webpack');
+const Dotenv = require('dotenv-webpack');
 
 module.exports = (env) => {
   const port = env.PORT || 8081;
 
   return {
     mode: "development",
-    devtool: "eval-cheap-module-source-map",
+    devtool: "eval-source-map",
     entry: './src/main/Main.ts',
     output: {
       path: path.resolve(__dirname, 'dist'),
@@ -24,6 +26,7 @@ module.exports = (env) => {
         stream: require.resolve("stream-browserify"),
         buffer: require.resolve("buffer/"),
         assert: require.resolve("assert"),
+        util: require.resolve("util/"),
         vm: false
       }
     },
@@ -33,9 +36,9 @@ module.exports = (env) => {
           test: /\.(ts|tsx)$/,
           include: path.resolve(__dirname, 'src'),
           use: {
-            loader: 'babel-loader',
+            loader: 'ts-loader',
             options: {
-              presets: ['@babel/preset-env', '@babel/preset-typescript']
+              transpileOnly: true, // Faster builds but no type checking
             }
           }
         },
@@ -57,6 +60,9 @@ module.exports = (env) => {
       new webpack.ProvidePlugin({
         Buffer: ['buffer', 'Buffer'],
         process: 'process/browser'
+      }),
+      new Dotenv({
+        systemvars: true // Load all system environment variables as well
       })
     ],
     devServer: {
@@ -66,7 +72,13 @@ module.exports = (env) => {
       },
       port: port,
       hot: true,
-      historyApiFallback: true
+      historyApiFallback: true,
+      // Important - set the correct MIME types
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+        "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization"
+      }
     }
   };
 };
