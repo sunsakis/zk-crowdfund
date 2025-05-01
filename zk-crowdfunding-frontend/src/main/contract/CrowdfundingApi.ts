@@ -1,6 +1,3 @@
-// Final Fixed CrowdfundingApi.ts for ZK Crowdfunding Platform
-// Exactly matching the format used in the average-salary example
-
 import {
   BlockchainAddress,
   BlockchainTransactionClient
@@ -28,6 +25,34 @@ export class CrowdfundingApi {
     this.zkClient = zkClient;
     this.sender = sender;
   }
+
+    /**
+   * Verify if the user has made a contribution to the campaign
+   * @param address The contract address
+   */
+  readonly verifyContribution = async (address: string) => {
+    if (!address) {
+      throw new Error("No contract address provided");
+    }
+    
+    if (this.transactionClient === undefined) {
+      throw new Error("No account logged in");
+    }
+    
+    // Using same format as previous functions but with different shortname
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      _out.writeU8(0x09);
+      _out.writeBytes(Buffer.from("04", "hex"));  // Shortname 0x04 for verification
+    });
+    
+    try {
+      const result = await this.transactionClient.signAndSend({ address, rpc }, 10_000);
+      return result;
+    } catch (error) {
+      console.error("Error verifying contribution:", error);
+      throw error;
+    }
+  };
 
   /**
    * Build and send add contribution secret input transaction.

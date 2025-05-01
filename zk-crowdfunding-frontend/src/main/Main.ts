@@ -136,6 +136,14 @@ function setupEventListeners() {
     console.warn("Address button not found");
   }
 
+  // Verify contribution
+  const verifyContributionBtn = document.querySelector("#verify-contribution-btn");
+  if (verifyContributionBtn) {
+    verifyContributionBtn.addEventListener("click", verifyContributionAction);
+  } else {
+    console.warn("Verify contribution button not found");
+  }
+
   // Refresh state
   const updateStateBtn = document.querySelector("#update-state-btn");
   if (updateStateBtn) {
@@ -698,6 +706,139 @@ function withdrawFundsAction() {
   }
 }
 
+function verifyContributionAction() {
+  console.log("Verify contribution button clicked");
+  
+  if (!isConnected() || !getContractAddress() || !getCrowdfundingApi()) {
+    return;
+  }
+  
+  const address = getContractAddress();
+  const api = getCrowdfundingApi();
+  
+  // Disable button and show loading state
+  const verifyContributionBtn = document.querySelector("#verify-contribution-btn") as HTMLButtonElement;
+  if (verifyContributionBtn) {
+    verifyContributionBtn.disabled = true;
+    verifyContributionBtn.textContent = "Verifying...";
+  }
+  
+  // Get verification status element
+  let verificationStatusEl = document.querySelector("#verification-status");
+  if (!verificationStatusEl) {
+    // Create element if needed...
+  }
+  
+  console.log(`Verifying contribution for address: ${address}`);
+  
+  // First, send the transaction
+  api.verifyContribution(address)
+    .then((sentTx) => {
+      console.log("Verification transaction sent:", sentTx);
+      
+      // Show pending status
+      if (verificationStatusEl) {
+        verificationStatusEl.innerHTML = `
+          <div class="bg-blue-50 p-4 rounded-md border border-blue-200 mt-4">
+            <p class="text-blue-700">Verification in progress...</p>
+            <p class="text-sm text-blue-600 mt-2">Transaction ID: ${sentTx.transactionPointer.identifier}</p>
+            <p class="text-sm text-blue-600">This may take 15-30 seconds to complete.</p>
+          </div>
+        `;
+      }
+      
+      // Wait for transaction to be confirmed (poll for status)
+      const checkTransactionStatus = () => {
+        CLIENT.getExecutedTransaction(sentTx.transactionPointer.destinationShardId, sentTx.transactionPointer.identifier)
+          .then((executedTx) => {
+            if (!executedTx) {
+              // Transaction not yet processed, try again after a delay
+              setTimeout(checkTransactionStatus, 5000);
+              return;
+            }
+            
+            console.log("Transaction execution details:", executedTx);
+            
+            // Now we can check executionSucceeded
+            if (executedTx.executionSucceeded) {
+              // Verification was successful
+              if (verificationStatusEl) {
+                verificationStatusEl.innerHTML = `
+                  <div class="bg-green-50 p-4 rounded-md border border-green-200 mt-4">
+                    <div class="flex items-center">
+                      <svg class="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                      </svg>
+                      <span class="text-green-700 font-medium">Your contribution has been verified successfully!</span>
+                    </div>
+                    <p class="text-sm text-green-600 mt-2">
+                      Your contribution was included in the final tally of this campaign.
+                    </p>
+                  </div>
+                `;
+              }
+              setConnectionStatus("Your contribution has been verified successfully");
+            } else {
+              // Transaction failed, meaning no contribution found
+              if (verificationStatusEl) {
+                verificationStatusEl.innerHTML = `
+                  <div class="bg-yellow-50 p-4 rounded-md border border-yellow-200 mt-4">
+                    <p class="text-yellow-700 font-medium">No contribution found for this wallet address.</p>
+                    <p class="text-sm text-yellow-600 mt-2">
+                      The verification could not confirm a contribution from your current wallet.
+                      If you believe this is incorrect, please ensure you're using the same wallet
+                      that you used to make your contribution.
+                    </p>
+                  </div>
+                `;
+              }
+              setConnectionStatus("No contribution found for your wallet address");
+            }
+          })
+          .catch((error) => {
+            console.error("Error checking transaction status:", error);
+            
+            if (verificationStatusEl) {
+              verificationStatusEl.innerHTML = `
+                <div class="bg-red-50 p-4 rounded-md border border-red-200 mt-4">
+                  <p class="text-red-700">Error checking verification status.</p>
+                  <p class="text-sm text-red-600 mt-2">${error.message || String(error)}</p>
+                </div>
+              `;
+            }
+          })
+          .finally(() => {
+            // Re-enable button
+            if (verifyContributionBtn) {
+              verifyContributionBtn.disabled = false;
+              verifyContributionBtn.textContent = "Verify My Contribution";
+            }
+          });
+      };
+      
+      // Start checking transaction status
+      checkTransactionStatus();
+    })
+    .catch((error) => {
+      console.error("Error sending verification transaction:", error);
+      
+      if (verificationStatusEl) {
+        verificationStatusEl.innerHTML = `
+          <div class="bg-red-50 p-4 rounded-md border border-red-200 mt-4">
+            <p class="text-red-700">Error sending verification transaction.</p>
+            <p class="text-sm text-red-600 mt-2">${error.message || String(error)}</p>
+          </div>
+        `;
+      }
+      
+      // Re-enable button
+      if (verifyContributionBtn) {
+        verifyContributionBtn.disabled = false;
+        verifyContributionBtn.textContent = "Verify My Contribution";
+      }
+    });
+}
+
 // Update UI elements based on wallet connection state
 export function updateWalletUI(address?: string) {
   console.log("Updating wallet UI:", address ? "Connected" : "Disconnected");
@@ -794,10 +935,14 @@ function updateUIWithContractState(state, variables) {
  }
  
  // Update total raised
- const totalRaised = document.querySelector("#total-raised");
- if (totalRaised) {
-   totalRaised.innerHTML = `Total Raised: ${state.totalRaised ?? "Not yet revealed"}`;
- }
+const totalRaised = document.querySelector("#total-raised");
+if (totalRaised) {
+  if (state.isSuccessful) {
+    totalRaised.innerHTML = `Total Raised: ${state.totalRaised}`;
+  } else {
+    totalRaised.innerHTML = `Total Raised: <span class="text-yellow-600">Not revealed (threshold not met)</span>`;
+  }
+}
  
  // Update campaign result
  const campaignResult = document.querySelector("#campaign-result");
@@ -825,36 +970,43 @@ function updateUIWithContractState(state, variables) {
 
 // Update action visibility based on contract state
 function updateActionVisibility(state) {
- const addContributionSection = document.querySelector("#add-contribution-section");
- const endCampaignSection = document.querySelector("#end-campaign-section");
- const withdrawFundsSection = document.querySelector("#withdraw-funds-section");
+  const addContributionSection = document.querySelector("#add-contribution-section");
+  const endCampaignSection = document.querySelector("#end-campaign-section");
+  const withdrawFundsSection = document.querySelector("#withdraw-funds-section");
+  const verificationSection = document.querySelector("#verification-section");
 
- // Reset all to hidden
- if (addContributionSection) addContributionSection.classList.add("hidden");
- if (endCampaignSection) endCampaignSection.classList.add("hidden");
- if (withdrawFundsSection) withdrawFundsSection.classList.add("hidden");
+  // Reset all to hidden
+  if (addContributionSection) addContributionSection.classList.add("hidden");
+  if (endCampaignSection) endCampaignSection.classList.add("hidden");
+  if (withdrawFundsSection) withdrawFundsSection.classList.add("hidden");
+  if (verificationSection) verificationSection.classList.add("hidden");
 
- // Only show actions if user is connected
- if (!isConnected()) {
-   return;
- }
+  // Only show actions if user is connected
+  if (!isConnected()) {
+    return;
+  }
 
- // Show appropriate sections based on state
- if (state.status === CampaignStatus.Active) {
-   // Anyone can contribute when campaign is active
-   if (addContributionSection) {
-     addContributionSection.classList.remove("hidden");
-   }
-   // Anyone can end campaign (owner or anyone after deadline)
-   if (endCampaignSection) {
-     endCampaignSection.classList.remove("hidden");
-   }
- } else if (state.status === CampaignStatus.Completed && state.isSuccessful) {
-   // Only project owner can withdraw funds
-   if (withdrawFundsSection) {
-     withdrawFundsSection.classList.remove("hidden");
-   }
- }
+  // Show appropriate sections based on state
+  if (state.status === CampaignStatus.Active) {
+    // Anyone can contribute when campaign is active
+    if (addContributionSection) {
+      addContributionSection.classList.remove("hidden");
+    }
+    // Anyone can end campaign (owner or anyone after deadline)
+    if (endCampaignSection) {
+      endCampaignSection.classList.remove("hidden");
+    }
+  } else if (state.status === CampaignStatus.Completed) {
+    // Show verification for completed campaigns
+    if (verificationSection) {
+      verificationSection.classList.remove("hidden");
+    }
+    
+    // Only show withdraw if campaign was successful and user is owner
+    if (state.isSuccessful && withdrawFundsSection) {
+      withdrawFundsSection.classList.remove("hidden");
+    }
+  }
 }
 
 // Show campaign results 

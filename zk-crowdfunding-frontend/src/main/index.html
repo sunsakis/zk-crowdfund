@@ -170,6 +170,35 @@
             <a href="#" class="transaction-link" id="withdraw-funds-tx-link" target="_blank">View in Explorer</a>
           </div>
         </div>
+
+        <!-- Verification Section -->
+        <div id="verification-section" class="card hidden">
+          <h2 class="card-title">Verify Your Contribution</h2>
+          <p class="action-description">
+            Verify that your contribution was included in the final total without revealing your contribution amount.
+            This uses zero-knowledge proofs to maintain privacy while ensuring transparency.
+          </p>
+          
+          <div class="bg-blue-50 p-4 rounded-md border border-blue-200 mb-4">
+            <h3 class="font-semibold mb-2 text-blue-700">How Verification Works</h3>
+            <p class="text-sm text-blue-700 mb-2">
+              Our platform uses zero-knowledge proofs to ensure:
+            </p>
+            <ul class="list-disc pl-5 text-sm text-blue-700 space-y-1 mb-2">
+              <li>Your contribution amount remains private</li>
+              <li>The total calculation is cryptographically verified</li>
+              <li>You can confirm your contribution was included</li>
+              <li>Multiple independent parties validate the computation</li>
+            </ul>
+          </div>
+          
+          <button id="verify-contribution-btn" class="btn btn-primary btn-full">
+            Verify My Contribution
+          </button>
+          
+          <div id="verification-status" class="mt-4"></div>
+        </div>
+
       </div>
     </div>
 
