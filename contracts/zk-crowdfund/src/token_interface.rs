@@ -19,19 +19,19 @@ impl MPC20TokenInterface {
         // Create event to call the token contract
         let mut builder = EventGroup::builder();
         
-        // Add shortname (0x01 for transfer)
-        let mut shortname = Vec::with_capacity(1 + Address::LEN + 16);
-        shortname.push(0x01);
+        // Create bytes for transfer (0x01)
+        let mut data = Vec::new();
+        data.push(0x01);
         
         // Add recipient address
-        let to_bytes = to.to_bytes();
-        shortname.extend_from_slice(&to_bytes);
+        data.extend_from_slice(to.as_bytes());
         
         // Add amount as u128 (16 bytes, little-endian)
-        shortname.extend_from_slice(&amount.to_le_bytes());
+        data.extend_from_slice(&amount.to_le_bytes());
         
-        // Build the event
-        builder = builder.binary_call(self.token_address, &shortname);
+        // Use event group binary_call method
+        builder.binary_call(self.token_address, &data);
+        
         builder.build()
     }
     
@@ -47,23 +47,22 @@ impl MPC20TokenInterface {
         // Create event to call the token contract
         let mut builder = EventGroup::builder();
         
-        // Add shortname (0x03 for transfer_from)
-        let mut shortname = Vec::with_capacity(1 + Address::LEN + Address::LEN + 16);
-        shortname.push(0x03);
+        // Create bytes for transfer_from (0x03)
+        let mut data = Vec::new();
+        data.push(0x03);
         
         // Add sender address
-        let from_bytes = from.to_bytes();
-        shortname.extend_from_slice(&from_bytes);
+        data.extend_from_slice(from.as_bytes());
         
         // Add recipient address
-        let to_bytes = to.to_bytes();
-        shortname.extend_from_slice(&to_bytes);
+        data.extend_from_slice(to.as_bytes());
         
         // Add amount as u128 (16 bytes, little-endian)
-        shortname.extend_from_slice(&amount.to_le_bytes());
+        data.extend_from_slice(&amount.to_le_bytes());
         
-        // Build the event
-        builder = builder.binary_call(self.token_address, &shortname);
+        // Use event group binary_call method
+        builder.binary_call(self.token_address, &data);
+        
         builder.build()
     }
     
@@ -73,19 +72,19 @@ impl MPC20TokenInterface {
         // Create event to call the token contract
         let mut builder = EventGroup::builder();
         
-        // Add shortname (0x05 for approve)
-        let mut shortname = Vec::with_capacity(1 + Address::LEN + 16);
-        shortname.push(0x05);
+        // Create bytes for approve (0x05)
+        let mut data = Vec::new();
+        data.push(0x05);
         
         // Add spender address
-        let spender_bytes = spender.to_bytes();
-        shortname.extend_from_slice(&spender_bytes);
+        data.extend_from_slice(spender.as_bytes());
         
         // Add amount as u128 (16 bytes, little-endian)
-        shortname.extend_from_slice(&amount.to_le_bytes());
+        data.extend_from_slice(&amount.to_le_bytes());
         
-        // Build the event
-        builder = builder.binary_call(self.token_address, &shortname);
+        // Use event group binary_call method
+        builder.binary_call(self.token_address, &data);
+        
         builder.build()
     }
 }

@@ -169,10 +169,9 @@ fn start_campaign(
         timestamp: context.block_production_time.try_into().unwrap(),
     };
     
-    // Create event group with binary content
+    // Create event group with event
     let mut builder = EventGroup::builder();
-    // Use add_raw_event - correct version of the method
-    builder = builder.add_raw_event(&status_event);
+    builder.add_event("CampaignStatusChanged", &status_event);
     let event_group = builder.build();
     
     // Return updated state and events
@@ -219,10 +218,9 @@ fn add_contribution(
         timestamp: context.block_production_time.try_into().unwrap(),
     };
     
-    // Create event group with binary content
+    // Create event group with event
     let mut builder = EventGroup::builder();
-    // Use add_raw_event - correct version of the method
-    builder = builder.add_raw_event(&contribution_event);
+    builder.add_event("ContributionReceived", &contribution_event);
     let event_group = builder.build();
     
     // NOTE: The token transfer happens in the inputted_variable callback
@@ -324,10 +322,9 @@ fn end_campaign(
         timestamp: context.block_production_time.try_into().unwrap(),
     };
     
-    // Create event group with binary content
+    // Create event group
     let mut builder = EventGroup::builder();
-    // Use add_raw_event - correct version of the method
-    builder = builder.add_raw_event(&status_event);
+    builder.add_event("CampaignStatusChanged", &status_event);
     let event_group = builder.build();
     
     // Start ZK computation to sum all contributions
@@ -416,11 +413,10 @@ fn open_sum_variable(
             timestamp: context.block_production_time.try_into().unwrap(),
         };
         
-        // Create event group with binary content
+        // Create event group with multiple events
         let mut builder = EventGroup::builder();
-        // Use add_raw_event - correct version of the method
-        builder = builder.add_raw_event(&status_event);
-        builder = builder.add_raw_event(&completed_event);
+        builder.add_event("CampaignStatusChanged", &status_event);
+        builder.add_event("CampaignCompleted", &completed_event);
         let event_group = builder.build();
         
         // Finalize ZK contract
@@ -480,10 +476,9 @@ fn withdraw_funds(
         timestamp: context.block_production_time.try_into().unwrap(),
     };
     
-    // Create event group with binary content
+    // Create event group
     let mut builder = EventGroup::builder();
-    // Use add_raw_event - correct version of the method
-    builder = builder.add_raw_event(&withdrawal_event);
+    builder.add_event("FundsWithdrawn", &withdrawal_event);
     let event_group = builder.build();
     
     // Return events
@@ -537,10 +532,9 @@ fn claim_refund(
         timestamp: context.block_production_time.try_into().unwrap(),
     };
     
-    // Create event group with binary content
+    // Create event group
     let mut builder = EventGroup::builder();
-    // Use add_raw_event - correct version of the method
-    builder = builder.add_raw_event(&refund_event);
+    builder.add_event("RefundProcessed", &refund_event);
     let event_group = builder.build();
     
     // Return events

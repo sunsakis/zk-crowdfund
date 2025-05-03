@@ -1,4 +1,3 @@
-// zk-crowdfunding-frontend/src/main/contract/CrowdfundingGenerated.ts
 import {
   AbiBitInput,
   AbiBitOutput,

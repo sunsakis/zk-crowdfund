@@ -1,4 +1,3 @@
-// zk-crowdfunding-frontend/src/main/WalletIntegration.ts
 import { Buffer } from "buffer";
 import {
   CLIENT,
