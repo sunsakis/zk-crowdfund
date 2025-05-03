@@ -137,7 +137,7 @@ fn add_contribution(
 #[action(shortname = 0x03, zk = true)]
 fn contribute_tokens(
     context: ContractContext,
-    mut state: ContractState,
+    state: ContractState,
     zk_state: ZkState<SecretVarType>,
     amount: u128,
 ) -> (ContractState, Vec<EventGroup>) {
@@ -154,7 +154,7 @@ fn contribute_tokens(
     let mut event_group = EventGroup::builder();
     
     // Create Shortname from u8 value
-    let transfer_from_shortname = Shortname::from_u8(TOKEN_TRANSFER_FROM_SHORTNAME);
+    let transfer_from_shortname = Shortname::from_u32(TOKEN_TRANSFER_FROM_SHORTNAME as u32);
     
     // Create proper ShortnameCallback from u32 value
     let callback_shortname = ShortnameCallback::from_u32(CONTRIBUTION_CALLBACK_SHORTNAME);
@@ -355,7 +355,7 @@ fn withdraw_funds(
     let mut events = Vec::new();
     
     // Create Shortname from u8 value
-    let transfer_shortname = Shortname::from_u8(TOKEN_TRANSFER_SHORTNAME);
+    let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
     
     // Set up transfer event with proper Shortname
     let mut event_group = EventGroup::builder();
@@ -398,7 +398,7 @@ fn claim_refund(
     let mut events = Vec::new();
     
     // Create Shortname from u8 value
-    let transfer_shortname = Shortname::from_u8(TOKEN_TRANSFER_SHORTNAME);
+    let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
     
     // Set up transfer event
     let mut event_group = EventGroup::builder();
