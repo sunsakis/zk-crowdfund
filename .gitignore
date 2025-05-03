@@ -17,3 +17,4 @@ Account-C.pk
 zk-crowdfunding-frontend/node_modules/
 zk-crowdfunding-frontend/dist/
 .env
+.DS_Store
