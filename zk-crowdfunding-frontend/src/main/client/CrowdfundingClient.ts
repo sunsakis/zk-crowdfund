@@ -1,56 +1,81 @@
-// src/CrowdfundingClient.ts
 import { 
   BlockchainAddress, 
-  AbiByteInput
+  AbiByteInput,
+  AbiBitOutput
 } from '@partisiablockchain/abi-client';
 import { 
-  BlockchainTransactionClient,
-  ChainControllerApi,
-  Configuration
+  BlockchainTransactionClient
 } from '@partisiablockchain/blockchain-api-transaction-client';
 import { RealZkClient, Client, CryptoUtils } from '@partisiablockchain/zk-client';
 import { Buffer } from 'buffer';
-import { AbiBitOutput } from '@partisiablockchain/abi-client';
+import { getRequest } from '../client/BaseClient';
 
 // Campaign status enum matching the contract
 export enum CampaignStatus {
-  Active = 0,
-  Computing = 1,
-  Completed = 2
+  ACTIVE = 0,
+  COMPUTING = 1,
+  COMPLETED = 2
 }
 
 export interface CampaignData {
+  address: string;
   owner: string;
   title: string;
   description: string;
   fundingTarget: number;
-  deadline: number;
   status: CampaignStatus;
   totalRaised?: number;
   numContributors?: number;
   isSuccessful: boolean;
+  deadline?: number;
+}
+
+// Contract interface to match what's returned by the API
+interface ContractCore {
+  type: string;
+  address: string;
+  jarHash: string;
+  storageLength: number;
+  abi: string;
+}
+
+// ContractData extends ContractCore with serialized state
+interface ContractData<T> extends ContractCore {
+  serializedContract: T;
+}
+
+// ZK Contract specific structures
+interface ZkVariable {
+  id: number;
+  information: { data: string };
+  owner: string;
+  transaction: string;
+}
+
+interface ZkContractData {
+  engines: { engines: any[] };
+  openState: { openState: { data: string } };
+  variables: Array<{ key: number; value: ZkVariable }>;
 }
 
 export class CrowdfundingClient {
-  private readonly testnetUrl = "https://node1.testnet.partisiablockchain.com";
-  private chainApi: ChainControllerApi;
-  private client: Client;
+  private readonly nodeUrl: string = "https://node1.testnet.partisiablockchain.com";
+  private readonly browserUrl: string = "https://browser.testnet.partisiablockchain.com";
+  private readonly client: Client;
   private transactionClient?: BlockchainTransactionClient;
   private zkClient?: RealZkClient;
   private walletAddress?: string;
   private keyPair?: any;
   
   constructor() {
-    this.chainApi = new ChainControllerApi(
-      new Configuration({ basePath: this.testnetUrl })
-    );
-    this.client = new Client(this.testnetUrl);
+    // Initialize client for contract interaction
+    this.client = new Client(this.nodeUrl);
   }
   
   /**
    * Connect wallet using private key
    */
-  async connectWallet(privateKey: string): Promise<string> {
+  public async connectWallet(privateKey: string): Promise<string> {
     try {
       // Initialize key pair from private key
       this.keyPair = CryptoUtils.privateKeyToKeypair(privateKey);
@@ -62,28 +87,21 @@ export class CrowdfundingClient {
       const auth = {
         getAddress: () => this.walletAddress!,
         sign: async (transactionPayload: Buffer, chainId: string): Promise<string> => {
-          // Create a hash of the transaction payload and chain ID
-          const combinedBuffer = Buffer.concat([
+          // Hash the transaction payload and chain ID
+          const hash = CryptoUtils.hashBuffers([
             transactionPayload,
             Buffer.from(chainId)
           ]);
           
-          // Use hash.js for hashing
-          const hash = require('hash.js').sha256().update(combinedBuffer).digest();
-          
           // Sign the hash
           const signature = this.keyPair!.sign(hash);
           
-          // Format the signature with recovery parameter
-          const r = signature.r.toArrayLike(Buffer, 'be', 32);
-          const s = signature.s.toArrayLike(Buffer, 'be', 32);
-          const recovery = Buffer.from([signature.recoveryParam || 0]);
-          
-          return Buffer.concat([recovery, r, s]).toString('hex');
+          // Format the signature
+          return CryptoUtils.signatureToBuffer(signature).toString('hex');
         }
       };
       
-      this.transactionClient = BlockchainTransactionClient.create(this.testnetUrl, auth);
+      this.transactionClient = BlockchainTransactionClient.create(this.nodeUrl, auth);
       
       return this.walletAddress;
     } catch (error) {
@@ -95,8 +113,8 @@ export class CrowdfundingClient {
   /**
    * Set the campaign contract address and initialize ZK client
    */
-  setCampaignAddress(contractAddress: string) {
-    if (!contractAddress) return;
+  public setCampaignAddress(contractAddress: string): boolean {
+    if (!contractAddress) return false;
     
     try {
       // Create ZK client for this contract
@@ -109,56 +127,92 @@ export class CrowdfundingClient {
   }
   
   /**
+   * Get contract data using the helper function
+   */
+  private async getContractData<T>(address: string, withState = true): Promise<ContractData<T> | undefined> {
+    const query = "?requireContractState=" + withState;
+    return getRequest<ContractData<T>>(this.nodeUrl + "/blockchain/contracts/" + address + query);
+  }
+  
+  /**
    * Get campaign data from contract
    */
-  async getCampaignData(contractAddress: string): Promise<CampaignData> {
+  public async getCampaignData(contractAddress: string): Promise<CampaignData> {
     try {
-      // Use the chain API to get contract state
-      const response = await this.chainApi.getContractState(contractAddress, true);
+      // Make sure we have a valid address format
+      if (!contractAddress || contractAddress.length !== 42 || !/^[0-9a-fA-F]+$/.test(contractAddress)) {
+        throw new Error("Invalid contract address format");
+      }
+
+      console.log(`Fetching contract data for address: ${contractAddress}`);
       
-      if (!response?.data?.serializedContract?.openState?.openState?.data) {
-        throw new Error("Contract data not found");
+      // Fetch contract data
+      const contractData = await this.getContractData<ZkContractData>(contractAddress, true);
+      
+      // Debug output to see what we're getting
+      console.log("Contract data received:", contractData ? "yes" : "no");
+      
+      if (!contractData) {
+        throw new Error("Failed to fetch contract data");
       }
       
-      const stateBuffer = Buffer.from(
-        response.data.serializedContract.openState.openState.data, 
-        'base64'
-      );
+      if (!contractData.serializedContract?.openState?.openState?.data) {
+        console.error("Missing state data in contract:", contractData);
+        throw new Error("Contract state data not found");
+      }
+      
+      // Get state buffer from base64 string
+      const stateBase64 = contractData.serializedContract.openState.openState.data;
+      const stateBuffer = Buffer.from(stateBase64, 'base64');
+      
+      console.log(`State buffer length: ${stateBuffer.length} bytes`);
+      
+      // Count the number of secret variables (contributions)
+      const variables = contractData.serializedContract.variables || [];
+      const numContributors = variables.length;
+      
+      console.log(`Found ${numContributors} variables/contributions`);
       
       // Create an input reader for the buffer
       const input = AbiByteInput.createLittleEndian(stateBuffer);
       
-      // Read state fields according to the contract structure
-      const owner = input.readAddress();
-      const title = input.readString();
-      const description = input.readString();
-      const fundingTarget = input.readU32();
-      const deadline = input.readU64().toNumber();
-      const status = input.readU8();
-      
-      let totalRaised = undefined;
-      if (input.readBoolean()) {
-        totalRaised = input.readU32();
+      try {
+        // Read state fields according to the contract structure
+        const owner = input.readAddress();
+        const title = input.readString();
+        const description = input.readString();
+        const fundingTarget = input.readU32();
+        const status = input.readU8(); // Campaign status enum
+        
+        let totalRaised = undefined;
+        if (input.readBoolean()) {
+          totalRaised = input.readU32();
+        }
+        
+        let stateNumContributors = undefined;
+        if (input.readBoolean()) {
+          stateNumContributors = input.readU32();
+        }
+        
+        const isSuccessful = input.readBoolean();
+        
+        console.log("Successfully parsed contract state");
+        
+        return {
+          address: contractAddress,
+          owner: owner.asString(),
+          title,
+          description,
+          fundingTarget,
+          status: status as CampaignStatus,
+          totalRaised,
+          numContributors: stateNumContributors || numContributors,
+          isSuccessful
+        };
+      } catch (parseError) {
+        console.error("Error parsing contract state:", parseError);
+        throw new Error(`Failed to parse contract state: ${parseError.message}. This might not be a ZK Crowdfunding contract.`);
       }
-      
-      let numContributors = undefined;
-      if (input.readBoolean()) {
-        numContributors = input.readU32();
-      }
-      
-      const isSuccessful = input.readBoolean();
-      
-      return {
-        owner: owner.asString(),
-        title,
-        description,
-        fundingTarget,
-        deadline,
-        status: status as CampaignStatus,
-        totalRaised,
-        numContributors,
-        isSuccessful
-      };
     } catch (error) {
       console.error("Error fetching campaign data:", error);
       throw new Error(`Failed to get campaign data: ${error instanceof Error ? error.message : String(error)}`);
@@ -168,17 +222,20 @@ export class CrowdfundingClient {
   /**
    * Add contribution (ZK secret input)
    */
-  async addContribution(contractAddress: string, amount: number): Promise<string> {
+  public async addContribution(amount: number, contractAddress: string): Promise<any> {
     if (!this.transactionClient || !this.walletAddress) {
       throw new Error("Wallet not connected");
     }
     
     if (!this.zkClient) {
-      this.setCampaignAddress(contractAddress);
+      const success = this.setCampaignAddress(contractAddress);
+      if (!success) {
+        throw new Error("Failed to initialize ZK client for contract");
+      }
     }
     
     try {
-      // Create secret input with the contribution amount
+      // Create secret input for contribution amount
       const secretInput = AbiBitOutput.serialize((_out) => {
         _out.writeI32(amount);
       });
@@ -196,7 +253,8 @@ export class CrowdfundingClient {
       // Send the transaction
       const result = await this.transactionClient.signAndSend(transaction, 100000);
       
-      return result.transactionPointer.identifier;
+      // Return transaction result
+      return result;
     } catch (error) {
       console.error("Error adding contribution:", error);
       throw new Error(`Failed to add contribution: ${error instanceof Error ? error.message : String(error)}`);
@@ -206,22 +264,20 @@ export class CrowdfundingClient {
   /**
    * End campaign - triggers the ZK computation
    */
-  async endCampaign(contractAddress: string): Promise<string> {
+  public async endCampaign(contractAddress: string): Promise<any> {
     if (!this.transactionClient || !this.walletAddress) {
       throw new Error("Wallet not connected");
     }
     
     try {
-      // Create RPC for end_campaign (shortname 0x02)
-      const rpc = Buffer.from([0x02]);
+      // Create RPC for end_campaign (shortname 0x01)
+      const rpc = Buffer.from([0x01]);
       
-      // Send the transaction
-      const result = await this.transactionClient.signAndSend({
+      // Send the transaction with higher gas limit for ZK operations
+      return await this.transactionClient.signAndSend({
         address: contractAddress,
         rpc
-      }, 50000); // Higher gas limit for ZK operations
-      
-      return result.transactionPointer.identifier;
+      }, 200000);
     } catch (error) {
       console.error("Error ending campaign:", error);
       throw new Error(`Failed to end campaign: ${error instanceof Error ? error.message : String(error)}`);
@@ -231,22 +287,20 @@ export class CrowdfundingClient {
   /**
    * Withdraw funds after successful campaign
    */
-  async withdrawFunds(contractAddress: string): Promise<string> {
+  public async withdrawFunds(contractAddress: string): Promise<any> {
     if (!this.transactionClient || !this.walletAddress) {
       throw new Error("Wallet not connected");
     }
     
     try {
-      // Create RPC for withdraw_funds (shortname 0x03)
-      const rpc = Buffer.from([0x03]);
+      // Create RPC for withdraw_funds (shortname 0x02)
+      const rpc = Buffer.from([0x02]);
       
       // Send the transaction
-      const result = await this.transactionClient.signAndSend({
+      return await this.transactionClient.signAndSend({
         address: contractAddress,
         rpc
-      }, 20000);
-      
-      return result.transactionPointer.identifier;
+      }, 100000);
     } catch (error) {
       console.error("Error withdrawing funds:", error);
       throw new Error(`Failed to withdraw funds: ${error instanceof Error ? error.message : String(error)}`);
@@ -254,43 +308,34 @@ export class CrowdfundingClient {
   }
   
   /**
-   * Check if the connected wallet is the campaign owner
+   * Get transaction URL for browser
    */
-  async isOwner(contractAddress: string): Promise<boolean> {
-    if (!this.walletAddress) return false;
-    
-    try {
-      const campaign = await this.getCampaignData(contractAddress);
-      return campaign.owner.toLowerCase() === this.walletAddress.toLowerCase();
-    } catch (error) {
-      console.error("Error checking owner:", error);
-      return false;
-    }
+  public getTransactionUrl(txId: string): string {
+    return `${this.browserUrl}/transactions/${txId}`;
   }
   
   /**
-   * Wait for transaction to be confirmed
+   * Get contract URL for browser
    */
-  async waitForTransaction(txId: string, maxAttempts = 30): Promise<boolean> {
-    let attempts = 0;
-    
-    while (attempts < maxAttempts) {
-      try {
-        // Get transaction status
-        const response = await this.chainApi.getTransactionStatus(txId);
-        
-        if (response.data?.finalized) {
-          return response.data.executionSucceeded || false;
-        }
-      } catch (error) {
-        console.log(`Waiting for transaction ${txId}...`);
-      }
-      
-      // Wait 2 seconds before trying again
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      attempts++;
-    }
-    
-    throw new Error('Transaction timeout');
+  public getContractUrl(address: string): string {
+    return `${this.browserUrl}/contracts/${address}`;
+  }
+  
+  /**
+   * Check if the connected wallet is the campaign owner
+   */
+  public isOwner(ownerAddress: string): boolean {
+    if (!this.walletAddress) return false;
+    return ownerAddress.toLowerCase() === this.walletAddress.toLowerCase();
+  }
+  
+  /**
+   * Disconnect wallet
+   */
+  public disconnect(): void {
+    this.walletAddress = undefined;
+    this.keyPair = undefined;
+    this.transactionClient = undefined;
+    this.zkClient = undefined;
   }
 }
