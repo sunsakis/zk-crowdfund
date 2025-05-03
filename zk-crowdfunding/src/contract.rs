@@ -188,7 +188,6 @@ fn sum_compute_complete(
     )
 }
 
-/// Automatically called when a variable is opened/declassified
 #[zk_on_variables_opened]
 fn open_sum_variable(
     context: ContractContext,
@@ -212,11 +211,27 @@ fn open_sum_variable(
         // Read the sum result
         let total_raised = read_variable_u32_le(&opened_variable);
         
-        // Update state with total raised
-        state.total_raised = Some(total_raised);
+        // Count the number of contributions
+        let num_contributors = zk_state
+            .secret_variables
+            .iter()
+            .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution {}))
+            .count() as u32;
         
-        // Check if campaign was successful
-        state.is_successful = total_raised >= state.funding_target;
+        // Determine if campaign was successful
+        let is_successful = total_raised >= state.funding_target;
+        
+        // Only set the total_raised if the threshold was met
+        if is_successful {
+            state.total_raised = Some(total_raised);
+        } else {
+            // If threshold wasn't met, don't reveal the total
+            state.total_raised = None;
+        }
+        
+        // Always set the contributor count and success flag
+        state.num_contributors = Some(num_contributors);
+        state.is_successful = is_successful;
         
         // Mark campaign as completed
         state.status = CampaignStatus::Completed {};
@@ -226,6 +241,36 @@ fn open_sum_variable(
     }
     
     (state, vec![], zk_state_changes)
+}
+
+/// Verify if the caller has made a contribution to this campaign
+///
+/// This function allows any user to check if their contribution was included in the campaign
+/// without revealing their contribution amount
+#[action(shortname = 0x04, zk = true)]
+fn verify_my_contribution(
+    context: ContractContext,
+    state: ContractState,
+    zk_state: ZkState<SecretVarType>,
+) -> (ContractState, Vec<EventGroup>) {
+    // Ensure we only verify completed campaigns
+    assert!(
+        state.status == CampaignStatus::Completed {},
+        "Verification only available after campaign is completed"
+    );
+    
+    // Check if sender has a contribution
+    let has_contribution = zk_state
+        .secret_variables
+        .iter()
+        .any(|(_, var)| var.owner == context.sender && 
+             matches!(var.metadata, SecretVarType::Contribution {}));
+             
+    // We could emit an event with the result, but for simplicity we'll just return the state
+    // The transaction success/failure will indicate the result
+    assert!(has_contribution, "No contribution found for this address");
+    
+    (state, vec![])
 }
 
 /// Process withdrawals based on campaign outcome
