@@ -1,466 +1,541 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { CrowdfundingClient, CampaignStatus, CampaignData } from './client/CrowdfundingClient';
+import { CrowdfundingClient, CampaignStatus } from './client/CrowdfundingClient';
+import { useState, useEffect } from 'react';
 
-const client = new CrowdfundingClient();
-
-const ZKCrowdfundingApp = () => {
-  const [contractAddress, setContractAddress] = useState('');
+function CrowdfundingApp() {
+  // Client instance
+  const [client, setClient] = useState(new CrowdfundingClient());
+  
+  // UI state
+  const [isConnected, setIsConnected] = useState(false);
+  const [walletAddress, setWalletAddress] = useState('');
+  const [campaignData, setCampaignData] = useState(null);
+  const [tokenInfo, setTokenInfo] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  
+  // Form values
+  const [campaignAddress, setCampaignAddress] = useState('');
   const [privateKey, setPrivateKey] = useState('');
   const [contributionAmount, setContributionAmount] = useState('');
-  const [message, setMessage] = useState({ text: '', type: '' });
-  const [loading, setLoading] = useState(false);
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [walletAddress, setWalletAddress] = useState('');
-  const [campaignData, setCampaignData] = useState<CampaignData | null>(null);
-  const [isOwner, setIsOwner] = useState(false);
-  const [txHash, setTxHash] = useState('');
-
-  // Show a message with type (success, error, info)
-  const showMessage = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
-    setMessage({ text, type });
-    // Clear message after 10 seconds
-    setTimeout(() => setMessage({ text: '', type: '' }), 10000);
-  };
-
-  // Format date from unix timestamp
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString();
-  };
-
-  // Get status name from enum
-  const getStatusName = (status: CampaignStatus) => {
-    switch (status) {
-      case CampaignStatus.Active: return "Active";
-      case CampaignStatus.Computing: return "Computing";
-      case CampaignStatus.Completed: return "Completed";
-      default: return "Unknown";
+  
+  // Connect wallet with private key
+  const connectWallet = async () => {
+    if (!privateKey) {
+      setMessage('Please enter a private key');
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      const address = await client.connectWallet(privateKey);
+      setWalletAddress(address);
+      setIsConnected(true);
+      setMessage(`Connected: ${address.substring(0, 6)}...${address.substring(address.length - 4)}`);
+    } catch (error) {
+      setMessage(`Error connecting: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
-
-  // Create transaction URL for explorer
-  const getTransactionUrl = (txId: string) => {
-    return `https://browser.testnet.partisiablockchain.com/transactions/${txId}`;
-  };
-
-  // Check if campaign is active
-  const isCampaignActive = campaignData?.status === CampaignStatus.Active;
   
-  // Check if campaign is completed and successful
-  const canWithdraw = campaignData?.status === CampaignStatus.Completed 
-                      && campaignData?.isSuccessful === true
-                      && isOwner;
-
-  return (
-    <div className="max-w-2xl mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">ZK Crowdfunding App</h1>
+  // Load campaign data
+  const loadCampaign = async () => {
+    if (!campaignAddress) {
+      setMessage('Please enter a campaign address');
+      return;
+    }
+    
+    try {
+      setLoading(true);
       
-      {/* Message display */}
-      {message.text && (
-        <div className={`p-4 mb-6 rounded border-l-4 ${
-          message.type === 'success' ? 'bg-green-50 border-green-500 text-green-700' : 
-          message.type === 'error' ? 'bg-red-50 border-red-500 text-red-700' : 
-          'bg-blue-50 border-blue-500 text-blue-700'
-        }`}>
-          {message.text}
-        </div>
-      )}
+      // Set campaign address in client
+      client.setCampaignAddress(campaignAddress);
       
-      {/* Contract Address Input */}
-      <div className="mb-6">
-        <label className="block mb-2 font-semibold">Campaign Contract Address</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={contractAddress}
-            onChange={(e) => setContractAddress(e.target.value)}
-            className="flex-1 p-2 border rounded"
-            placeholder="Enter contract address"
-            disabled={loading}
-          />
-          <button 
-            onClick={loadCampaign}
-            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
-            disabled={loading || !contractAddress}
-          >
-            {loading ? 'Loading...' : 'Load'}
-          </button>
+      // Load campaign data
+      const data = await client.getCampaignData(campaignAddress);
+      setCampaignData(data);
+      
+      // Load token info
+      const tokenData = await client.getTokenInfo(data.tokenAddress);
+      setTokenInfo(tokenData);
+      
+      setMessage('Campaign loaded successfully');
+    } catch (error) {
+      setMessage(`Error loading campaign: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Approve tokens for contribution
+  const approveTokens = async () => {
+    if (!isConnected || !campaignData) return;
+    
+    try {
+      setLoading(true);
+      setMessage('Approving tokens...');
+      
+      // Parse contribution amount
+      const amount = client.parseTokenAmount(
+        contributionAmount, 
+        tokenInfo.decimals
+      );
+      
+      // Approve tokens
+      const result = await client.approveTokens(
+        campaignData.tokenAddress,
+        campaignAddress,
+        amount
+      );
+      
+      setMessage(`Token approval submitted. Transaction: ${result.transactionPointer.identifier}`);
+      
+      // Wait for confirmation
+      await client.waitForTransaction(result.transactionPointer.identifier);
+      setMessage('Token approval confirmed');
+    } catch (error) {
+      setMessage(`Error approving tokens: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Add contribution
+  const contribute = async () => {
+    if (!isConnected || !campaignData) return;
+    
+    try {
+      setLoading(true);
+      setMessage('Processing contribution...');
+      
+      // Convert the user-friendly amount to the raw amount
+      const rawAmount = parseInt(contributionAmount) * (10 ** tokenInfo.decimals);
+      
+      // Make contribution
+      const result = await client.addContribution(campaignAddress, rawAmount);
+      
+      setMessage(`Contribution submitted. Transaction: ${result.transactionPointer.identifier}`);
+      
+      // Wait for confirmation
+      await client.waitForTransaction(result.transactionPointer.identifier);
+      setMessage('Contribution confirmed');
+      
+      // Refresh campaign data
+      loadCampaign();
+    } catch (error) {
+      setMessage(`Error making contribution: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // End campaign
+  const endCampaign = async () => {
+    if (!isConnected || !campaignData) return;
+    
+    try {
+      setLoading(true);
+      setMessage('Ending campaign...');
+      
+      // End campaign
+      const result = await client.endCampaign(campaignAddress);
+      
+      setMessage(`Campaign end transaction submitted: ${result.transactionPointer.identifier}`);
+      
+      // Wait for confirmation
+      await client.waitForTransaction(result.transactionPointer.identifier);
+      setMessage('Campaign end confirmed. Computing results...');
+      
+      // Refresh campaign data after a delay to allow computation
+      setTimeout(loadCampaign, 10000);
+    } catch (error) {
+      setMessage(`Error ending campaign: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Withdraw funds
+  const withdrawFunds = async () => {
+    if (!isConnected || !campaignData) return;
+    
+    try {
+      setLoading(true);
+      setMessage('Withdrawing funds...');
+      
+      // Withdraw funds
+      const result = await client.withdrawFunds(campaignAddress);
+      
+      setMessage(`Withdrawal transaction submitted: ${result.transactionPointer.identifier}`);
+      
+      // Wait for confirmation
+      await client.waitForTransaction(result.transactionPointer.identifier);
+      setMessage('Withdrawal confirmed');
+      
+      // Refresh campaign data
+      loadCampaign();
+    } catch (error) {
+      setMessage(`Error withdrawing funds: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Claim refund
+  const claimRefund = async () => {
+    if (!isConnected || !campaignData) return;
+    
+    try {
+      setLoading(true);
+      setMessage('Claiming refund...');
+      
+      // Claim refund
+      const result = await client.claimRefund(campaignAddress);
+      
+      setMessage(`Refund transaction submitted: ${result.transactionPointer.identifier}`);
+      
+      // Wait for confirmation
+      await client.waitForTransaction(result.transactionPointer.identifier);
+      setMessage('Refund claimed successfully');
+    } catch (error) {
+      setMessage(`Error claiming refund: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Verify contribution
+  const verifyContribution = async () => {
+    if (!isConnected || !campaignData) return;
+    
+    try {
+      setLoading(true);
+      setMessage('Verifying contribution...');
+      
+      // Verify contribution
+      const result = await client.verifyContribution(campaignAddress);
+      
+      setMessage(`Verification transaction submitted: ${result.transactionPointer.identifier}`);
+      
+      // Wait for confirmation
+      const success = await client.waitForTransaction(result.transactionPointer.identifier);
+      
+      if (success) {
+        setMessage('Contribution verified successfully! Your contribution was included in the campaign.');
+      } else {
+        setMessage('Verification failed. No contribution found for your address.');
+      }
+    } catch (error) {
+      setMessage(`Error verifying contribution: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Check if user is the campaign owner
+  const checkIfOwner = async () => {
+    if (!isConnected || !campaignData) return false;
+    
+    try {
+      return await client.isOwner(campaignAddress);
+    } catch (error) {
+      console.error("Error checking if owner:", error);
+      return false;
+    }
+  };
+  
+  // Determine available actions based on campaign status
+  const getAvailableActions = () => {
+    if (!campaignData) return {};
+    
+    const isOwner = checkIfOwner();
+    const currentTime = Date.now();
+    const deadlinePassed = currentTime > campaignData.deadline;
+    
+    return {
+      canContribute: 
+        campaignData.status === CampaignStatus.Active && 
+        !deadlinePassed && 
+        isConnected,
+      
+      canEndCampaign: 
+        campaignData.status === CampaignStatus.Active && 
+        (isOwner || deadlinePassed) && 
+        isConnected,
+      
+      canWithdraw: 
+        campaignData.status === CampaignStatus.Completed && 
+        campaignData.isSuccessful && 
+        isOwner && 
+        isConnected,
+      
+      canClaimRefund: 
+        campaignData.status === CampaignStatus.Completed && 
+        !campaignData.isSuccessful && 
+        isConnected,
+      
+      canVerify: 
+        campaignData.status === CampaignStatus.Completed && 
+        isConnected
+    };
+  };
+  
+  // Format token values for display
+  const formatTokenValue = (value) => {
+    if (!tokenInfo || value === undefined) return 'N/A';
+    
+    if (typeof value === 'bigint') {
+      return client.formatTokenAmount(value, tokenInfo.decimals) + ' ' + tokenInfo.symbol;
+    }
+    
+    return value + ' ' + tokenInfo.symbol;
+  };
+  
+  // Get campaign status text
+  const getCampaignStatusText = () => {
+    if (!campaignData) return '';
+    
+    switch (campaignData.status) {
+      case CampaignStatus.Setup:
+        return 'Setup - Awaiting Start';
+      case CampaignStatus.Active:
+        return 'Active - Accepting Contributions';
+      case CampaignStatus.Computing:
+        return 'Computing - Processing Results';
+      case CampaignStatus.Completed:
+        return campaignData.isSuccessful 
+          ? 'Completed - Successfully Funded'
+          : 'Completed - Funding Goal Not Reached';
+      default:
+        return 'Unknown';
+    }
+  };
+  
+  // Render campaign information
+  const renderCampaignInfo = () => {
+    if (!campaignData) return null;
+    
+    return (
+      <div className="campaign-info">
+        <h2>{campaignData.title}</h2>
+        <p>{campaignData.description}</p>
+        
+        <div className="campaign-details">
+          <div className="detail-item">
+            <span className="label">Status</span>
+            <span className={`value status-${campaignData.status}`}>
+              {getCampaignStatusText()}
+            </span>
+          </div>
+          
+          <div className="detail-item">
+            <span className="label">Token</span>
+            <span className="value">
+              {tokenInfo ? `${tokenInfo.name} (${tokenInfo.symbol})` : 'Loading...'}
+            </span>
+          </div>
+          
+          <div className="detail-item">
+            <span className="label">Funding Goal</span>
+            <span className="value">{formatTokenValue(campaignData.fundingTarget)}</span>
+          </div>
+          
+          {campaignData.totalRaised !== undefined && (
+            <div className="detail-item">
+              <span className="label">Raised</span>
+              <span className="value">{formatTokenValue(campaignData.totalRaised)}</span>
+            </div>
+          )}
+          
+          <div className="detail-item">
+            <span className="label">Contributors</span>
+            <span className="value">{campaignData.numContributors || 'Hidden'}</span>
+          </div>
+          
+          <div className="detail-item">
+            <span className="label">Deadline</span>
+            <span className="value">
+              {new Date(campaignData.deadline).toLocaleString()}
+            </span>
+          </div>
+          
+          <div className="detail-item">
+            <span className="label">Owner</span>
+            <span className="value address">
+              {campaignData.owner}
+              {campaignData.owner === walletAddress && (
+                <span className="owner-badge">You</span>
+              )}
+            </span>
+          </div>
         </div>
       </div>
+    );
+  };
+  
+  // Render action buttons based on campaign state
+  const renderActions = () => {
+    if (!campaignData || !isConnected) return null;
+    
+    const actions = getAvailableActions();
+    
+    return (
+      <div className="campaign-actions">
+        <h3>Available Actions</h3>
+        
+        {actions.canContribute && (
+          <div className="action-group">
+            <h4>Make a Contribution</h4>
+            <div className="input-group">
+              <input
+                type="text"
+                value={contributionAmount}
+                onChange={(e) => setContributionAmount(e.target.value)}
+                placeholder={`Amount in ${tokenInfo?.symbol || 'tokens'}`}
+              />
+              <div className="button-group">
+                <button onClick={approveTokens} disabled={loading}>
+                  1. Approve Tokens
+                </button>
+                <button onClick={contribute} disabled={loading}>
+                  2. Contribute
+                </button>
+              </div>
+              <p className="note">
+                Your contribution amount will remain private until the campaign ends.
+              </p>
+            </div>
+          </div>
+        )}
+        
+        {actions.canEndCampaign && (
+          <div className="action-item">
+            <button onClick={endCampaign} disabled={loading}>
+              End Campaign & Calculate Results
+            </button>
+            <p className="note">
+              This will end the campaign and calculate the total raised amount using 
+              zero-knowledge computation.
+            </p>
+          </div>
+        )}
+        
+        {actions.canWithdraw && (
+          <div className="action-item">
+            <button 
+              onClick={withdrawFunds} 
+              disabled={loading}
+              className="button-success"
+            >
+              Withdraw Funds
+            </button>
+            <p className="note">
+              As the campaign owner, you can withdraw the total raised amount.
+            </p>
+          </div>
+        )}
+        
+        {actions.canClaimRefund && (
+          <div className="action-item">
+            <button onClick={claimRefund} disabled={loading}>
+              Claim Refund
+            </button>
+            <p className="note">
+              The campaign did not reach its funding goal. You can claim a refund for your contribution.
+            </p>
+          </div>
+        )}
+        
+        {actions.canVerify && (
+          <div className="action-item">
+            <button onClick={verifyContribution} disabled={loading}>
+              Verify My Contribution
+            </button>
+            <p className="note">
+              Verify that your contribution was included in the final total without revealing your amount.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+  // Main render function
+  return (
+    <div className="crowdfunding-app">
+      <header>
+        <h1>ZK Crowdfunding Platform</h1>
+        <p>Privacy-preserving crowdfunding with token transfers on Partisia Blockchain</p>
+      </header>
       
-      {/* Wallet Connection */}
-      {!walletConnected ? (
-        <div className="mb-6">
-          <label className="block mb-2 font-semibold">Connect Wallet</label>
-          <div className="flex gap-2">
+      <section className="connection-section">
+        <h2>Account</h2>
+        
+        {!isConnected ? (
+          <div className="connect-wallet">
             <input
               type="password"
               value={privateKey}
               onChange={(e) => setPrivateKey(e.target.value)}
-              className="flex-1 p-2 border rounded"
               placeholder="Enter private key"
-              disabled={loading}
             />
-            <button 
-              onClick={connectWallet}
-              className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors"
-              disabled={loading || !privateKey}
-            >
-              {loading ? 'Connecting...' : 'Connect'}
+            <button onClick={connectWallet} disabled={loading}>
+              Connect Wallet
             </button>
           </div>
-          <p className="text-xs mt-1 text-gray-500">Never share your private key. For testnet use only.</p>
-        </div>
-      ) : (
-        <div className="mb-6 p-4 bg-green-50 rounded border border-green-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="font-semibold">Connected Wallet</p>
-              <p className="text-sm text-gray-600">{walletAddress}</p>
-              {isOwner && campaignData && (
-                <p className="text-xs mt-1 text-green-600 font-semibold">Campaign Owner</p>
-              )}
+        ) : (
+          <div className="wallet-info">
+            <div className="wallet-details">
+              <span className="label">Connected:</span>
+              <span className="value address">{walletAddress}</span>
             </div>
             <button 
               onClick={() => {
-                setWalletConnected(false);
+                client.disconnect();
+                setIsConnected(false);
                 setWalletAddress('');
-                setIsOwner(false);
-                setPrivateKey('');
               }}
-              className="text-sm text-red-500 hover:text-red-700"
+              className="disconnect-button"
             >
               Disconnect
             </button>
           </div>
+        )}
+      </section>
+      
+      <section className="campaign-section">
+        <h2>Campaign</h2>
+        
+        <div className="load-campaign">
+          <input
+            type="text"
+            value={campaignAddress}
+            onChange={(e) => setCampaignAddress(e.target.value)}
+            placeholder="Enter campaign address"
+          />
+          <button onClick={loadCampaign} disabled={loading}>
+            Load Campaign
+          </button>
+        </div>
+        
+        {campaignData && renderCampaignInfo()}
+        {campaignData && renderActions()}
+      </section>
+      
+      {message && (
+        <div className="message-container">
+          <p className="message">{message}</p>
         </div>
       )}
       
-      {/* Transaction Hash Display */}
-      {txHash && (
-        <div className="mb-6 p-4 bg-gray-50 rounded border">
-          <p className="font-semibold mb-1">Latest Transaction</p>
-          <p className="text-sm text-gray-600 break-all mb-2">{txHash}</p>
-          <a 
-            href={getTransactionUrl(txHash)} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-blue-500 hover:text-blue-700 text-sm"
-          >
-            View in Explorer
-          </a>
-        </div>
-      )}
-      
-      {/* Campaign Details */}
-      {campaignData && (
-        <div className="mb-6 p-4 border rounded">
-          <h2 className="text-xl font-bold mb-1">{campaignData.title}</h2>
-          <p className="mb-4 text-gray-700">{campaignData.description}</p>
-          
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <p className="text-sm text-gray-600">Status</p>
-              <div className="font-semibold flex items-center gap-2">
-                <span className={
-                  campaignData.status === CampaignStatus.Active ? "text-blue-600" :
-                  campaignData.status === CampaignStatus.Computing ? "text-yellow-600" :
-                  "text-green-600"
-                }>
-                  {getStatusName(campaignData.status)}
-                </span>
-                {campaignData.status === CampaignStatus.Computing && (
-                  <span className="inline-block w-4 h-4 border-2 border-yellow-600 border-t-transparent rounded-full animate-spin"></span>
-                )}
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Funding Target</p>
-              <p className="font-semibold">{campaignData.fundingTarget}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Deadline</p>
-              <p className="font-semibold">{formatDate(campaignData.deadline)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Contributors</p>
-              <p className="font-semibold">{campaignData.numContributors ?? 'Hidden'}</p>
-            </div>
-          </div>
-
-          {campaignData.status === CampaignStatus.Completed && (
-            <div className="mt-4 p-4 bg-gray-50 rounded border">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-gray-600">Total Raised</p>
-                  <p className="text-2xl font-bold">{campaignData.totalRaised}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Campaign Result</p>
-                  <p className={`font-semibold ${
-                    campaignData.isSuccessful ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {campaignData.isSuccessful ? 'Success!' : 'Failed'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      
-      {/* Campaign Actions */}
-      {walletConnected && campaignData && (
-        <div className="space-y-6">
-          {/* Contribution Form */}
-          {isCampaignActive && (
-            <div className="p-4 bg-blue-50 rounded border border-blue-200">
-              <h3 className="font-semibold mb-3">Make a Contribution</h3>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={contributionAmount}
-                  onChange={(e) => setContributionAmount(e.target.value)}
-                  className="flex-1 p-2 border rounded"
-                  placeholder="Enter amount"
-                  disabled={loading}
-                  min="1"
-                />
-                <button 
-                  onClick={handleContribution}
-                  className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
-                  disabled={loading || !contributionAmount}
-                >
-                  {loading ? 'Processing...' : 'Contribute'}
-                </button>
-              </div>
-              <p className="text-xs mt-2 text-blue-700">Your contribution amount will remain private.</p>
-            </div>
-          )}
-          
-          {/* End Campaign Button */}
-          {isCampaignActive && (
-            <div className="p-4 bg-yellow-50 rounded border border-yellow-200">
-              <h3 className="font-semibold mb-3">End Campaign</h3>
-              <p className="text-sm text-gray-700 mb-3">
-                This will end the campaign and calculate the total raised amount.
-                {!isOwner && " Only the owner can do this before the deadline."}
-              </p>
-              <button 
-                onClick={handleEndCampaign}
-                className="w-full bg-yellow-500 text-white p-2 rounded hover:bg-yellow-600 transition-colors"
-                disabled={loading || (!isOwner && new Date().getTime() < campaignData.deadline)}
-              >
-                {loading ? 'Processing...' : 'End Campaign & Calculate Results'}
-              </button>
-            </div>
-          )}
-          
-          {/* Withdraw Funds Button */}
-          {canWithdraw && (
-            <div className="p-4 bg-green-50 rounded border border-green-200">
-              <h3 className="font-semibold mb-3">Withdraw Funds</h3>
-              <p className="text-sm text-gray-700 mb-3">
-                As the campaign owner, you can withdraw the raised funds since the campaign was successful.
-              </p>
-              <button 
-                onClick={handleWithdrawFunds}
-                className="w-full bg-green-600 text-white p-2 rounded hover:bg-green-700 transition-colors"
-                disabled={loading}
-              >
-                {loading ? 'Processing...' : 'Withdraw Funds'}
-              </button>
-            </div>
-          )}
+      {loading && (
+        <div className="loading-overlay">
+          <div className="spinner"></div>
+          <p>Processing...</p>
         </div>
       )}
     </div>
   );
+}
 
-  // Connect wallet with private key
-  const connectWallet = async () => {
-    if (!privateKey) {
-      showMessage('Please enter a private key', 'error');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      showMessage('Connecting wallet...', 'info');
-
-      const address = await client.connectWallet(privateKey);
-      setWalletAddress(address);
-      setWalletConnected(true);
-      
-      // Format address for display
-      const shortAddress = `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
-      showMessage(`Wallet connected: ${shortAddress}`, 'success');
-      
-      // Check if owner if campaign is loaded
-      if (contractAddress) {
-        checkOwnership();
-      }
-    } catch (error) {
-      showMessage(`Connection error: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Check if connected wallet is the campaign owner
-  const checkOwnership = async () => {
-    if (!walletConnected || !contractAddress) return;
-    
-    try {
-      const ownerStatus = await client.isOwner(contractAddress);
-      setIsOwner(ownerStatus);
-    } catch (error) {
-      console.error("Error checking ownership:", error);
-    }
-  };
-
-  // Load campaign data
-  const loadCampaign = useCallback(async () => {
-    if (!contractAddress) {
-      showMessage('Please enter a contract address', 'error');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      showMessage('Loading campaign data...', 'info');
-      
-      // Set contract address in client
-      client.setCampaignAddress(contractAddress);
-      
-      // Fetch campaign data
-      const data = await client.getCampaignData(contractAddress);
-      setCampaignData(data);
-      showMessage('Campaign loaded successfully', 'success');
-      
-      // Check if wallet is owner
-      if (walletConnected) {
-        checkOwnership();
-      }
-      
-    } catch (error) {
-      showMessage(`Error loading campaign: ${error.message}`, 'error');
-      setCampaignData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [contractAddress, walletConnected]);
-
-  // Auto-refresh when in Computing state
-  useEffect(() => {
-    let refreshTimer: NodeJS.Timeout;
-    
-    if (campaignData?.status === CampaignStatus.Computing) {
-      refreshTimer = setInterval(() => {
-        loadCampaign();
-      }, 10000); // Refresh every 10 seconds
-    }
-    
-    return () => {
-      if (refreshTimer) clearInterval(refreshTimer);
-    };
-  }, [campaignData?.status, loadCampaign]);
-
-  // Submit contribution
-  const handleContribution = async () => {
-    if (!contractAddress) {
-      showMessage('Please enter a contract address', 'error');
-      return;
-    }
-    
-    if (!walletConnected) {
-      showMessage('Please connect your wallet first', 'error');
-      return;
-    }
-    
-    if (!contributionAmount || parseInt(contributionAmount) <= 0) {
-      showMessage('Please enter a valid contribution amount', 'error');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      showMessage('Processing contribution...', 'info');
-      
-      const amount = parseInt(contributionAmount);
-      const txId = await client.addContribution(contractAddress, amount);
-      
-      setTxHash(txId);
-      showMessage(`Contribution submitted! Transaction: ${txId}`, 'success');
-      setContributionAmount('');
-      
-      // Wait a moment before refreshing
-      setTimeout(() => loadCampaign(), 5000);
-      
-    } catch (error) {
-      showMessage(`Error: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // End campaign
-  const handleEndCampaign = async () => {
-    if (!contractAddress || !walletConnected) {
-      showMessage('Please connect wallet and enter contract address', 'error');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      showMessage('Ending campaign...', 'info');
-      
-      const txId = await client.endCampaign(contractAddress);
-      
-      setTxHash(txId);
-      showMessage(`Campaign ending initiated! Transaction: ${txId}`, 'success');
-      
-      // Change status to computing to show progress
-      if (campaignData) {
-        setCampaignData({
-          ...campaignData,
-          status: CampaignStatus.Computing
-        });
-      }
-      
-    } catch (error) {
-      showMessage(`Error: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Withdraw funds
-  const handleWithdrawFunds = async () => {
-    if (!contractAddress || !walletConnected) {
-      showMessage('Please connect wallet and enter contract address', 'error');
-      return;
-    }
-    
-    if (!isOwner) {
-      showMessage('Only the campaign owner can withdraw funds', 'error');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      showMessage('Withdrawing funds...', 'info');
-      
-      const txId = await client.withdrawFunds(contractAddress);
-      
-      setTxHash(txId);
-      showMessage(`Withdrawal initiated! Transaction: ${txId}`, 'success');
-      
-      // Refresh after a short delay to show updated state
-      setTimeout(() => loadCampaign(), 5000);
-      
-    } catch (error) {
-      showMessage(`Error: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+export default CrowdfundingApp;
