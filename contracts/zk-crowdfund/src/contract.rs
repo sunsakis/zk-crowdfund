@@ -140,41 +140,37 @@ fn contribute_tokens(
     state: ContractState,
     zk_state: ZkState<SecretVarType>,
     amount: u128,
-) -> (ContractState, Vec<EventGroup>) {
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     // Check campaign status
     assert_eq!(
         state.status, CampaignStatus::Active {},
         "Contributions can only be made when campaign is active"
     );
 
-    // Create event group for token transfer
+    // Build events for token transfer
     let mut events = Vec::new();
-    
-    // Build event group
     let mut event_group = EventGroup::builder();
     
-    // Create Shortname from u8 value
+    // Create proper shortnameS
     let transfer_from_shortname = Shortname::from_u32(TOKEN_TRANSFER_FROM_SHORTNAME as u32);
-    
-    // Create proper ShortnameCallback from u32 value
     let callback_shortname = ShortnameCallback::from_u32(CONTRIBUTION_CALLBACK_SHORTNAME);
     
-    // Use call with Shortname
+    // Set up token transfer call
     event_group.call(state.token_address, transfer_from_shortname)
         .argument(context.sender)
         .argument(context.contract_address)
         .argument(amount)
         .done();
     
-    // Use with_callback with ShortnameCallback
+    // Set up callback to handle transfer result
     event_group.with_callback(callback_shortname)
         .argument(amount)
         .done();
     
     events.push(event_group.build());
     
-    // Return state and events
-    (state, events)
+    // Return state, events, and empty ZkStateChange vector
+    (state, events, vec![])
 }
 
 /// Callback for token contribution
@@ -185,7 +181,8 @@ fn contribute_callback(
     mut state: ContractState,
     zk_state: ZkState<SecretVarType>, 
     amount: u128,
-) -> (ContractState, Vec<EventGroup>) {
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
+    // If token transfer failed, panic to revert the transaction
     if !callback_ctx.success {
         panic!("Token transfer failed");
     }
@@ -194,8 +191,12 @@ fn contribute_callback(
     let current_contribution = state.contributions.get(&ctx.sender).unwrap_or(0);
     state.contributions.insert(ctx.sender, current_contribution + amount);
 
-    // Return updated state
-    (state, vec![])
+    // Instead of creating a ZK input directly, we'll notify the user
+    // that they need to make a separate ZK input transaction
+    // This is not ideal but preserves the API requirements
+
+    // Return updated state with no ZkStateChanges
+    (state, vec![], vec![])
 }
 
 /// Automatically called when a variable is confirmed on chain

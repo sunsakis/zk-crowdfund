@@ -330,7 +330,8 @@ export const updateContractState = () => {
     });
 };
 
-function addContributionFormAction() {
+// In Main.ts
+async function addContributionFormAction() {
   console.log("Add contribution button clicked");
   
   // Test if a user has connected
@@ -339,20 +340,20 @@ function addContributionFormAction() {
     return;
   }
   
-  if (!elements.contributionInput || isNaN(parseInt(elements.contributionInput.value, 10))) {
+  const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
+  if (!contributionInput || isNaN(parseInt(contributionInput.value, 10))) {
     setConnectionStatus("Please enter a valid contribution amount");
     return;
   }
   
-  // All fields validated, add contribution
+  // Get API and address
   const api = getCrowdfundingApi();
-  if (!api) {
-    setConnectionStatus("Error: API not initialized");
+  const address = getContractAddress();
+  
+  if (!api || !address) {
+    setConnectionStatus("API or address not initialized");
     return;
   }
-  
-  const amount = parseInt(elements.contributionInput.value, 10);
-  console.log(`Adding contribution of ${amount}`);
   
   // Disable the button during processing
   const addContributionBtn = document.querySelector("#add-contribution-btn") as HTMLButtonElement;
@@ -362,95 +363,216 @@ function addContributionFormAction() {
   }
   
   // Show transaction info container
-  if (elements.addContributionTransactionLink) {
-    elements.addContributionTransactionLink.classList.remove("hidden");
-    elements.addContributionTransactionLink.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
+  const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
+  if (transactionLinkContainer) {
+    transactionLinkContainer.classList.remove("hidden");
+    transactionLinkContainer.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
   }
   
-  // Create a timeout to ensure spinner doesn't run forever
-  const timeoutId = setTimeout(() => {
-    console.log("Contribution transaction timed out after 60 seconds");
-    if (elements.addContributionTransactionLink) {
-      elements.addContributionTransactionLink.innerHTML = '<div class="alert alert-error">Transaction timed out. It may still be processing.</div>';
+  try {
+    // Get the contract data to find token address
+    const contractData = await CLIENT.getContractData(address);
+    if (!contractData?.serializedContract?.openState?.openState?.data) {
+      throw new Error("Could not retrieve contract data");
     }
+    
+    // Parse the state to get token address
+    const stateBuffer = Buffer.from(
+      contractData.serializedContract.openState.openState.data,
+      "base64"
+    );
+    
+    const state = deserializeState(stateBuffer);
+    const tokenAddress = state.token_address?.asString();
+    
+    if (!tokenAddress) {
+      throw new Error("Token address not found in contract state");
+    }
+    
+    // Parse amount
+    const amount = parseInt(contributionInput.value, 10);
+    
+    // Step 1: Check token allowance and approve if needed
+    setConnectionStatus("Checking token allowance...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Checking token allowance...</p>
+        </div>
+      `;
+    }
+    
+    const allowance = await api.getTokenAllowance(
+      tokenAddress,
+      api.client.getAddress(),
+      address
+    );
+    
+    if (allowance < BigInt(amount)) {
+      setConnectionStatus("Approving tokens (Step 1/3)...");
+      if (transactionLinkContainer) {
+        transactionLinkContainer.innerHTML = `
+          <div class="alert alert-info">
+            <p>Approving tokens (Step 1/3)...</p>
+          </div>
+        `;
+      }
+      
+      const approvalTx = await api.approveTokens(
+        tokenAddress,
+        address,
+        BigInt(amount)
+      );
+      
+      setConnectionStatus("Waiting for approval confirmation...");
+      if (transactionLinkContainer) {
+        transactionLinkContainer.innerHTML = `
+          <div class="alert alert-info">
+            <p>Approval transaction submitted (Step 1/3)</p>
+            <p class="transaction-hash">Transaction: ${approvalTx.transactionPointer.identifier}</p>
+            <a href="https://browser.testnet.partisiablockchain.com/transactions/${approvalTx.transactionPointer.identifier}" 
+               class="transaction-link" target="_blank">View in Explorer</a>
+            <p>Waiting for confirmation...</p>
+          </div>
+        `;
+      }
+      
+      await waitForTransaction(approvalTx.transactionPointer.identifier);
+    }
+    
+    // Step 2: Add ZK contribution
+    setConnectionStatus("Adding confidential contribution (Step 2/3)...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Adding confidential contribution (Step 2/3)...</p>
+        </div>
+      `;
+    }
+    
+    const zkTx = await api.addContribution(amount);
+    
+    setConnectionStatus("Waiting for contribution confirmation...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Confidential contribution submitted (Step 2/3)</p>
+          <p class="transaction-hash">Transaction: ${zkTx.transactionPointer.identifier}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTx.transactionPointer.identifier}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p>Waiting for confirmation...</p>
+        </div>
+      `;
+    }
+    
+    await waitForTransaction(zkTx.transactionPointer.identifier);
+    
+    // Step 3: Transfer tokens
+    setConnectionStatus("Transferring tokens (Step 3/3)...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Transferring tokens (Step 3/3)...</p>
+        </div>
+      `;
+    }
+    
+    const tokenTx = await api.contributeTokens(address, amount);
+    
+    setConnectionStatus("Waiting for token transfer confirmation...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Token transfer submitted (Step 3/3)</p>
+          <p class="transaction-hash">Transaction: ${tokenTx.transactionPointer.identifier}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTx.transactionPointer.identifier}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p>Waiting for confirmation...</p>
+        </div>
+      `;
+    }
+    
+    await waitForTransaction(tokenTx.transactionPointer.identifier);
+    
+    // Save contribution receipt
+    try {
+      const receipt = {
+        txId: tokenTx.transactionPointer.identifier,
+        campaignAddress: address,
+        timestamp: Date.now()
+      };
+      
+      localStorage.setItem(
+        `contribution_receipt_${address}`,
+        JSON.stringify(receipt)
+      );
+    } catch (error) {
+      console.error("Error saving receipt:", error);
+    }
+    
+    // Success!
+    setConnectionStatus("Contribution successful!");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-success">
+          <p>Contribution successful!</p>
+          <p class="transaction-hash">Final Transaction: ${tokenTx.transactionPointer.identifier}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTx.transactionPointer.identifier}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+        </div>
+      `;
+    }
+    
+    // Clear the input
+    contributionInput.value = "";
+    
+    // Update the contract state after a delay
+    setTimeout(() => {
+      updateContractState();
+    }, 5000);
+    
+  } catch (error) {
+    console.error("Error in contribution process:", error);
+    
+    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-error">
+          <p>Error: ${error.message || String(error)}</p>
+        </div>
+      `;
+    }
+  } finally {
+    // Re-enable the button
     if (addContributionBtn) {
       addContributionBtn.disabled = false;
       addContributionBtn.textContent = "Contribute";
     }
-  }, 60000); // 60 second timeout
+  }
+}
+
+// Helper function to wait for transaction confirmation
+async function waitForTransaction(txId: string, maxAttempts = 30): Promise<boolean> {
+  let attempts = 0;
   
-  // Add contribution via API
-  api.addContribution(amount)
-    .then((result) => {
-      // Clear the timeout as we got a response
-      clearTimeout(timeoutId);
+  while (attempts < maxAttempts) {
+    try {
+      // Get transaction status
+      const response = await CLIENT.getExecutedTransaction(null, txId);
       
-      console.log("Contribution transaction submitted successfully:", result);
-      const txId = result.transactionPointer.identifier;
-      
-      // Update transaction hash display
-      if (elements.contributionTxHash) {
-        elements.contributionTxHash.textContent = `Transaction: ${txId}`;
+      if (response?.finalized) {
+        return response.executionSucceeded || false;
       }
-      
-      // Update transaction link
-      if (elements.contributionTxLink) {
-        elements.contributionTxLink.href = `https://browser.testnet.partisiablockchain.com/transactions/${txId}`;
-      }
-      
-      if (elements.addContributionTransactionLink) {
-        elements.addContributionTransactionLink.innerHTML = '';
-        
-        const txInfoDiv = document.createElement('div');
-        txInfoDiv.className = 'transaction-info';
-        
-        const txHashPara = document.createElement('p');
-        txHashPara.textContent = `Transaction: ${txId}`;
-        txInfoDiv.appendChild(txHashPara);
-        
-        const txLink = document.createElement('a');
-        txLink.href = `https://browser.testnet.partisiablockchain.com/transactions/${txId}`;
-        txLink.textContent = 'View in Explorer';
-        txLink.className = 'transaction-link';
-        txLink.target = '_blank';
-        txInfoDiv.appendChild(txLink);
-        
-        elements.addContributionTransactionLink.appendChild(txInfoDiv);
-      }
-      
-      // Set status message
-      setConnectionStatus("Contribution submitted successfully");
-      
-      // Clear input after successful contribution
-      if (elements.contributionInput) {
-        elements.contributionInput.value = "";
-      }
-      
-      // Update state after a delay to reflect new contribution
-      console.log("Setting timeout to update contract state");
-      setTimeout(() => {
-        console.log("Executing delayed state update after contribution");
-        updateContractState();
-      }, 15000);
-    })
-    .catch((error) => {
-      // Clear the timeout as we got a response
-      clearTimeout(timeoutId);
-      
-      console.error("Error making contribution:", error);
-      
-      if (elements.addContributionTransactionLink) {
-        elements.addContributionTransactionLink.innerHTML = `<div class="alert alert-error">Error: ${error.message || String(error)}</div>`;
-      }
-      setConnectionStatus(`Error making contribution: ${error.message || String(error)}`);
-    })
-    .finally(() => {
-      // Re-enable the button
-      if (addContributionBtn) {
-        addContributionBtn.disabled = false;
-        addContributionBtn.textContent = "Contribute";
-      }
-    });
+    } catch (error) {
+      console.log(`Waiting for transaction ${txId}...`);
+    }
+    
+    // Wait 2 seconds before trying again
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    attempts++;
+  }
+  
+  throw new Error('Transaction confirmation timeout');
 }
 
 function endCampaignAction() {
