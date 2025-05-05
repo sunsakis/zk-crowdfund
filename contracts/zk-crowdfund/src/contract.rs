@@ -90,8 +90,8 @@ fn initialize(
     assert!(!description.is_empty(), "Description cannot be empty");
     assert!(funding_target > 0, "Funding target must be greater than 0");
     assert!(
-        token_address.address_type == AddressType::PublicContract,
-        "Token address must be a public contract"
+        token_address.address_type != AddressType::Account,
+        "Token address cannot be a user account"
     );
 
     ContractState {

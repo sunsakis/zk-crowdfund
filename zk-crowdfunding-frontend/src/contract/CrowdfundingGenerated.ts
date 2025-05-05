@@ -44,6 +44,15 @@ export class CrowdfundingContract {
       const owner: BlockchainAddress = _input.readAddress();
       const title: string = _input.readString();
       const description: string = _input.readString();
+      
+      // Handle token_address field if it exists in your contract
+      let token_address: BlockchainAddress | undefined;
+      try {
+        token_address = _input.readAddress();
+      } catch (error) {
+        console.warn("Could not read token_address, this field might not exist in contract");
+      }
+      
       const fundingTarget: number = _input.readU32();
       const status: CampaignStatus = _input.readU8();
       
@@ -66,7 +75,8 @@ export class CrowdfundingContract {
       return { 
         owner, 
         title, 
-        description, 
+        description,
+        token_address, 
         fundingTarget, 
         status, 
         totalRaised, 
@@ -80,12 +90,17 @@ export class CrowdfundingContract {
   }
   
   public async getState(): Promise<ContractState> {
-    const bytes = await this._client?.getContractStateBinary(this._address!);
-    if (bytes === undefined) {
-      throw new Error("Unable to get state bytes");
+    try {
+      const bytes = await this._client?.getContractStateBinary(this._address!);
+      if (bytes === undefined) {
+        throw new Error("Unable to get state bytes");
+      }
+      const input = AbiByteInput.createLittleEndian(bytes);
+      return this.deserializeContractState(input);
+    } catch (error) {
+      console.error("Error in getState:", error);
+      throw error;
     }
-    const input = AbiByteInput.createLittleEndian(bytes);
-    return this.deserializeContractState(input);
   }
 }
 
@@ -93,6 +108,7 @@ export interface ContractState {
   owner: BlockchainAddress;
   title: string;
   description: string;
+  token_address?: BlockchainAddress; // Optional as it may not exist in older versions
   fundingTarget: number;
   status: CampaignStatus;
   totalRaised: Option<number>;
@@ -125,7 +141,7 @@ export function addContribution(): SecretInputBuilder<number> {
   const _publicRpc: Buffer = AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeBytes(Buffer.from("40", "hex"));
   });
-  const _secretInput = (secret_input_lambda: number): CompactBitArray =>
+  const _secretInput = (secret_input_lambda: number): any =>
     AbiBitOutput.serialize((_out) => {
       _out.writeI32(secret_input_lambda);
     });

@@ -214,31 +214,36 @@ function contractAddressClick() {
   }
   
   // Validate that address is 21 bytes in hexadecimal format
-  const regex = /[0-9A-Fa-f]{42}/g;
-  if (address.length != 42 || address.match(regex) == null) {
+  const regex = /^[0-9A-Fa-f]{42}$/;
+  if (address.length != 42 || !regex.test(address)) {
     setConnectionStatus(`${address} is not a valid Partisia Blockchain address`);
     return;
   }
   
   console.log(`Setting contract address: ${address}`);
   
-  // Update the contract state
-  setContractAddress(address);
-  updateInteractionVisibility();
-  
-  // Show address and link to the browser
-  const currentAddressElement = document.querySelector("#current-address");
-  if (currentAddressElement) {
-    currentAddressElement.innerHTML = `Campaign Contract Address: <strong>${address}</strong>`;
+  try {
+    // Update the contract state
+    setContractAddress(address);
+    updateInteractionVisibility();
+    
+    // Show address and link to the browser
+    const currentAddressElement = document.querySelector("#current-address");
+    if (currentAddressElement) {
+      currentAddressElement.innerHTML = `Campaign Contract Address: <strong>${address}</strong>`;
+    }
+    
+    const browserLink = document.querySelector("#browser-link");
+    if (browserLink) {
+      browserLink.innerHTML = `<a href="https://browser.testnet.partisiablockchain.com/contracts/${address}" class="transaction-link" target="_blank">View contract in explorer</a>`;
+    }
+    
+    // Update the contract state
+    updateContractState();
+  } catch (error) {
+    console.error("Error setting contract address:", error);
+    setConnectionStatus(`Error: ${error.message || String(error)}`);
   }
-  
-  const browserLink = document.querySelector("#browser-link");
-  if (browserLink) {
-    browserLink.innerHTML = `<a href="https://browser.testnet.partisiablockchain.com/contracts/${address}" class="transaction-link" target="_blank">View contract in explorer</a>`;
-  }
-  
-  // Update the contract state
-  updateContractState();
 }
 
 export const updateContractState = () => {
