@@ -12,7 +12,7 @@ import {
 } from '@partisiablockchain/blockchain-api-transaction-client';
 import { CryptoUtils, RealZkClient, Client } from '@partisiablockchain/zk-client';
 import { Buffer } from 'buffer';
-import { deserializeState } from './contract/CrowdfundingGenerated';
+import { deserializeState } from '../contract/CrowdfundingGenerated';
 
 // Campaign status enum matching the contract
 export enum CampaignStatus {
@@ -116,6 +116,122 @@ export class CrowdfundingClient {
       return false;
     }
   }
+
+/**
+ * Check token allowance for the campaign contract
+ * @param tokenAddress Token contract address
+ * @param ownerAddress Owner address (usually the connected wallet)
+ * @param spenderAddress Spender address (campaign contract)
+ * @returns Current allowance as BigInt
+ */
+async getTokenAllowance(
+  tokenAddress: string,
+  ownerAddress: string,
+  spenderAddress: string
+): Promise<bigint> {
+  try {
+      // For now, return 0 to ensure approval is always needed
+      // In a production app, you'd query the token contract
+      console.log("Checking allowance (simulated):", ownerAddress, spenderAddress);
+      return BigInt(0);
+  } catch (error) {
+      console.error("Error getting token allowance:", error);
+      return BigInt(0);
+  }
+}
+
+/**
+* Approve tokens to be spent by the campaign contract
+* @param tokenAddress Token contract address
+* @param campaignAddress Campaign contract address
+* @param amount Amount to approve
+* @returns Transaction result
+*/
+async approveTokens(
+  tokenAddress: string,
+  campaignAddress: string,
+  amount: bigint
+): Promise<SentTransaction> {
+  if (!this.transactionClient) {
+      throw new Error("Wallet not connected");
+  }
+
+  try {
+      console.log(`Approving ${amount} tokens for campaign ${campaignAddress}`);
+
+      // Build the approve RPC buffer (shortname 0x05 for approve)
+      // For large numbers, we need to handle the serialization differently
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+          _out.writeU8(0x05); // approve shortname
+          _out.writeAddress(BlockchainAddress.fromString(campaignAddress));
+          
+          // Convert BigInt to bytes and write it as a byte array
+          // For u128, we need 16 bytes
+          const buffer = Buffer.alloc(16);
+          
+          // Write the amount as little-endian bytes
+          // This might need adjustment based on your exact protocol
+          for (let i = 0; i < 16; i++) {
+              buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+          }
+          
+          _out.writeBytes(buffer);
+      });
+
+      // Send the transaction to approve tokens
+      return this.transactionClient.signAndSend({
+          address: tokenAddress,
+          rpc
+      }, 10000); // 10,000 gas
+  } catch (error) {
+      console.error("Error approving tokens:", error);
+      throw error;
+  }
+}
+
+/**
+* Transfer tokens to the campaign (separate from ZK input)
+* @param contractAddress Campaign contract address
+* @param amount Contribution amount
+* @returns Transaction result
+*/
+async contributeTokens(
+  contractAddress: string, 
+  amount: number
+): Promise<SentTransaction> {
+  if (!this.transactionClient) {
+      throw new Error("Wallet not connected");
+  }
+
+  try {
+      console.log(`Contributing ${amount} tokens to campaign ${contractAddress}`);
+
+      // Create RPC for contribute_tokens (shortname 0x03)
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+          _out.writeU8(0x03); // contribute_tokens shortname
+          
+          // Convert number to bytes for u128
+          const buffer = Buffer.alloc(16);
+          const bigIntAmount = BigInt(amount);
+          
+          // Write the amount as little-endian bytes
+          for (let i = 0; i < 16; i++) {
+              buffer[i] = Number((bigIntAmount >> BigInt(i * 8)) & BigInt(0xff));
+          }
+          
+          _out.writeBytes(buffer);
+      });
+
+      // Send the transaction
+      return this.transactionClient.signAndSend({
+          address: contractAddress,
+          rpc
+      }, 100000); // 100,000 gas
+  } catch (error) {
+      console.error("Error contributing tokens:", error);
+      throw error;
+  }
+}
   
   /**
    * Get campaign data from contract

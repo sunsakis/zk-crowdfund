@@ -330,7 +330,6 @@ export const updateContractState = () => {
     });
 };
 
-// In Main.ts
 async function addContributionFormAction() {
   console.log("Add contribution button clicked");
   
@@ -404,7 +403,7 @@ async function addContributionFormAction() {
     
     const allowance = await api.getTokenAllowance(
       tokenAddress,
-      api.client.getAddress(),
+      api.getWalletAddress(),
       address
     );
     
