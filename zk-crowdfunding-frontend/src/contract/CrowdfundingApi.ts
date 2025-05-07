@@ -26,7 +26,87 @@ export class CrowdfundingApi {
     this.sender = sender;
   }
 
-    /**
+  /**
+   * Get wallet address
+   * @returns The wallet address
+   */
+  readonly getWalletAddress = (): string => {
+    return this.sender;
+  };
+
+  /**
+   * Check token allowance for the campaign contract
+   * @param tokenAddress Token contract address
+   * @param ownerAddress Owner address (usually the connected wallet)
+   * @param spenderAddress Spender address (campaign contract)
+   * @returns Current allowance as BigInt
+   */
+  readonly getTokenAllowance = async (
+    tokenAddress: string,
+    ownerAddress: string,
+    spenderAddress: string
+  ): Promise<bigint> => {
+    try {
+      // For now, return 0 to ensure approval is always needed
+      // In a production app, you'd query the token contract
+      console.log("Checking allowance (simulated):", ownerAddress, spenderAddress);
+      return BigInt(0);
+    } catch (error) {
+      console.error("Error getting token allowance:", error);
+      return BigInt(0);
+    }
+  };
+
+  /**
+   * Approve tokens to be spent by the campaign contract
+   * @param tokenAddress Token contract address
+   * @param campaignAddress Campaign contract address
+   * @param amount Amount to approve
+   * @returns Transaction result
+   */
+  readonly approveTokens = async (
+    tokenAddress: string,
+    campaignAddress: string,
+    amount: bigint
+  ) => {
+    if (!this.transactionClient) {
+      throw new Error("Wallet not connected");
+    }
+
+    try {
+      console.log(`Approving ${amount} tokens for campaign ${campaignAddress}`);
+
+      // Build the approve RPC buffer (shortname 0x05 for approve)
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x05); // approve shortname
+        
+        // Instead of using BlockchainAddress.fromString, we'll write the address directly
+        _out.writeBytes(Buffer.from(campaignAddress, 'hex'));
+        
+        // Convert BigInt to bytes and write it as a byte array
+        // For u128, we need 16 bytes
+        const buffer = Buffer.alloc(16);
+        
+        // Write the amount as little-endian bytes
+        for (let i = 0; i < 16; i++) {
+          buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        
+        _out.writeBytes(buffer);
+      });
+
+      // Send the transaction to approve tokens
+      return this.transactionClient.signAndSend({
+        address: tokenAddress,
+        rpc
+      }, 10000); // 10,000 gas
+    } catch (error) {
+      console.error("Error approving tokens:", error);
+      throw error;
+    }
+  };
+
+  /**
    * Verify if the user has made a contribution to the campaign
    * @param address The contract address
    */
@@ -42,7 +122,7 @@ export class CrowdfundingApi {
     // Using same format as previous functions but with different shortname
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
       _out.writeU8(0x09);
-      _out.writeBytes(Buffer.from("04", "hex"));  // Shortname 0x04 for verification
+      _out.writeBytes(Buffer.from("06", "hex"));  // Shortname 0x06 for verification
     });
     
     try {
@@ -83,6 +163,51 @@ export class CrowdfundingApi {
       return this.transactionClient.signAndSend(transaction, 100_000);
     } catch (error) {
       console.error("Error adding contribution:", error);
+      throw error;
+    }
+  };
+  
+  /**
+   * Transfer tokens to the campaign (separate from ZK input)
+   * @param address Campaign contract address
+   * @param amount Contribution amount
+   * @returns Transaction result
+   */
+  readonly contributeTokens = async (address: string, amount: number) => {
+    if (!address) {
+      throw new Error("No contract address provided");
+    }
+    
+    if (this.transactionClient === undefined) {
+      throw new Error("No account logged in");
+    }
+    
+    try {
+      console.log(`Contributing ${amount} tokens to campaign ${address}`);
+
+      // Create RPC for contribute_tokens (shortname 0x03)
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x03); // contribute_tokens shortname
+        
+        // Convert number to bytes for u128
+        const buffer = Buffer.alloc(16);
+        const bigIntAmount = BigInt(amount);
+        
+        // Write the amount as little-endian bytes
+        for (let i = 0; i < 16; i++) {
+          buffer[i] = Number((bigIntAmount >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        
+        _out.writeBytes(buffer);
+      });
+
+      // Send the transaction
+      return this.transactionClient.signAndSend({
+        address,
+        rpc
+      }, 100_000); // 100,000 gas
+    } catch (error) {
+      console.error("Error contributing tokens:", error);
       throw error;
     }
   };
@@ -138,7 +263,7 @@ export class CrowdfundingApi {
     // Using same format as endCampaign with different shortname
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
       _out.writeU8(0x09);
-      _out.writeBytes(Buffer.from("02", "hex"));
+      _out.writeBytes(Buffer.from("04", "hex"));
     });
     
     return this.transactionClient.signAndSend({ address, rpc }, 20_000);
