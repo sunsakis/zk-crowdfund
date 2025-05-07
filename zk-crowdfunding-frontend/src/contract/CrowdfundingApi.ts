@@ -182,35 +182,28 @@ export class CrowdfundingApi {
       throw new Error("No account logged in");
     }
     
-    try {
-      console.log(`Contributing ${amount} tokens to campaign ${address}`);
-
-      // Create RPC for contribute_tokens (shortname 0x03)
-      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-        _out.writeU8(0x03); // contribute_tokens shortname
-        
-        // Convert number to bytes for u128
-        const buffer = Buffer.alloc(16);
-        const bigIntAmount = BigInt(amount);
-        
-        // Write the amount as little-endian bytes
-        for (let i = 0; i < 16; i++) {
-          buffer[i] = Number((bigIntAmount >> BigInt(i * 8)) & BigInt(0xff));
-        }
-        
-        _out.writeBytes(buffer);
-      });
-
-      // Send the transaction
-      return this.transactionClient.signAndSend({
-        address,
-        rpc
-      }, 100_000); // 100,000 gas
-    } catch (error) {
-      console.error("Error contributing tokens:", error);
-      throw error;
-    }
-  };
+    // Create RPC for contribute_tokens (shortname 0x03)
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      _out.writeU8(0x03); // contribute_tokens shortname
+      
+      // Convert number to bytes for u128
+      const buffer = Buffer.alloc(16);
+      const bigIntAmount = BigInt(amount);
+      
+      // Write the amount as little-endian bytes
+      for (let i = 0; i < 16; i++) {
+        buffer[i] = Number((bigIntAmount >> BigInt(i * 8)) & BigInt(0xff));
+      }
+      
+      _out.writeBytes(buffer);
+    });
+  
+    // Send the transaction
+    return this.transactionClient.signAndSend({
+      address,
+      rpc
+    }, 100000); // 100,000 gas
+  }
 
   /**
    * Build and send end campaign transaction
