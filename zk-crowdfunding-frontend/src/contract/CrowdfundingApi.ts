@@ -138,34 +138,39 @@ export class CrowdfundingApi {
    * Build and send add contribution secret input transaction.
    * @param amount the contribution amount to input
    */
-  readonly addContribution = async (amount: number) => {
-    if (this.transactionClient === undefined) {
-      throw new Error("No account logged in");
-    }
+readonly addContribution = async (amount: number) => {
+  if (this.transactionClient === undefined) {
+    throw new Error("No account logged in");
+  }
 
-    // Create secret input builder for the contribution amount
-    const secretInput = AbiBitOutput.serialize((_out) => {
-      _out.writeI32(amount);
-    });
+  // Create secret input builder for the contribution amount
+  const secretInput = AbiBitOutput.serialize((_out) => {
+    _out.writeI32(amount);
+  });
+  
+  // Create public RPC for add_contribution (shortname 0x40)
+  const publicRpc = Buffer.from([0x40]);
+  
+  try {
+    console.log("Building ZK transaction for amount:", amount);
     
-    // Create public RPC for add_contribution (shortname 0x40)
-    const publicRpc = Buffer.from([0x40]);
+    // Build the ZK input transaction
+    const transaction = await this.zkClient.buildOnChainInputTransaction(
+      this.sender,
+      secretInput,
+      publicRpc
+    );
     
-    try {
-      // Build the ZK input transaction
-      const transaction = await this.zkClient.buildOnChainInputTransaction(
-        this.sender,
-        secretInput,
-        publicRpc
-      );
-      
-      // Send the transaction
-      return this.transactionClient.signAndSend(transaction, 100_000);
-    } catch (error) {
-      console.error("Error adding contribution:", error);
-      throw error;
-    }
-  };
+    console.log("Transaction built:", transaction);
+    
+    // Send the transaction
+    console.log("Sending transaction...");
+    return this.transactionClient.signAndSend(transaction, 100_000);
+  } catch (error) {
+    console.error("Error adding contribution:", error);
+    throw error;
+  }
+};
   
   /**
    * Transfer tokens to the campaign (separate from ZK input)

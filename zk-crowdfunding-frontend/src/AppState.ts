@@ -6,9 +6,13 @@ import {
   SenderAuthentication
 } from "@partisiablockchain/blockchain-api-transaction-client";
 
-// Constants
-export const TESTNET_URL = "https://node1.testnet.partisiablockchain.com";
-export const CLIENT = new ShardedClient(TESTNET_URL, ["Shard0", "Shard1", "Shard2"]);
+// Constants with primary and fallback nodes
+export const TESTNET_URL_PRIMARY = "https://node1.testnet.partisiablockchain.com";
+export const TESTNET_URL_FALLBACK = "https://node2.testnet.partisiablockchain.com";
+
+// Start with primary node
+let currentNodeUrl = TESTNET_URL_PRIMARY;
+export const CLIENT = new ShardedClient(currentNodeUrl, ["Shard0", "Shard1", "Shard2"]);
 
 // State variables
 let contractAddress: string | undefined;
@@ -17,9 +21,68 @@ let crowdfundingApi: CrowdfundingApi | undefined;
 let walletType: 'privateKey' | 'mpc' | 'metamask' | undefined;
 
 // Event handling for state changes
-// You can use a simple event system for vanilla TypeScript
 type StateChangeListener = () => void;
 const stateChangeListeners: StateChangeListener[] = [];
+
+/**
+ * Check if blockchain node is accessible
+ * @returns Promise resolving to true if node is accessible, false otherwise
+ */
+export const checkNodeConnectivity = async (): Promise<boolean> => {
+  try {
+    console.log(`Checking connectivity to node: ${currentNodeUrl}`);
+    const testUrl = `${currentNodeUrl}/blockchain/blocks/latest`;
+    
+    const response = await fetch(testUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      },
+      // Short timeout to detect connectivity issues faster
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (response.ok) {
+      console.log("Blockchain node is accessible");
+      return true;
+    } else {
+      console.error(`Node connectivity check failed: ${response.status} ${response.statusText}`);
+      return false;
+    }
+  } catch (error) {
+    console.error("Failed to connect to blockchain node:", error);
+    return false;
+  }
+};
+
+/**
+ * Switch to fallback node
+ * @returns The new ShardedClient instance
+ */
+export const switchToFallbackNode = (): ShardedClient => {
+  // If already on fallback, switch back to primary
+  if (currentNodeUrl === TESTNET_URL_FALLBACK) {
+    currentNodeUrl = TESTNET_URL_PRIMARY;
+  } else {
+    currentNodeUrl = TESTNET_URL_FALLBACK;
+  }
+  
+  console.log(`Switching to node: ${currentNodeUrl}`);
+  
+  // Create new client with updated URL
+  const newClient = new ShardedClient(currentNodeUrl, ["Shard0", "Shard1", "Shard2"]);
+  
+  // Replace global CLIENT reference
+  (global as any).CLIENT = newClient;
+  
+  // Update API if wallet is connected and contract is set
+  if (currentAccount && contractAddress) {
+    updateCrowdfundingApi();
+  }
+  
+  console.log(`Switched to node: ${currentNodeUrl}`);
+  return newClient;
+};
 
 /**
  * Subscribe to state changes
@@ -131,18 +194,25 @@ export const getCrowdfundingApi = (): CrowdfundingApi | undefined => {
 function updateCrowdfundingApi(): void {
   if (currentAccount && contractAddress) {
     try {
+      console.log(`Creating transaction client with node URL: ${currentNodeUrl}`);
+      
+      // Create transaction client with current node URL
       const transactionClient = BlockchainTransactionClient.create(
-        TESTNET_URL,
+        currentNodeUrl,
         currentAccount
       );
       
-      const zkClient = RealZkClient.create(contractAddress, new Client(TESTNET_URL));
+      // Create ZK client with contract address
+      const zkClient = RealZkClient.create(contractAddress, new Client(currentNodeUrl));
       
+      // Create API instance
       crowdfundingApi = new CrowdfundingApi(
         transactionClient, 
         zkClient, 
         currentAccount.getAddress()
       );
+      
+      console.log("Crowdfunding API initialized successfully");
     } catch (error) {
       console.error("Error updating crowdfunding API:", error);
       crowdfundingApi = undefined;

@@ -12,9 +12,7 @@ use pbc_contract_common::address::Address;
 use pbc_contract_common::address::AddressType;
 use pbc_contract_common::context::{CallbackContext, ContractContext};
 use pbc_contract_common::events::EventGroup;
-// Import the Shortname type from address module
 use pbc_contract_common::address::Shortname;
-// Import the ShortnameCallback type from address module
 use pbc_contract_common::address::ShortnameCallback;
 use pbc_contract_common::zk::ZkClosed;
 use pbc_contract_common::zk::{CalculationStatus, SecretVarId, ZkInputDef, ZkState, ZkStateChange};
@@ -70,10 +68,11 @@ struct ContractState {
     contributions: AvlTreeMap<Address, u128>,
 }
 
-// Define shortname constants correctly
+// Define shortname constants
 const TOKEN_TRANSFER_FROM_SHORTNAME: u8 = 0x03;
 const TOKEN_TRANSFER_SHORTNAME: u8 = 0x01;
 const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
+const FIXED_CONTRIBUTION_AMOUNT: u128 = 100; // For fixed contributions, change as needed
 
 /// Initializes contract - starts directly in Active state
 #[init(zk = true)]
@@ -125,58 +124,43 @@ fn add_contribution(
         "Contributions can only be made when campaign is active"
     );
     
-    // Create a new secret input definition
-    let input_def =
-        ZkInputDef::with_metadata(Some(SHORTNAME_INPUTTED_VARIABLE), SecretVarType::Contribution {});
-    
-    (state, vec![], input_def)
-}
-
-/// Handle the token transfer
-#[action(shortname = 0x03, zk = true)]
-fn contribute_tokens(
-    context: ContractContext,
-    state: ContractState,
-    zk_state: ZkState<SecretVarType>,  
-    amount: u128,
-) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {  
-    // Check campaign status
-    assert_eq!(
-        state.status, CampaignStatus::Active {},
-        "Contributions can only be made when campaign is active"
-    );
-
-    // Build events for token transfer
+    // Create token transfer events
     let mut events = Vec::new();
     let mut event_group = EventGroup::builder();
     
-    // Create token transfer call
+    // Create token transfer call - this is where we handle the token transfer
+    // The amount should be extracted from the input in a real implementation
+    let amount = FIXED_CONTRIBUTION_AMOUNT; // Fixed amount or from frontend
+    
     event_group.call(state.token_address, Shortname::from_u32(TOKEN_TRANSFER_FROM_SHORTNAME as u32))
         .argument(context.sender)
         .argument(context.contract_address)
         .argument(amount)
         .done();
     
-    // Add callback
+    // Add callback to handle token transfer result
     event_group.with_callback(ShortnameCallback::from_u32(CONTRIBUTION_CALLBACK_SHORTNAME))
         .argument(amount)
         .done();
     
     events.push(event_group.build());
     
-    // Return state, events, and EMPTY ZK state changes
-    (state, events, vec![])  // Empty ZkStateChange vector
+    // Create a new secret input definition for the ZK contribution
+    let input_def = 
+        ZkInputDef::with_metadata(Some(SHORTNAME_INPUTTED_VARIABLE), SecretVarType::Contribution {});
+    
+    (state, events, input_def)
 }
 
-/// Callback for token contribution (with required zk = true flag)
+/// Callback for token contributions
 #[callback(shortname = 0x31, zk = true)]
 fn contribute_callback(
     ctx: ContractContext,
     callback_ctx: CallbackContext,
     mut state: ContractState,
-    zk_state: ZkState<SecretVarType>,  // Need this parameter
+    zk_state: ZkState<SecretVarType>,
     amount: u128,
-) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {  // Need to return ZkStateChange
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     // If token transfer failed, panic to revert the transaction
     if !callback_ctx.success {
         panic!("Token transfer failed");
@@ -186,8 +170,8 @@ fn contribute_callback(
     let current_contribution = state.contributions.get(&ctx.sender).unwrap_or(0);
     state.contributions.insert(ctx.sender, current_contribution + amount);
 
-    // Return updated state with EMPTY ZK state changes
-    (state, vec![], vec![])  // Empty ZkStateChange vector
+    // Return updated state
+    (state, vec![], vec![])
 }
 
 /// Automatically called when a variable is confirmed on chain
@@ -198,11 +182,12 @@ fn inputted_variable(
     zk_state: ZkState<SecretVarType>,
     inputted_variable: SecretVarId,
 ) -> ContractState {
+    // We don't need additional logic here as we handle the token transfer
+    // in the add_contribution function
     state
 }
 
 /// End campaign and compute results
-/// Uses shortname 0x01 to make it easier to call from frontend
 #[action(shortname = 0x01, zk = true)]
 fn end_campaign(
     context: ContractContext,
