@@ -138,81 +138,70 @@ export class CrowdfundingApi {
    * Build and send add contribution secret input transaction.
    * @param amount the contribution amount to input
    */
-readonly addContribution = async (amount: number) => {
-  if (this.transactionClient === undefined) {
-    throw new Error("No account logged in");
-  }
-
-  // Create secret input builder for the contribution amount
-  const secretInput = AbiBitOutput.serialize((_out) => {
-    _out.writeI32(amount);
-  });
-  
-  // Create public RPC for add_contribution (shortname 0x40)
-  const publicRpc = Buffer.from([0x40]);
-  
-  try {
-    console.log("Building ZK transaction for amount:", amount);
-    
-    // Build the ZK input transaction
-    const transaction = await this.zkClient.buildOnChainInputTransaction(
-      this.sender,
-      secretInput,
-      publicRpc
-    );
-    
-    console.log("Transaction built:", transaction);
-    
-    // Send the transaction
-    console.log("Sending transaction...");
-    return this.transactionClient.signAndSend(transaction, 100_000);
-  } catch (error) {
-    console.error("Error adding contribution:", error);
-    throw error;
-  }
-};
-  
-  /**
-   * Transfer tokens to the campaign (separate from ZK input)
-   * @param address Campaign contract address
-   * @param amount Contribution amount
-   * @returns Transaction result
-   */
-  readonly contributeTokens = async (address: string, amount: number) => {
-    if (!address) {
-      throw new Error("No contract address provided");
-    }
-    
+  readonly addContribution = async (amount: number) => {
     if (this.transactionClient === undefined) {
       throw new Error("No account logged in");
     }
-    
-    // Create RPC for contribute_tokens (shortname 0x03)
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      // Write the function shortname
-      _out.writeU8(0x03); // contribute_tokens shortname
-      
-      // Serialize the amount as u128 (16 bytes)
-      const buffer = Buffer.alloc(16);
-      const bigIntAmount = BigInt(amount);
-      
-      // Write the amount as little-endian bytes
-      for (let i = 0; i < 16; i++) {
-        buffer[i] = Number((bigIntAmount >> BigInt(i * 8)) & BigInt(0xff));
-      }
-      
-      _out.writeBytes(buffer);
-    });
-  
-    console.log(`Sending contribute_tokens transaction to ${address} with amount ${amount}`);
-    
-    // Send the transaction
-    return this.transactionClient.signAndSend({
-      address,
-      rpc
-    }, 100000); // 100,000 gas
-  }
 
+    // Create secret input builder for the contribution amount
+    const secretInput = AbiBitOutput.serialize((_out) => {
+      _out.writeI32(amount);
+    });
+    
+    // Create public RPC for add_contribution (shortname 0x40)
+    const publicRpc = Buffer.from([0x40]);
+    
+    try {
+      console.log("Building ZK transaction for amount:", amount);
+      
+      // Build the ZK input transaction
+      const transaction = await this.zkClient.buildOnChainInputTransaction(
+        this.sender,
+        secretInput,
+        publicRpc
+      );
+      
+      console.log("Transaction built:", transaction);
+      
+      // Send the ZK input transaction
+      const zkTx = await this.transactionClient.signAndSend(transaction, 100_000);
+      
+      console.log("ZK input transaction sent:", zkTx);
+      
+      // Now also send the token transfer transaction
+      const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x07); // contribute_tokens shortname
+        
+        // Serialize the amount as u128 (16 bytes)
+        const buffer = Buffer.alloc(16);
+        const bigIntAmount = BigInt(amount);
+        
+        // Write the amount as little-endian bytes
+        for (let i = 0; i < 16; i++) {
+          buffer[i] = Number((bigIntAmount >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        
+        _out.writeBytes(buffer);
+      });
+      
+      console.log(`Sending contribute_tokens transaction with amount ${amount}`);
+      
+      // Send the token transfer transaction
+      const tokenTx = await this.transactionClient.signAndSend({
+        address: transaction.address,
+        rpc: contributeTokensRpc
+      }, 100000);
+      
+      console.log("Token transfer transaction sent:", tokenTx);
+      
+      // Return the ZK transaction for the frontend to track
+      return zkTx;
+    } catch (error) {
+      console.error("Error adding contribution:", error);
+      throw error;
+    }
+  };
+  
   /**
    * Build and send end campaign transaction
    * This starts the ZK computation to sum all contributions.

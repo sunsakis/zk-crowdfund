@@ -72,7 +72,6 @@ struct ContractState {
 const TOKEN_TRANSFER_FROM_SHORTNAME: u8 = 0x03;
 const TOKEN_TRANSFER_SHORTNAME: u8 = 0x01;
 const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
-const FIXED_CONTRIBUTION_AMOUNT: u128 = 100; // For fixed contributions, change as needed
 
 /// Initializes contract - starts directly in Active state
 #[init(zk = true)]
@@ -124,14 +123,32 @@ fn add_contribution(
         "Contributions can only be made when campaign is active"
     );
     
-    // Create token transfer events
-    let mut events = Vec::new();
+    // Create a new secret input definition for the ZK contribution
+    // The amount is extracted from the secret input itself
+    let input_def = 
+        ZkInputDef::with_metadata(Some(SHORTNAME_INPUTTED_VARIABLE), SecretVarType::Contribution {});
+    
+    (state, vec![], input_def)
+}
+
+/// Add funds to the campaign from token transfer
+#[action(shortname = 0x07, zk = true)]
+fn contribute_tokens(
+    context: ContractContext,
+    mut state: ContractState,
+    zk_state: ZkState<SecretVarType>,
+    amount: u128,
+) -> (ContractState, Vec<EventGroup>) {
+    // Check campaign status
+    assert_eq!(
+        state.status, CampaignStatus::Active {},
+        "Contributions can only be made when campaign is active"
+    );
+    
+    // Create token transfer event
     let mut event_group = EventGroup::builder();
     
-    // Create token transfer call - this is where we handle the token transfer
-    // The amount should be extracted from the input in a real implementation
-    let amount = FIXED_CONTRIBUTION_AMOUNT; // Fixed amount or from frontend
-    
+    // Create token transfer call with the specified amount
     event_group.call(state.token_address, Shortname::from_u32(TOKEN_TRANSFER_FROM_SHORTNAME as u32))
         .argument(context.sender)
         .argument(context.contract_address)
@@ -143,13 +160,11 @@ fn add_contribution(
         .argument(amount)
         .done();
     
-    events.push(event_group.build());
+    // Record contribution for potential refund
+    let current_contribution = state.contributions.get(&context.sender).unwrap_or(0);
+    state.contributions.insert(context.sender, current_contribution + amount);
     
-    // Create a new secret input definition for the ZK contribution
-    let input_def = 
-        ZkInputDef::with_metadata(Some(SHORTNAME_INPUTTED_VARIABLE), SecretVarType::Contribution {});
-    
-    (state, events, input_def)
+    (state, vec![event_group.build()])
 }
 
 /// Callback for token contributions
@@ -157,7 +172,7 @@ fn add_contribution(
 fn contribute_callback(
     ctx: ContractContext,
     callback_ctx: CallbackContext,
-    mut state: ContractState,
+    state: ContractState,
     zk_state: ZkState<SecretVarType>,
     amount: u128,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
@@ -166,11 +181,7 @@ fn contribute_callback(
         panic!("Token transfer failed");
     }
 
-    // Record contribution for potential refund
-    let current_contribution = state.contributions.get(&ctx.sender).unwrap_or(0);
-    state.contributions.insert(ctx.sender, current_contribution + amount);
-
-    // Return updated state
+    // Return updated state (we already recorded the contribution in contribute_tokens)
     (state, vec![], vec![])
 }
 
@@ -182,8 +193,7 @@ fn inputted_variable(
     zk_state: ZkState<SecretVarType>,
     inputted_variable: SecretVarId,
 ) -> ContractState {
-    // We don't need additional logic here as we handle the token transfer
-    // in the add_contribution function
+    // We don't need additional logic here
     state
 }
 
