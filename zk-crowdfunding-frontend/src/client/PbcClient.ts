@@ -55,6 +55,7 @@ export class PbcClient {
     requireFinal = true
   ): Promise<ExecutedTransactionDto | undefined> {
     const query = "?requireFinal=" + requireFinal;
-    return getRequest(this.host + "/blockchain/transaction/" + identifier + query);
+    // Changed from transaction to transactions (plural) to match the correct API endpoint
+    return getRequest(this.host + "/blockchain/transactions/" + identifier + query);
   }
 }

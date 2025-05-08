@@ -184,9 +184,10 @@ export class CrowdfundingApi {
     
     // Create RPC for contribute_tokens (shortname 0x03)
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      // Write the function shortname
       _out.writeU8(0x03); // contribute_tokens shortname
       
-      // Convert number to bytes for u128
+      // Serialize the amount as u128 (16 bytes)
       const buffer = Buffer.alloc(16);
       const bigIntAmount = BigInt(amount);
       
@@ -198,6 +199,8 @@ export class CrowdfundingApi {
       _out.writeBytes(buffer);
     });
   
+    console.log(`Sending contribute_tokens transaction to ${address} with amount ${amount}`);
+    
     // Send the transaction
     return this.transactionClient.signAndSend({
       address,

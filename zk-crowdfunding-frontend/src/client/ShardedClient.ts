@@ -38,6 +38,7 @@ export type ShardPutTransactionResponse =
 
 /**
  * Web client that can handle the sending requests to the correct shard of PBC.
+ * Fixed to use the correct endpoints
  */
 export class ShardedClient {
   private readonly masterClient: PbcClient;
@@ -103,6 +104,7 @@ export class ShardedClient {
 
   public putTransaction(transaction: Buffer): Promise<TransactionPointer | undefined> {
     const byteJson = { payload: transaction.toString("base64") };
+    // Ensure this endpoint matches the correct API endpoint
     return putRequest(this.baseUrl + "/chain/transactions", byteJson);
   }
 

@@ -330,6 +330,10 @@ export const updateContractState = () => {
     });
 };
 
+/**
+ * Improved form action for adding a contribution
+ * Uses type-safe transaction waiting
+ */
 async function addContributionFormAction() {
   console.log("Add contribution button clicked");
   
@@ -369,96 +373,94 @@ async function addContributionFormAction() {
   }
   
   try {
-    // Get the contract data to find token address
+    // Parse amount
+    const amount = parseInt(contributionInput.value, 10);
+    
+    // Get token address from contract state
+    setConnectionStatus("Loading contract data...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Loading contract data...</p>
+        </div>
+      `;
+    }
+    
     const contractData = await CLIENT.getContractData(address);
     if (!contractData?.serializedContract?.openState?.openState?.data) {
       throw new Error("Could not retrieve contract data");
     }
     
-    // Parse the state to get token address
     const stateBuffer = Buffer.from(
       contractData.serializedContract.openState.openState.data,
       "base64"
     );
     
     const state = deserializeState(stateBuffer);
-    const tokenAddress = state.token_address?.asString();
+    const tokenAddress = state.token_address.asString();
     
-    if (!tokenAddress) {
-      throw new Error("Token address not found in contract state");
-    }
-    
-    // Parse amount
-    const amount = parseInt(contributionInput.value, 10);
-    
-    // Step 1: Check token allowance and approve if needed
-    setConnectionStatus("Checking token allowance...");
+    // Step 1: Approve tokens
+    setConnectionStatus("Approving tokens (Step 1/3)...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Checking token allowance...</p>
+          <p>Approving tokens (Step 1/3)...</p>
         </div>
       `;
     }
     
-    const allowance = await api.getTokenAllowance(
+    // Send approval transaction
+    const approvalTx = await api.approveTokens(
       tokenAddress,
-      api.getWalletAddress(),
-      address
+      address,
+      BigInt(amount)
     );
     
-    if (allowance < BigInt(amount)) {
-      setConnectionStatus("Approving tokens (Step 1/3)...");
+    // Show approval transaction details
+    setConnectionStatus("Approval transaction submitted. Waiting for confirmation...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Approval transaction submitted (Step 1/3)</p>
+          <p class="transaction-hash">Transaction ID: ${approvalTx.transactionPointer.identifier}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${approvalTx.transactionPointer.identifier}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p>Waiting for confirmation (may take 30-60 seconds)...</p>
+        </div>
+      `;
+    }
+    
+    // Wait for approval to be confirmed
+    console.log(`Waiting for approval transaction ${approvalTx.transactionPointer.identifier} to be confirmed...`);
+    
+    // Use our fixed waitForTransaction function
+    const approvalStatus = await waitForTransactionUsingClient(
+      approvalTx.transactionPointer.identifier,
+      CLIENT,
+      20 // Fewer attempts for approval
+    );
+    
+    // Handle possible outcomes
+    if (approvalStatus === true) {
+      console.log("Approval transaction confirmed successfully");
+    } else if (approvalStatus === false) {
+      console.warn("Approval transaction failed on the blockchain");
+      throw new Error("Approval transaction failed. Please check your token balance and try again.");
+    } else {
+      // null - transaction confirmation timed out
+      console.log("Approval transaction confirmation timed out, proceeding anyway...");
+      
       if (transactionLinkContainer) {
-        transactionLinkContainer.innerHTML = `
-          <div class="alert alert-info">
-            <p>Approving tokens (Step 1/3)...</p>
+        transactionLinkContainer.innerHTML += `
+          <div class="alert alert-warning">
+            <p>Approval confirmation is taking longer than expected, but we'll proceed.</p>
+            <p>The transaction should still complete on the blockchain.</p>
           </div>
         `;
       }
       
-      const approvalTx = await api.approveTokens(
-        tokenAddress,
-        address,
-        BigInt(amount)
-      );
-      
-      setConnectionStatus("Waiting for approval confirmation...");
-      if (transactionLinkContainer) {
-        transactionLinkContainer.innerHTML = `
-          <div class="alert alert-info">
-            <p>Approval transaction submitted (Step 1/3)</p>
-            <p class="transaction-hash">Transaction: ${approvalTx.transactionPointer.identifier}</p>
-            <a href="https://browser.testnet.partisiablockchain.com/transactions/${approvalTx.transactionPointer.identifier}" 
-               class="transaction-link" target="_blank">View in Explorer</a>
-            <p>Waiting for confirmation... (this may take 1-2 minutes)</p>
-          </div>
-        `;
-      }
-      
-      try {
-        // Try to wait for transaction
-        await waitForTransaction(approvalTx.transactionPointer.identifier);
-        console.log("Approval confirmed!");
-      } catch (error) {
-        console.warn("Approval confirmation timed out, but we'll proceed anyway:", error);
-        
-        // Instead of failing, we'll add a note and continue
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-warning">
-              <p>Approval transaction submitted but confirmation took too long (Step 1/3)</p>
-              <p class="transaction-hash">Transaction: ${approvalTx.transactionPointer.identifier}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${approvalTx.transactionPointer.identifier}" 
-                class="transaction-link" target="_blank">View in Explorer</a>
-              <p>Proceeding to next step...</p>
-            </div>
-          `;
-        }
-        
-        // Wait a bit more to ensure transaction has time to propagate
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
+      // Wait a bit more to ensure transaction has time to propagate
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
     
     // Step 2: Add ZK contribution
@@ -471,37 +473,48 @@ async function addContributionFormAction() {
       `;
     }
     
+    // Send ZK contribution transaction
     const zkTx = await api.addContribution(amount);
     
-    setConnectionStatus("Waiting for contribution confirmation...");
+    // Show ZK transaction details
+    setConnectionStatus("Confidential contribution submitted. Waiting for confirmation...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
           <p>Confidential contribution submitted (Step 2/3)</p>
-          <p class="transaction-hash">Transaction: ${zkTx.transactionPointer.identifier}</p>
+          <p class="transaction-hash">Transaction ID: ${zkTx.transactionPointer.identifier}</p>
           <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTx.transactionPointer.identifier}" 
              class="transaction-link" target="_blank">View in Explorer</a>
-          <p>Waiting for confirmation... (this may take 1-2 minutes)</p>
+          <p>Waiting for confirmation (may take 30-60 seconds)...</p>
         </div>
       `;
     }
     
-    try {
-      // Try to wait for transaction
-      await waitForTransaction(zkTx.transactionPointer.identifier);
-      console.log("ZK contribution confirmed!");
-    } catch (error) {
-      console.warn("ZK contribution confirmation timed out, but we'll proceed anyway:", error);
+    // Wait for ZK transaction to be confirmed
+    console.log(`Waiting for ZK transaction ${zkTx.transactionPointer.identifier} to be confirmed...`);
+    
+    // Use our fixed waitForTransaction function
+    const zkStatus = await waitForTransactionUsingClient(
+      zkTx.transactionPointer.identifier,
+      CLIENT,
+      30 // More attempts for ZK tx
+    );
+    
+    // Handle possible outcomes
+    if (zkStatus === true) {
+      console.log("ZK transaction confirmed successfully");
+    } else if (zkStatus === false) {
+      console.warn("ZK transaction failed on the blockchain");
+      throw new Error("ZK contribution transaction failed. Please try again.");
+    } else {
+      // null - transaction confirmation timed out
+      console.log("ZK transaction confirmation timed out, proceeding anyway...");
       
-      // Instead of failing, we'll add a note and continue
       if (transactionLinkContainer) {
-        transactionLinkContainer.innerHTML = `
+        transactionLinkContainer.innerHTML += `
           <div class="alert alert-warning">
-            <p>Confidential contribution submitted but confirmation took too long (Step 2/3)</p>
-            <p class="transaction-hash">Transaction: ${zkTx.transactionPointer.identifier}</p>
-            <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTx.transactionPointer.identifier}" 
-               class="transaction-link" target="_blank">View in Explorer</a>
-            <p>Proceeding to next step...</p>
+            <p>ZK confirmation is taking longer than expected, but we'll proceed.</p>
+            <p>The transaction should still complete on the blockchain.</p>
           </div>
         `;
       }
@@ -520,47 +533,60 @@ async function addContributionFormAction() {
       `;
     }
     
+    // Send token transfer transaction
+    console.log(`Sending token transfer for contract ${address}, amount: ${amount}`);
     const tokenTx = await api.contributeTokens(address, amount);
     
-    setConnectionStatus("Waiting for token transfer confirmation...");
+    // Show token transfer transaction details
+    setConnectionStatus("Token transfer submitted. Waiting for confirmation...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
           <p>Token transfer submitted (Step 3/3)</p>
-          <p class="transaction-hash">Transaction: ${tokenTx.transactionPointer.identifier}</p>
+          <p class="transaction-hash">Transaction ID: ${tokenTx.transactionPointer.identifier}</p>
           <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTx.transactionPointer.identifier}" 
              class="transaction-link" target="_blank">View in Explorer</a>
-          <p>Waiting for confirmation... (this may take 1-2 minutes)</p>
+          <p>Waiting for confirmation (may take 30-60 seconds)...</p>
         </div>
       `;
     }
     
-    try {
-      await waitForTransaction(tokenTx.transactionPointer.identifier);
-      console.log("Token transfer confirmed!");
-      
+    // Wait for token transfer to be confirmed
+    console.log(`Waiting for token transfer ${tokenTx.transactionPointer.identifier} to be confirmed...`);
+    
+    // Use our fixed waitForTransaction function
+    const tokenStatus = await waitForTransactionUsingClient(
+      tokenTx.transactionPointer.identifier,
+      CLIENT,
+      30 // More attempts for token tx
+    );
+    
+    // Handle possible outcomes
+    if (tokenStatus === true) {
       // Success!
+      console.log("Token transfer confirmed successfully");
       setConnectionStatus("Contribution successful!");
       if (transactionLinkContainer) {
         transactionLinkContainer.innerHTML = `
           <div class="alert alert-success">
             <p>Contribution successful!</p>
-            <p class="transaction-hash">Final Transaction: ${tokenTx.transactionPointer.identifier}</p>
+            <p class="transaction-hash">Final Transaction ID: ${tokenTx.transactionPointer.identifier}</p>
             <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTx.transactionPointer.identifier}" 
                class="transaction-link" target="_blank">View in Explorer</a>
           </div>
         `;
       }
-    } catch (error) {
-      console.warn("Token transfer confirmation timed out:", error);
-      
-      // We'll show a warning but consider it a potential success
+    } else if (tokenStatus === false) {
+      console.warn("Token transfer failed on the blockchain");
+      throw new Error("Token transfer failed. Please try again.");
+    } else {
+      // null - transaction confirmation timed out
       setConnectionStatus("Contribution submitted, but confirmation timed out");
       if (transactionLinkContainer) {
         transactionLinkContainer.innerHTML = `
           <div class="alert alert-warning">
             <p>Contribution submitted but confirmation timed out</p>
-            <p class="transaction-hash">Final Transaction: ${tokenTx.transactionPointer.identifier}</p>
+            <p class="transaction-hash">Final Transaction ID: ${tokenTx.transactionPointer.identifier}</p>
             <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTx.transactionPointer.identifier}" 
                class="transaction-link" target="_blank">View in Explorer</a>
             <p>Your contribution may still be processed successfully. Please check the explorer for confirmation.</p>
@@ -569,7 +595,7 @@ async function addContributionFormAction() {
       }
     }
     
-    // Save contribution receipt
+    // Save contribution receipt in local storage
     try {
       const receipt = {
         txId: tokenTx.transactionPointer.identifier,
@@ -578,7 +604,7 @@ async function addContributionFormAction() {
       };
       
       localStorage.setItem(
-        `contribution_receipt_${address}`,
+        `contribution_receipt_${address}_${api.getWalletAddress()}`,
         JSON.stringify(receipt)
       );
     } catch (error) {
@@ -591,7 +617,7 @@ async function addContributionFormAction() {
     // Update the contract state after a delay
     setTimeout(() => {
       updateContractState();
-    }, 10000); // Increased to 10 seconds to allow for transaction processing
+    }, 15000); // Give it 15 seconds before refreshing state
     
   } catch (error) {
     console.error("Error in contribution process:", error);
@@ -614,21 +640,62 @@ async function addContributionFormAction() {
 }
 
 /**
- * Wait for transaction to be confirmed
- * This improved version handles 404 errors and has better logging
- * @param txId The transaction ID
- * @param maxAttempts Maximum number of attempts
- * @returns Promise that resolves to true if successful, false if failed
+ * Utility function to check transaction status
+ * @param txId Transaction ID
+ * @param transactionHash Optional hash string (sometimes needed)
+ * @returns Promise resolving to the transaction status
  */
-async function waitForTransaction(txId: string, maxAttempts = 60): Promise<boolean> {
+async function checkTransactionStatus(txId: string, transactionHash?: string) {
+  // Use the correct URL structure with /transactions/ (plural)
+  const url = `https://node1.testnet.partisiablockchain.com/blockchain/transactions/${txId || transactionHash}?requireFinal=true`;
+  
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      if (response.status === 404) {
+        // Transaction not found - this is normal while it's being processed
+        console.log(`Transaction ${txId} not found yet (status 404), still processing...`);
+        return null;
+      }
+      throw new Error(`Error fetching transaction: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error(`Error checking transaction ${txId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Alternative method to check transaction status using CLIENT
+ * This assumes CLIENT is configured correctly with the fixed endpoints
+ * @param txId Transaction ID to check
+ * @param client The ShardedClient instance
+ * @param maxAttempts Maximum number of attempts to check status
+ * @param delayMs Delay between attempts in milliseconds
+ * @returns Promise<boolean | null> - true if successful, false if failed, null if timeout
+ */
+async function waitForTransactionUsingClient(
+  txId: string,
+  client,
+  maxAttempts = 60,
+  delayMs = 3000
+): Promise<boolean | null> {
   let attempts = 0;
+  
+  console.log(`Starting to wait for transaction ${txId} to be confirmed...`);
+  
+  // Give the transaction time to propagate before we start checking
+  await new Promise(resolve => setTimeout(resolve, 5000));
   
   while (attempts < maxAttempts) {
     try {
       console.log(`Checking transaction ${txId} (attempt ${attempts + 1}/${maxAttempts})...`);
       
-      // Get transaction status
-      const response = await CLIENT.getExecutedTransaction(null, txId);
+      // Use null for the shard ID to let the system determine the right shard
+      const response = await client.getExecutedTransaction(null, txId);
       
       if (response) {
         console.log(`Transaction status:`, response);
@@ -643,17 +710,18 @@ async function waitForTransaction(txId: string, maxAttempts = 60): Promise<boole
         console.log(`No response for transaction ${txId}, might still be processing...`);
       }
     } catch (error) {
-      // Log error but continue waiting
-      console.log(`Error checking transaction ${txId}:`, error);
+      // This is expected behavior early on - the TX may not be indexed yet
+      console.log(`Error checking transaction ${txId} (attempt ${attempts + 1}/${maxAttempts}):`, error);
       console.log(`Waiting for transaction to be indexed...`);
     }
     
-    // Wait 3 seconds before trying again
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait before trying again
+    await new Promise(resolve => setTimeout(resolve, delayMs));
     attempts++;
   }
   
-  throw new Error('Transaction confirmation timeout - transaction may still complete successfully');
+  console.log(`Max attempts (${maxAttempts}) reached for transaction ${txId}`);
+  return null;
 }
 
 function endCampaignAction() {
