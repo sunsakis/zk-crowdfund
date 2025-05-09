@@ -467,8 +467,6 @@ readonly executeContribution = async (
     
     // Phase 1: Submit ZK input
     const secretInput = AbiBitOutput.serialize((_out) => {
-      // First byte is metadata type (0 for contribution)
-      _out.writeU8(0); // Explicitly set metadata type to contribution
       _out.writeI32(zkAmount); // Write the ZK amount as i32
     });
     
@@ -832,4 +830,6 @@ readonly checkTransactionStatus = async (
     return { status: 'pending' };
   }
 };
+
+
 }

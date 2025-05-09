@@ -294,10 +294,7 @@ async addContribution(contractAddress: string, amount: number): Promise<SentTran
     
     console.log(`Adding contribution of ${amount} (scaled to ZK amount: ${zkAmount})`);
     
-    // Create secret input with the contribution amount - using a different approach
-    // Don't try to log the CompactBitArray directly
     const secretInput = AbiBitOutput.serialize((_out) => {
-      _out.writeU8(0); // Metadata type byte for contribution
       _out.writeI32(zkAmount);
     });
     
