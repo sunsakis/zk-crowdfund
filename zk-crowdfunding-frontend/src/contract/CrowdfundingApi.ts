@@ -53,7 +53,7 @@ export class CrowdfundingApi {
   
   // Constants for gas limits with some buffer
   private readonly TOKEN_APPROVAL_GAS = 15000;
-  private readonly CONTRIBUTION_GAS = 120000;
+  private readonly CONTRIBUTION_GAS = 200000;
   private readonly END_CAMPAIGN_GAS = 150000;
   private readonly WITHDRAW_FUNDS_GAS = 30000;
   private readonly VERIFY_CONTRIBUTION_GAS = 15000;
@@ -366,6 +366,9 @@ readonly addContributionWithApproval = async (
     const tokenDecimals = 18; // This should match your token's actual decimals
     const tokenAmount = BigInt(Math.floor(amount * (10 ** tokenDecimals)));
     
+    console.log(`Processing contribution: Amount ${amount}, ZK scaling ${this.ZK_SCALE_FACTOR}, Token decimals ${tokenDecimals}`);
+    console.log(`Token amount in wei: ${tokenAmount.toString()}`);
+    
     // Check current allowance
     const allowance = await this.getTokenAllowance(
       tokenAddress,
@@ -383,12 +386,31 @@ readonly addContributionWithApproval = async (
         tokenAmount
       );
       
-      // Wait for approval to be processed
+      // Wait for approval to be confirmed on chain
       console.log("Waiting for approval to be processed...");
-      await new Promise(resolve => setTimeout(resolve, 20000)); // Increased to 20 seconds
       
-      // Important: After approval, we'll bypass the allowance check in addContribution
-      // by directly calling the internal executeContribution method
+      // Get the approval transaction ID for logging/tracking
+      const approvalTxId = approvalResult.transaction?.transactionPointer?.identifier || "unknown";
+      console.log(`Approval transaction ID: ${approvalTxId}`);
+      
+      // Wait longer for approval to be fully confirmed on-chain 
+      await new Promise(resolve => setTimeout(resolve, 30000)); // 30 seconds
+      
+      try {
+        // Verify approval status 
+        const approvalStatus = await this.checkTransactionStatus(approvalTxId);
+        console.log(`Approval transaction status: ${approvalStatus.status}`);
+        
+        if (approvalStatus.status === 'failed') {
+          throw new CrowdfundingApiError(
+            `Token approval failed: ${approvalStatus.errorMessage || 'Unknown error'}`,
+            "APPROVAL_FAILED",
+            approvalTxId
+          );
+        }
+      } catch (statusError) {
+        console.warn("Could not verify approval status, continuing anyway:", statusError);
+      }
       
       // Make the contribution directly
       console.log("Executing contribution after approval...");
@@ -428,8 +450,8 @@ readonly addContributionWithApproval = async (
   }
 };
   
-  /**
- * Execute the contribution in two coordinated transactions
+ /**
+ * Execute the contribution in two coordinated transactions with improved error handling
  * @param campaignAddress Campaign contract address
  * @param zkAmount Amount for ZK computation
  * @param tokenAmount Amount for token transfer
@@ -441,9 +463,13 @@ readonly executeContribution = async (
   tokenAmount: bigint
 ): Promise<TransactionResult> => {
   try {
+    console.log(`Executing contribution: ZK amount: ${zkAmount}, Token amount: ${tokenAmount.toString()}`);
+    
     // Phase 1: Submit ZK input
     const secretInput = AbiBitOutput.serialize((_out) => {
-      _out.writeI32(zkAmount);
+      // First byte is metadata type (0 for contribution)
+      _out.writeU8(0); // Explicitly set metadata type to contribution
+      _out.writeI32(zkAmount); // Write the ZK amount as i32
     });
     
     // Create public RPC for add_contribution (shortname 0x40)
@@ -456,10 +482,10 @@ readonly executeContribution = async (
       publicRpc
     );
     
-    // Send the ZK input transaction
+    // Send the ZK input transaction with increased gas
     const zkTx = await this.transactionClient!.signAndSend(
       transaction, 
-      this.CONTRIBUTION_GAS
+      200000 // Increased gas for ZK operations
     );
     
     // Defensive check to ensure transaction pointer exists
@@ -480,9 +506,8 @@ readonly executeContribution = async (
       zkAmount
     });
     
-    // Wait a brief time for the ZK transaction to be seen by the network
-    // This helps coordinate the two transactions
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait longer for the ZK transaction to be processed by the network
+    await new Promise(resolve => setTimeout(resolve, 5000));
     
     // Phase 2: Send the token contribution transaction
     const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
@@ -508,11 +533,11 @@ readonly executeContribution = async (
       _out.writeBytes(buffer);
     });
     
-    // Send the token transfer transaction
+    // Send the token transfer transaction with increased gas
     const tokenTx = await this.transactionClient!.signAndSend({
-      address: campaignAddress, // Use campaignAddress directly to avoid potential issues
+      address: campaignAddress,
       rpc: contributeTokensRpc
-    }, this.CONTRIBUTION_GAS);
+    }, 200000); // Increased gas for token operations
     
     // Defensive check for token transaction
     if (!tokenTx || !tokenTx.transactionPointer) {

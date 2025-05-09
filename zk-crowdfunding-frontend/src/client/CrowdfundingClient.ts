@@ -272,44 +272,56 @@ async contributeTokens(
     }
   }
   
-  /**
-   * Add contribution as a secret input
-   * @param contractAddress The campaign contract address
-   * @param amount The contribution amount
-   * @returns Transaction result
-   */
-  async addContribution(contractAddress: string, amount: number): Promise<SentTransaction> {
-    if (!this.transactionClient || !this.walletAddress) {
-      throw new Error("Wallet not connected");
-    }
-    
-    if (!this.zkClient) {
-      this.setCampaignAddress(contractAddress);
-    }
-    
-    try {
-      // Create secret input with the contribution amount
-      const secretInput = AbiBitOutput.serialize((_out) => {
-        _out.writeI32(amount);
-      });
-      
-      // Create public RPC for add_contribution (shortname 0x40)
-      const publicRpc = Buffer.from([0x40]);
-      
-      // Build the ZK input transaction
-      const transaction = await this.zkClient!.buildOnChainInputTransaction(
-        BlockchainAddress.fromString(this.walletAddress),
-        secretInput,
-        publicRpc
-      );
-      
-      // Send the transaction
-      return this.transactionClient.signAndSend(transaction, 100000); // 100,000 gas
-    } catch (error) {
-      console.error("Error adding contribution:", error);
-      throw error;
-    }
+ /**
+ * Add contribution as a secret input
+ * @param contractAddress The campaign contract address
+ * @param amount The contribution amount
+ * @returns Transaction result
+ */
+async addContribution(contractAddress: string, amount: number): Promise<SentTransaction> {
+  if (!this.transactionClient || !this.walletAddress) {
+    throw new Error("Wallet not connected");
   }
+  
+  if (!this.zkClient) {
+    this.setCampaignAddress(contractAddress);
+  }
+  
+  try {
+    // Calculate the ZK amount with scaling factor
+    const ZK_SCALE_FACTOR = 1_000_000; // 6 decimal places
+    const zkAmount = Math.floor(amount * ZK_SCALE_FACTOR);
+    
+    console.log(`Adding contribution of ${amount} (scaled to ZK amount: ${zkAmount})`);
+    
+    // Create secret input with the contribution amount - using a different approach
+    // Don't try to log the CompactBitArray directly
+    const secretInput = AbiBitOutput.serialize((_out) => {
+      _out.writeU8(0); // Metadata type byte for contribution
+      _out.writeI32(zkAmount);
+    });
+    
+    console.log("Secret input created successfully");
+    
+    // Create public RPC for add_contribution (shortname 0x40)
+    const publicRpc = Buffer.from([0x40]);
+    
+    // Build the ZK input transaction
+    const transaction = await this.zkClient!.buildOnChainInputTransaction(
+      this.walletAddress,
+      secretInput, // Pass the CompactBitArray directly
+      publicRpc
+    );
+    
+    console.log("ZK transaction built successfully");
+    
+    // Send the transaction with increased gas
+    return this.transactionClient.signAndSend(transaction, 200000); // Increased to 200,000 gas
+  } catch (error) {
+    console.error("Error adding contribution:", error);
+    throw error;
+  }
+}
   
   /**
    * End campaign and compute results
