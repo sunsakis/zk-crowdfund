@@ -9,7 +9,7 @@ import { AbiBitOutput, AbiByteOutput } from "@partisiablockchain/abi-client";
 
 /**
  * API for the crowdfunding contract.
- * This implementation exactly matches the format used in average-salary.
+ * Handles communication with the blockchain and ZK computations.
  */
 export class CrowdfundingApi {
   private readonly transactionClient: BlockchainTransactionClient | undefined;
@@ -80,17 +80,26 @@ export class CrowdfundingApi {
       const rpc = AbiByteOutput.serializeBigEndian((_out) => {
         _out.writeU8(0x05); // approve shortname
         
-        // Write the address directly as bytes
+        // Write the address as bytes
         _out.writeBytes(Buffer.from(campaignAddress, 'hex'));
         
-        // Convert BigInt to bytes and write it as a byte array
-        // For u128, we need 16 bytes
+        // Convert BigInt to a 16-byte buffer for u128
         const buffer = Buffer.alloc(16);
         
-        // Properly write the full BigInt value as little-endian bytes
-        for (let i = 0; i < 16; i++) {
-          buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
-        }
+        // Use DataView for better endianness control
+        const view = new DataView(buffer.buffer);
+        
+        // Split the bigint into 32-bit chunks
+        const low32 = Number(amount & BigInt(0xffffffff));
+        const mid32 = Number((amount >> BigInt(32)) & BigInt(0xffffffff));
+        const high32 = Number((amount >> BigInt(64)) & BigInt(0xffffffff));
+        const top32 = Number((amount >> BigInt(96)) & BigInt(0xffffffff));
+        
+        // Write in little-endian format
+        view.setUint32(0, low32, true);
+        view.setUint32(4, mid32, true);
+        view.setUint32(8, high32, true);
+        view.setUint32(12, top32, true);
         
         _out.writeBytes(buffer);
       });
@@ -170,23 +179,35 @@ readonly addContribution = async (zkAmount: number, tokenAmount: bigint) => {
     console.log("ZK input transaction sent:", zkTx);
     
     // Now also send the token transfer transaction
+    console.log(`Sending contribute_tokens transaction with full token amount: ${tokenAmount}`);
+    
+    // Create the RPC for contributeTokens
     const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x07); // contribute_tokens shortname
+      _out.writeU8(0x09); // Format indicator
+      _out.writeBytes(Buffer.from("07", "hex")); // contribute_tokens shortname
       
-      // Serialize the full token amount as u128 (16 bytes)
+      // Convert BigInt to a 16-byte buffer for u128
       const buffer = Buffer.alloc(16);
       
-      // Convert tokenAmount to bytes
-      for (let i = 0; i < 16; i++) {
-        buffer[i] = Number((tokenAmount >> BigInt(i * 8)) & BigInt(0xff));
-      }
+      // Use DataView for better endianness control
+      const view = new DataView(buffer.buffer);
+      
+      // Split the bigint into 32-bit chunks
+      const low32 = Number(tokenAmount & BigInt(0xffffffff));
+      const mid32 = Number((tokenAmount >> BigInt(32)) & BigInt(0xffffffff));
+      const high32 = Number((tokenAmount >> BigInt(64)) & BigInt(0xffffffff));
+      const top32 = Number((tokenAmount >> BigInt(96)) & BigInt(0xffffffff));
+      
+      // Write in little-endian format - THIS IS CRITICAL
+      view.setUint32(0, low32, true);
+      view.setUint32(4, mid32, true);
+      view.setUint32(8, high32, true);
+      view.setUint32(12, top32, true);
       
       _out.writeBytes(buffer);
     });
     
-    console.log(`Sending contribute_tokens transaction with full token amount: ${tokenAmount}`);
-    
-    // Send the token transfer transaction with the full token amount
+    // Send the token transfer transaction
     const tokenTx = await this.transactionClient.signAndSend({
       address: transaction.address,
       rpc: contributeTokensRpc
@@ -217,16 +238,16 @@ readonly addContribution = async (zkAmount: number, tokenAmount: bigint) => {
       throw new Error("No account logged in");
     }
 
-    // Create the RPC for ending campaign with EXACT same format as average-salary example
+    // Create the RPC for ending campaign
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09);  // This is a format indicator used in average-salary
+      _out.writeU8(0x09);  // Format indicator
       _out.writeBytes(Buffer.from("01", "hex"));  // The action shortname (0x01)
     });
 
     try {
       console.log("Ending campaign with properly serialized RPC:", Buffer.from(rpc).toString('hex'));
       
-      // Send the transaction with proper format
+      // Send the transaction
       return this.transactionClient.signAndSend({ 
         address, 
         rpc 
