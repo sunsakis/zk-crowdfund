@@ -405,114 +405,152 @@ async function addContributionFormAction() {
   }
   
   try {
-    // Parse amount as float
-    const floatAmount = parseFloat(contributionInput.value);
-    
-    // IMPORTANT FIX: For token transfer, we use a higher precision value
-    // For ZK input, we use a scaled value that fits in an i32 (signed 32-bit integer)
-    
-    // For token transfers: Convert to the smallest unit with 18 decimals (typical ERC-20)
-    const DECIMALS = 18;
-    const tokenAmount = BigInt(Math.floor(floatAmount * (10 ** DECIMALS)));
-    
-    // For ZK computation: Use a lower scale factor that fits in i32 range (-2^31 to 2^31-1)
-    // Max i32 value is 2,147,483,647, so a scale of 10^6 allows values up to 2,147
-    const ZK_SCALE = 1_000_000; // 6 decimal places (microunits)
-    const zkAmount = Math.floor(floatAmount * ZK_SCALE);
-    
-    // Validate ZK amount fits in i32
-    if (zkAmount > 2147483647 || zkAmount < -2147483648) {
-      throw new Error("Contribution amount too large for ZK computation. Maximum is approximately 2,147 tokens.");
-    }
-    
-    console.log(`Contribution: ${floatAmount} (float) => ${tokenAmount} (token units) => ${zkAmount} (ZK units with scale ${ZK_SCALE})`);
-    
-    // Get token address from contract state
-    setConnectionStatus("Loading contract data...");
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Loading contract data...</p>
-        </div>
-      `;
-    }
-    
+    // Get token address from contract state data, with type safety
     const contractData = await CLIENT.getContractData(address);
-    if (!contractData?.serializedContract?.openState?.openState?.data) {
+    if (!contractData) {
       throw new Error("Could not retrieve contract data");
     }
     
-    const stateBuffer = Buffer.from(
-      contractData.serializedContract.openState.openState.data,
-      "base64"
-    );
+    // Safely access nested properties with optional chaining and type checking
+    const serializedContract = contractData.serializedContract;
+    if (!serializedContract) {
+      throw new Error("Contract data missing serializedContract");
+    }
     
+    // Get raw state data
+    let rawStateData: string;
+    if ('openState' in serializedContract && 
+        serializedContract.openState && 
+        'openState' in serializedContract.openState && 
+        serializedContract.openState.openState && 
+        'data' in serializedContract.openState.openState) {
+      rawStateData = serializedContract.openState.openState.data;
+    } else {
+      throw new Error("Contract state data format not recognized");
+    }
+    
+    if (!rawStateData) {
+      throw new Error("Contract state data is empty");
+    }
+    
+    const stateBuffer = Buffer.from(rawStateData, "base64");
     const state = deserializeState(stateBuffer);
     
-    // Check if token_address exists
-    if (!state.token_address) {
+    // Check if token_address exists - use both naming conventions for compatibility
+    const tokenAddress = (state.token_address || state.tokenAddress)?.asString();
+    if (!tokenAddress) {
       throw new Error("Contract does not have a token address configured");
     }
     
-    const tokenAddress = state.token_address.asString();
-    console.log("Token address:", tokenAddress);
+    const floatAmount = parseFloat(contributionInput.value);
     
-    // Step 1: Approve tokens
-    setConnectionStatus("Approving tokens...");
+    // Show processing status
+    setConnectionStatus("Processing contribution...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Approving ${floatAmount} tokens...</p>
+          <p>Processing contribution of ${floatAmount} tokens...</p>
+          <div class="spinner mt-2"></div>
         </div>
       `;
     }
     
-    // Send approval transaction with the full token amount (BigInt)
-    const approvalTx = await api.approveTokens(
-      tokenAddress,
-      address,
-      tokenAmount
-    );
+    // Use the combined method that handles both approval and contribution
+    const result = await api.addContributionWithApproval(floatAmount, address, tokenAddress);
     
-    // Show approval transaction details
-    setConnectionStatus("Approval transaction submitted. Waiting for confirmation...");
+    // Get transaction IDs safely
+    let zkTxId = "unknown";
+    let tokenTxId = "unknown";
+    
+    // Handle approval feedback first if applicable
+    if (result.approvalResult) {
+      const approvalTxId = 
+        result.approvalResult.transaction?.transactionPointer?.identifier || "unknown";
+      
+      console.log("Approval transaction:", approvalTxId);
+    }
+    
+    // Handle the contribution transaction details
+    const contributionResult = result.contributionResult;
+    if (contributionResult.metadata) {
+      // Extract transaction IDs with safe access
+      if (contributionResult.metadata.zkTransaction) {
+        if (typeof contributionResult.metadata.zkTransaction === 'string') {
+          zkTxId = contributionResult.metadata.zkTransaction;
+        } else if (contributionResult.metadata.zkTransaction.id) {
+          zkTxId = contributionResult.metadata.zkTransaction.id;
+        }
+      }
+      
+      if (contributionResult.metadata.tokenTransaction) {
+        if (typeof contributionResult.metadata.tokenTransaction === 'string') {
+          tokenTxId = contributionResult.metadata.tokenTransaction;
+        } else if (contributionResult.metadata.tokenTransaction.id) {
+          tokenTxId = contributionResult.metadata.tokenTransaction.id;
+        }
+      }
+    }
+    
+    // Use ZK transaction ID for status checking
+    const primaryTxId = zkTxId !== "unknown" ? zkTxId : 
+                       (tokenTxId !== "unknown" ? tokenTxId : 
+                       (contributionResult.transaction?.transactionPointer?.identifier || "unknown"));
+    
+    console.log("Contribution transactions:", { zkTxId, tokenTxId, primaryTxId });
+    
+    // Update UI with transaction info
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Approval transaction submitted</p>
-          <p class="transaction-hash">Transaction ID: ${approvalTx.transactionPointer.identifier}</p>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${approvalTx.transactionPointer.identifier}" 
-             class="transaction-link" target="_blank">View Approval in Explorer</a>
-          <p>Waiting for confirmation (may take 30-60 seconds)...</p>
+          <p>Contribution submitted successfully!</p>
+          <p class="transaction-hash">Transaction ID: ${primaryTxId}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p class="mt-2">Transaction is processing...</p>
+          <div class="spinner"></div>
         </div>
       `;
+      
+      // Add a refresh button
+      const refreshButton = document.createElement('button');
+      refreshButton.className = 'btn btn-secondary mt-2';
+      refreshButton.textContent = 'Refresh Contract State';
+      refreshButton.addEventListener('click', updateContractState);
+      
+      transactionLinkContainer.appendChild(refreshButton);
     }
-    
-    // Wait 10 seconds to give approval time to be processed
-    await new Promise(resolve => setTimeout(resolve, 10000));
-    
-    // Step 2: Add ZK contribution
-    setConnectionStatus("Adding confidential contribution...");
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Adding confidential contribution (${floatAmount})...</p>
-          <div class="spinner" style="margin-top: 10px;"></div>
-        </div>
-      `;
-    }
-    
-    // Send ZK contribution transaction with the scale-adjusted amount that fits in i32
-    console.log(`Sending ZK contribution with scaled amount: ${zkAmount}`);
-    
-    // Pass both amounts to allow proper coordination between ZK input and token transfer
-    const zkTx = await api.addContribution(zkAmount, tokenAmount);
-    console.log("ZK contribution transaction sent:", zkTx);
-    
-    // Rest of function remains the same...
     
     // Clear the input
     contributionInput.value = "";
+    
+    // Schedule status checking with the improved function
+    scheduleTransactionStatusCheck(primaryTxId);
+    
+    // Set a fallback timer to update the state regardless of transaction status
+    setTimeout(() => {
+      updateContractState();
+      
+      // Also update UI to indicate refresh happened
+      const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
+      if (transactionLinkContainer && transactionLinkContainer.innerHTML.includes("processing")) {
+        transactionLinkContainer.innerHTML = `
+          <div class="alert alert-info">
+            <p>Contribution submitted</p>
+            <p class="transaction-hash">Transaction ID: ${primaryTxId}</p>
+            <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
+               class="transaction-link" target="_blank">View in Explorer</a>
+            <p>Contract state has been refreshed</p>
+            <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Again</button>
+          </div>
+        `;
+        
+        // Add event listener to the refresh button
+        const refreshBtn = document.querySelector("#refresh-state-btn");
+        if (refreshBtn) {
+          refreshBtn.addEventListener("click", updateContractState);
+        }
+      }
+    }, 30000);
     
   } catch (error) {
     console.error("Error in contribution process:", error);
@@ -523,8 +561,26 @@ async function addContributionFormAction() {
         <div class="alert alert-error">
           <p>Error: ${error.message || String(error)}</p>
           <p>Please try again or check the console for more details.</p>
+          <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
         </div>
       `;
+      
+      // Add retry button
+      const retryBtn = document.querySelector("#retry-contribution");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", () => {
+          // Reset UI
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = '';
+          }
+          
+          // Re-enable the button for manual retry
+          if (addContributionBtn) {
+            addContributionBtn.disabled = false;
+            addContributionBtn.textContent = "Contribute";
+          }
+        });
+      }
     }
   } finally {
     // Re-enable the button
@@ -533,6 +589,138 @@ async function addContributionFormAction() {
       addContributionBtn.textContent = "Contribute";
     }
   }
+}
+
+// Helper function to schedule checking transaction status
+function scheduleTransactionStatusCheck(txId: string, attempts = 0) {
+  if (attempts > 10) return; // Limit to 10 attempts
+  
+  setTimeout(async () => {
+    try {
+      // Don't try to directly check in explorer due to CORS
+      // Instead, use the Sharded Client which makes server-side calls
+      const api = getCrowdfundingApi();
+      if (!api) return;
+      
+      // Get shard ID from metadata or use a default
+      const shardId = 'Shard2'; // Default, or get from your transaction metadata
+      
+      // Check if the API has a checkTransactionStatus method
+      if (api.checkTransactionStatus) {
+        const result = await api.checkTransactionStatus(txId, shardId);
+        
+        const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
+        
+        if (result.status === 'success') {
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-success">
+                <p>Contribution successful!</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                  class="transaction-link" target="_blank">View in Explorer</a>
+                <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
+              </div>
+            `;
+            
+            // Add event listener to the refresh button
+            const refreshBtn = document.querySelector("#refresh-state-btn");
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
+          }
+          
+          // Update contract state to reflect the new contribution
+          updateContractState();
+        } else if (result.status === 'failed') {
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-error">
+                <p>Contribution failed: ${result.errorMessage || 'Unknown error'}</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                  class="transaction-link" target="_blank">View in Explorer</a>
+                <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
+              </div>
+            `;
+            
+            // Add retry button
+            const retryBtn = document.querySelector("#retry-contribution");
+            if (retryBtn) {
+              retryBtn.addEventListener("click", () => {
+                // Reset UI
+                if (transactionLinkContainer) {
+                  transactionLinkContainer.innerHTML = '';
+                  transactionLinkContainer.classList.add("hidden");
+                }
+              });
+            }
+          }
+        } else {
+          // Transaction still pending, check again
+          scheduleTransactionStatusCheck(txId, attempts + 1);
+        }
+      } else {
+        // If we can't check status, just update after a while
+        if (attempts === 5) {
+          console.log("Unable to check transaction status, updating state after delay");
+          const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-info">
+                <p>Transaction submitted, check explorer for status</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                  class="transaction-link" target="_blank">View in Explorer</a>
+                <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
+              </div>
+            `;
+            
+            // Add event listener to the refresh button
+            const refreshBtn = document.querySelector("#refresh-state-btn");
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
+          }
+          
+          // Update contract state after a delay
+          setTimeout(() => {
+            updateContractState();
+          }, 10000);
+        } else {
+          // Continue checking until we reach the limit
+          scheduleTransactionStatusCheck(txId, attempts + 1);
+        }
+      }
+    } catch (error) {
+      console.error("Error checking transaction status:", error);
+      
+      // If we hit max retries, update UI
+      if (attempts >= 8) {
+        const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-info">
+              <p>Unable to verify transaction status automatically</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
+            </div>
+          `;
+          
+          // Add event listener to the refresh button
+          const refreshBtn = document.querySelector("#refresh-state-btn");
+          if (refreshBtn) {
+            refreshBtn.addEventListener("click", updateContractState);
+          }
+        }
+      } else {
+        // Continue checking if there was an error
+        scheduleTransactionStatusCheck(txId, attempts + 1);
+      }
+    }
+  }, 5000); // Check every 5 seconds
 }
 
 function withdrawFundsAction() {
