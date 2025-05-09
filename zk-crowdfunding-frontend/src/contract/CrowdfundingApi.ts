@@ -710,33 +710,81 @@ readonly executeContribution = async (
     }
   };
   
-  /**
-   * Check transaction status using ShardedClient
-   * @param transactionId Transaction ID
-   * @param shardId Shard ID
-   * @returns Promise resolving to transaction status
-   */
-  readonly checkTransactionStatus = async (
-    transactionId: string,
-    shardId: string
-  ): Promise<{
-    status: 'pending' | 'success' | 'failed',
-    finalizedBlock?: string,
-    errorMessage?: string
-  }> => {
-    if (!transactionId) {
-      throw new CrowdfundingApiError(
-        "Transaction ID is required",
-        "MISSING_TRANSACTION_INFO"
-      );
-    }
+ /**
+ * Check transaction status using direct API calls
+ * @param transactionId Transaction ID
+ * @param shardId Optional shard ID (if already known)
+ * @returns Promise resolving to transaction status
+ */
+readonly checkTransactionStatus = async (
+  transactionId: string,
+  shardId?: string
+): Promise<{
+  status: 'pending' | 'success' | 'failed',
+  finalizedBlock?: string,
+  errorMessage?: string
+}> => {
+  if (!transactionId) {
+    throw new CrowdfundingApiError(
+      "Transaction ID is required",
+      "MISSING_TRANSACTION_INFO"
+    );
+  }
+  
+  try {
+    // Use native fetch instead of relying on ShardedClient
+    const checkSingleShard = async (shard: string) => {
+      try {
+        // Construct URL directly
+        const url = `${this.API_URL}/chain/shards/${shard}/transactions/${transactionId}?requireFinal=true`;
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (!response.ok) {
+          // Not found in this shard or other error
+          return null;
+        }
+        
+        const transaction = await response.json();
+        return transaction;
+      } catch (error) {
+        console.log(`Error checking transaction in ${shard}:`, error);
+        return null;
+      }
+    };
     
-    try {
-      // Use the baseClient.getExecutedTransaction method
-      const transaction = await this.baseClient.getExecutedTransaction(
-        shardId,
-        transactionId
-      );
+    // If no shard specified, try all
+    if (!shardId) {
+      const shards = ["Shard0", "Shard1", "Shard2"];
+      
+      for (const shard of shards) {
+        const transaction = await checkSingleShard(shard);
+        
+        if (transaction) {
+          if (transaction.executionSucceeded) {
+            return { 
+              status: 'success',
+              finalizedBlock: transaction.block
+            };
+          } else {
+            return { 
+              status: 'failed',
+              errorMessage: transaction.failureCause?.errorMessage || 'Unknown error'
+            };
+          }
+        }
+      }
+      
+      // If we get here, transaction was not found on any shard
+      return { status: 'pending' };
+    } else {
+      // Check just the specified shard
+      const transaction = await checkSingleShard(shardId);
       
       if (!transaction) {
         return { status: 'pending' };
@@ -753,9 +801,10 @@ readonly executeContribution = async (
           errorMessage: transaction.failureCause?.errorMessage || 'Unknown error'
         };
       }
-    } catch (error) {
-      console.error("Error checking transaction status:", error);
-      return { status: 'pending' };
     }
-  };
+  } catch (error) {
+    console.error("Error checking transaction status:", error);
+    return { status: 'pending' };
+  }
+};
 }
