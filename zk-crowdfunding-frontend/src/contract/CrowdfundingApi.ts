@@ -9,6 +9,31 @@ import { AbiBitOutput, AbiByteOutput, AbiByteInput } from "@partisiablockchain/a
 import { ShardedClient } from "../client/ShardedClient";
 
 /**
+ * Correctly serializes a u128 value for Partisia blockchain contracts
+ * Uses specific byte ordering to match Rust u128 deserialization
+ * 
+ * @param value The BigInt value to serialize
+ * @returns Buffer with correctly serialized u128
+ */
+function serializeU128ForPartisiaContract(value: bigint): Buffer {
+  // Ensure the value is valid
+  if (value < 0n || value > BigInt("0xffffffffffffffffffffffffffffffff")) {
+    throw new Error(`Value out of range for u128: ${value}`);
+  }
+  
+  // Create 16-byte buffer for u128
+  const buffer = Buffer.alloc(16);
+  
+  // Convert to bytes - CRITICAL: this must match the byte order expected by Rust
+  // In Rust, u128 is serialized as little-endian (LSB first)
+  for (let i = 0; i < 16; i++) {
+    buffer[i] = Number((value >> BigInt(8 * i)) & BigInt(0xFF));
+  }
+  
+  return buffer;
+}
+
+/**
  * Custom error class for API operations
  */
 export class CrowdfundingApiError extends Error {
@@ -106,7 +131,7 @@ export class CrowdfundingApi {
       );
     }
     
-    const scaledAmount = Math.floor(amount * this.ZK_SCALE_FACTOR);
+    const scaledAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
     if (scaledAmount <= 0) {
       throw new CrowdfundingApiError(
         "Contribution amount too small for ZK computation",
@@ -144,7 +169,7 @@ export class CrowdfundingApi {
     
     try {
       // NOTE: Since direct token allowance checking via callView is not available,
-      // we'll use a more compatible approach:
+      // we'll use a more compatible approach
       
       // Fetch the contract data for the token, if available
       const tokenContract = await this.baseClient.getContractData(tokenAddress);
@@ -213,34 +238,24 @@ export class CrowdfundingApi {
         "INVALID_AMOUNT"
       );
     }
-  
+
     try {
-      // Build the approve RPC buffer (shortname 0x05 for approve)
+      // Build the approve RPC buffer with the FIXED serialization
       const rpc = AbiByteOutput.serializeBigEndian((_out) => {
         _out.writeU8(0x05); // approve shortname
         
-        // Fixed: Directly use Buffer for address
+        // Write spender address
         _out.writeBytes(Buffer.from(campaignAddress, 'hex'));
         
-        // Serialize u128 as 16 bytes in little-endian format
-        const buffer = Buffer.alloc(16);
-        const view = new DataView(buffer.buffer);
+        // FIXED: Serialize the u128 amount correctly for the contract
+        const amountBuffer = serializeU128ForPartisiaContract(amount);
         
-        // Split the bigint into 32-bit chunks
-        const low32 = Number(amount & BigInt(0xffffffff));
-        const mid32 = Number((amount >> BigInt(32)) & BigInt(0xffffffff));
-        const high32 = Number((amount >> BigInt(64)) & BigInt(0xffffffff));
-        const top32 = Number((amount >> BigInt(96)) & BigInt(0xffffffff));
+        // Log the serialized bytes for debugging
+        console.log("Approval amount bytes:", [...amountBuffer].map(b => b.toString(16).padStart(2, '0')).join(' '));
         
-        // Write in little-endian format
-        view.setUint32(0, low32, true);
-        view.setUint32(4, mid32, true);
-        view.setUint32(8, high32, true);
-        view.setUint32(12, top32, true);
-        
-        _out.writeBytes(buffer);
+        _out.writeBytes(amountBuffer);
       });
-  
+
       // Send the transaction to approve tokens
       const transaction = await this.transactionClient!.signAndSend({
         address: tokenAddress,
@@ -305,8 +320,8 @@ export class CrowdfundingApi {
       this.validateZkAmount(amount);
       
       // Convert to scaled values for different parts of the operation
-      const zkAmount = Math.floor(amount * this.ZK_SCALE_FACTOR);
-      const tokenAmount = BigInt(Math.floor(amount * 10**18)); // Assuming 18 decimals for token
+      const zkAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
+      const tokenAmount = BigInt(Math.round(amount * 10**18)); // Assuming 18 decimals for token
       
       // Check token allowance first
       const allowance = await this.getTokenAllowance(
@@ -363,11 +378,20 @@ readonly addContributionWithApproval = async (
   try {
     // Validate inputs and calculate amounts
     this.validateZkAmount(amount);
-    const tokenDecimals = 18; // This should match your token's actual decimals
-    const tokenAmount = BigInt(Math.floor(amount * (10 ** tokenDecimals)));
     
-    console.log(`Processing contribution: Amount ${amount}, ZK scaling ${this.ZK_SCALE_FACTOR}, Token decimals ${tokenDecimals}`);
+    // IMPORTANT: Ensure consistent token decimals
+    const tokenDecimals = 18; // This should match your token's actual decimals
+    
+    // Use proper Math.round() to avoid floating point precision issues
+    // Then convert to BigInt to maintain precision
+    const tokenAmount = BigInt(Math.round(amount * (10 ** tokenDecimals)));
+    
+    console.log(`Processing contribution: Amount ${amount}, Token decimals ${tokenDecimals}`);
     console.log(`Token amount in wei: ${tokenAmount.toString()}`);
+    
+    // Convert the ZK amount using the same consistent method
+    const zkAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
+    console.log(`ZK amount: ${zkAmount}`);
     
     // Check current allowance
     const allowance = await this.getTokenAllowance(
@@ -414,7 +438,6 @@ readonly addContributionWithApproval = async (
       
       // Make the contribution directly
       console.log("Executing contribution after approval...");
-      const zkAmount = Math.floor(amount * this.ZK_SCALE_FACTOR);
       const contributionResult = await this.executeContribution(
         campaignAddress, 
         zkAmount, 
@@ -427,11 +450,13 @@ readonly addContributionWithApproval = async (
       };
     } else {
       // Allowance is already sufficient, just make the contribution
-      console.log("Allowance already sufficient, making contribution directly");
-      const contributionResult = await this.addContribution(
-        amount,
-        campaignAddress,
-        tokenAddress
+      console.log("Allowance already sufficient, making direct contribution");
+      
+      // Execute the contribution using the calculated values
+      const contributionResult = await this.executeContribution(
+        campaignAddress, 
+        zkAmount, 
+        tokenAmount
       );
       
       return {
@@ -450,8 +475,8 @@ readonly addContributionWithApproval = async (
   }
 };
   
- /**
- * Execute the contribution in two coordinated transactions with improved error handling
+/**
+ * Execute the contribution in two coordinated transactions
  * @param campaignAddress Campaign contract address
  * @param zkAmount Amount for ZK computation
  * @param tokenAmount Amount for token transfer
@@ -507,28 +532,18 @@ readonly executeContribution = async (
     // Wait longer for the ZK transaction to be processed by the network
     await new Promise(resolve => setTimeout(resolve, 5000));
     
-    // Phase 2: Send the token contribution transaction
+    // Phase 2: Send the token contribution transaction with FIXED serialization
     const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
       _out.writeU8(0x09); // Format indicator
       _out.writeBytes(Buffer.from("07", "hex")); // contribute_tokens shortname
       
-      // Serialize u128 as 16 bytes in little-endian format
-      const buffer = Buffer.alloc(16);
-      const view = new DataView(buffer.buffer);
+      // FIXED: Serialize the u128 amount correctly for the contract
+      const amountBuffer = serializeU128ForPartisiaContract(tokenAmount);
       
-      // Split the bigint into 32-bit chunks
-      const low32 = Number(tokenAmount & BigInt(0xffffffff));
-      const mid32 = Number((tokenAmount >> BigInt(32)) & BigInt(0xffffffff));
-      const high32 = Number((tokenAmount >> BigInt(64)) & BigInt(0xffffffff));
-      const top32 = Number((tokenAmount >> BigInt(96)) & BigInt(0xffffffff));
+      // Log the serialized bytes for debugging
+      console.log("Contribution amount bytes:", [...amountBuffer].map(b => b.toString(16).padStart(2, '0')).join(' '));
       
-      // Write in little-endian format
-      view.setUint32(0, low32, true);
-      view.setUint32(4, mid32, true);
-      view.setUint32(8, high32, true);
-      view.setUint32(12, top32, true);
-      
-      _out.writeBytes(buffer);
+      _out.writeBytes(amountBuffer);
     });
     
     // Send the token transfer transaction with increased gas
