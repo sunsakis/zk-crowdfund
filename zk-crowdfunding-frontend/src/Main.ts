@@ -374,6 +374,11 @@ async function addContributionFormAction() {
   }
   
   const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
+
+  if (parseFloat(contributionInput.value) < 0.000001 || parseFloat(contributionInput.value) > 1000) {
+    setConnectionStatus("Please enter a contribution amount between 0.000001 and 1000");
+    return;
+  }
   
   // Use parseFloat to handle decimal values
   if (!contributionInput || isNaN(parseFloat(contributionInput.value)) || parseFloat(contributionInput.value) <= 0) {

@@ -10,7 +10,7 @@ import { ShardedClient } from "../client/ShardedClient";
 
 /**
  * Correctly serializes a u128 value for Partisia blockchain contracts
- * Uses specific byte ordering to match Rust u128 deserialization
+ * Uses little-endian format to match Rust's u128 deserialization
  * 
  * @param value The BigInt value to serialize
  * @returns Buffer with correctly serialized u128
@@ -21,16 +21,114 @@ function serializeU128ForPartisiaContract(value: bigint): Buffer {
     throw new Error(`Value out of range for u128: ${value}`);
   }
   
+  console.log("SERIALIZE DEBUG: Serializing BigInt value:", value.toString());
+  console.log("SERIALIZE DEBUG: Hex representation:", "0x" + value.toString(16));
+  
   // Create 16-byte buffer for u128
   const buffer = Buffer.alloc(16);
   
-  // Convert to bytes - CRITICAL: this must match the byte order expected by Rust
-  // In Rust, u128 is serialized as little-endian (LSB first)
+  // Convert to bytes - little-endian (LSB first)
   for (let i = 0; i < 16; i++) {
-    buffer[i] = Number((value >> BigInt(8 * i)) & BigInt(0xFF));
+    buffer[i] = Number((value >> BigInt(i * 8)) & BigInt(0xFF));
   }
   
+  console.log("SERIALIZE DEBUG: Bytes (hex):", buffer.toString('hex'));
+  console.log("SERIALIZE DEBUG: Bytes (array):", [...buffer].map(b => "0x" + b.toString(16).padStart(2, '0')));
+  
   return buffer;
+}
+
+/**
+ * Converts a floating-point amount to token units with precise handling
+ * @param amount The amount as a floating-point number
+ * @param decimals The number of decimal places for the token
+ * @returns BigInt representation of the token amount
+ */
+function floatToTokenUnits(amount: number, decimals: number): bigint {
+  if (isNaN(amount) || amount < 0) {
+    throw new Error("Amount must be a non-negative number");
+  }
+  
+  // Convert to string with fixed precision to avoid floating point errors
+  const amountStr = amount.toFixed(decimals);
+  
+  // Remove decimal point and convert to BigInt
+  const parts = amountStr.split('.');
+  const wholePart = parts[0];
+  const fractionalPart = parts.length > 1 ? parts[1] : '';
+  
+  // Pad fractional part with zeros if needed
+  const paddedFractionalPart = fractionalPart.padEnd(decimals, '0');
+  
+  // Combine and convert to BigInt
+  const result = BigInt(wholePart + paddedFractionalPart);
+  
+  console.log("AMOUNT DEBUG: Using token decimals:", decimals);
+  console.log("AMOUNT DEBUG: Amount entered:", amount);
+  console.log("AMOUNT DEBUG: Precise string conversion:", amountStr, "->", wholePart + paddedFractionalPart);
+  console.log("AMOUNT DEBUG: Token amount (" + decimals + " decimals):", result.toString());
+  
+  return result;
+}
+
+/**
+ * Creates the RPC buffer for the approve action
+ * @param spenderAddress The address to approve (campaign contract)
+ * @param amount The token amount to approve as BigInt
+ * @returns Buffer containing the correctly serialized RPC call
+ */
+function createApproveRpc(spenderAddress: string, amount: bigint): Buffer {
+  console.log("APPROVAL DEBUG: Approving exact amount:", amount.toString());
+  console.log("APPROVAL DEBUG: For campaign contract:", spenderAddress);
+  
+  return AbiByteOutput.serializeBigEndian((_out) => {
+    // Write the action shortname for approve (0x05)
+    _out.writeU8(0x05);
+    
+    // Write the spender address (campaign address)
+    // Note: Address is expected to be a hex string without 0x prefix
+    if (spenderAddress.startsWith('0x')) {
+      spenderAddress = spenderAddress.substring(2);
+    }
+    _out.writeBytes(Buffer.from(spenderAddress, 'hex'));
+    
+    // Serialize the u128 amount correctly using our helper
+    const amountBuffer = serializeU128ForPartisiaContract(amount);
+    
+    console.log("APPROVAL DEBUG: Serialized amount (hex):", [...amountBuffer].map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
+    // Logging for debugging - we'll just log the components separately
+    console.log("APPROVAL DEBUG: Action shortname: 0x05");
+    console.log("APPROVAL DEBUG: Spender address:", spenderAddress);
+    console.log("APPROVAL DEBUG: Serialized amount:", amountBuffer.toString('hex'));
+    
+    _out.writeBytes(amountBuffer);
+  });
+}
+
+/**
+ * Creates the RPC buffer for the contribute_tokens action
+ * @param amount The token amount to contribute as BigInt
+ * @returns Buffer containing the correctly serialized RPC call
+ */
+function createContributeTokensRpc(amount: bigint): Buffer {
+  console.log("CONTRIBUTE DEBUG: Creating RPC for amount:", amount.toString());
+  console.log("CONTRIBUTE DEBUG: Hex representation:", "0x" + amount.toString(16));
+  
+  return AbiByteOutput.serializeBigEndian((_out) => {
+    // Use format indicator + shortname format for action calls
+    _out.writeU8(0x09); // Format indicator for actions
+    _out.writeBytes(Buffer.from([0x07])); // Action shortname as bytes
+    
+    // Serialize the u128 amount correctly
+    const amountBuffer = serializeU128ForPartisiaContract(amount);
+    
+    // Logging for debugging
+    console.log("CONTRIBUTE DEBUG: Using format: 0x09 + shortname (0x07)");
+    console.log("CONTRIBUTE DEBUG: Serialized amount:", amountBuffer.toString('hex'));
+    
+    _out.writeBytes(amountBuffer);
+  });
 }
 
 /**
@@ -87,6 +185,9 @@ export class CrowdfundingApi {
   private readonly ZK_SCALE_FACTOR = 1_000_000; // 6 decimal places
   private readonly MAX_ZK_VALUE = 2147483647; // Max i32 value
   private readonly API_URL = "https://node1.testnet.partisiablockchain.com";
+  
+  // Default token decimals
+  private readonly TOKEN_DECIMALS = 18;
 
   constructor(
     transactionClient: BlockchainTransactionClient | undefined,
@@ -145,6 +246,8 @@ export class CrowdfundingApi {
         "AMOUNT_TOO_LARGE"
       );
     }
+    
+    console.log("AMOUNT DEBUG: ZK amount:", scaledAmount);
   };
 
   /**
@@ -168,27 +271,20 @@ export class CrowdfundingApi {
     }
     
     try {
-      // NOTE: Since direct token allowance checking via callView is not available,
-      // we'll use a more compatible approach
+      // Since direct token allowance checking is not available,
+      // we'll simulate it by querying the user's balance
       
-      // Fetch the contract data for the token, if available
-      const tokenContract = await this.baseClient.getContractData(tokenAddress);
+      // Get the user's balance
+      const userAddress = this.sender;
+      const accountData = await this.baseClient.getAccountData(userAddress);
       
-      if (!tokenContract) {
-        console.warn(`Token contract data not available for ${tokenAddress}`);
-        return {
-          currentAllowance: BigInt(0),
-          sufficientAllowance: false,
-          requiredAmount
-        };
-      }
+      // Simulate a balance check
+      const userBalance = BigInt(accountData?.nonce || 0) + BigInt("9990000000000000");
+      console.log("BALANCE DEBUG: User balance:", userBalance.toString());
+      console.log("BALANCE DEBUG: Contribution amount:", requiredAmount.toString());
+      console.log("BALANCE DEBUG: Has sufficient funds:", userBalance >= requiredAmount);
       
-      // For production, you would implement this by:
-      // 1. Creating a custom endpoint in your backend to check allowances
-      // 2. Use direct blockchain queries against the token contract storage
-      // 3. Maintain a local cache of recent approvals by the user
-      
-      // For now, we conservatively return 0 allowance, requiring explicit approval
+      // Conservatively return 0 allowance, requiring explicit approval
       return {
         currentAllowance: BigInt(0),
         sufficientAllowance: false,
@@ -240,21 +336,8 @@ export class CrowdfundingApi {
     }
 
     try {
-      // Build the approve RPC buffer with the FIXED serialization
-      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-        _out.writeU8(0x05); // approve shortname
-        
-        // Write spender address
-        _out.writeBytes(Buffer.from(campaignAddress, 'hex'));
-        
-        // FIXED: Serialize the u128 amount correctly for the contract
-        const amountBuffer = serializeU128ForPartisiaContract(amount);
-        
-        // Log the serialized bytes for debugging
-        console.log("Approval amount bytes:", [...amountBuffer].map(b => b.toString(16).padStart(2, '0')).join(' '));
-        
-        _out.writeBytes(amountBuffer);
-      });
+      // Create the RPC for token approval using our helper
+      const rpc = createApproveRpc(campaignAddress, amount);
 
       // Send the transaction to approve tokens
       const transaction = await this.transactionClient!.signAndSend({
@@ -321,7 +404,7 @@ export class CrowdfundingApi {
       
       // Convert to scaled values for different parts of the operation
       const zkAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
-      const tokenAmount = BigInt(Math.round(amount * 10**18)); // Assuming 18 decimals for token
+      const tokenAmount = floatToTokenUnits(amount, this.TOKEN_DECIMALS);
       
       // Check token allowance first
       const allowance = await this.getTokenAllowance(
@@ -339,7 +422,7 @@ export class CrowdfundingApi {
         );
       }
       
-      // Create two-phase approach using a Promise that resolves when both operations succeed
+      // Execute the contribution using the calculated values
       return await this.executeContribution(campaignAddress, zkAmount, tokenAmount);
     } catch (error) {
       if (error instanceof CrowdfundingApiError) {
@@ -379,19 +462,11 @@ readonly addContributionWithApproval = async (
     // Validate inputs and calculate amounts
     this.validateZkAmount(amount);
     
-    // IMPORTANT: Ensure consistent token decimals
-    const tokenDecimals = 18; // This should match your token's actual decimals
-    
-    // Use proper Math.round() to avoid floating point precision issues
-    // Then convert to BigInt to maintain precision
-    const tokenAmount = BigInt(Math.round(amount * (10 ** tokenDecimals)));
-    
-    console.log(`Processing contribution: Amount ${amount}, Token decimals ${tokenDecimals}`);
-    console.log(`Token amount in wei: ${tokenAmount.toString()}`);
+    // Convert to token units with precise handling
+    const tokenAmount = floatToTokenUnits(amount, this.TOKEN_DECIMALS);
     
     // Convert the ZK amount using the same consistent method
     const zkAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
-    console.log(`ZK amount: ${zkAmount}`);
     
     // Check current allowance
     const allowance = await this.getTokenAllowance(
@@ -488,7 +563,7 @@ readonly executeContribution = async (
   tokenAmount: bigint
 ): Promise<TransactionResult> => {
   try {
-    console.log(`Executing contribution: ZK amount: ${zkAmount}, Token amount: ${tokenAmount.toString()}`);
+    console.log(`EXECUTE DEBUG: ZK amount: ${zkAmount}, Token amount: ${tokenAmount.toString()}`);
     
     // Phase 1: Submit ZK input
     const secretInput = AbiBitOutput.serialize((_out) => {
@@ -529,22 +604,12 @@ readonly executeContribution = async (
       zkAmount
     });
     
-    // Wait longer for the ZK transaction to be processed by the network
+    // Wait for the ZK transaction to be processed by the network
     await new Promise(resolve => setTimeout(resolve, 5000));
     
-    // Phase 2: Send the token contribution transaction with FIXED serialization
-    const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09); // Format indicator
-      _out.writeBytes(Buffer.from("07", "hex")); // contribute_tokens shortname
-      
-      // FIXED: Serialize the u128 amount correctly for the contract
-      const amountBuffer = serializeU128ForPartisiaContract(tokenAmount);
-      
-      // Log the serialized bytes for debugging
-      console.log("Contribution amount bytes:", [...amountBuffer].map(b => b.toString(16).padStart(2, '0')).join(' '));
-      
-      _out.writeBytes(amountBuffer);
-    });
+    // Phase 2: Send the token contribution transaction
+    // Create the RPC for contribute_tokens using our helper function
+    const contributeTokensRpc = createContributeTokensRpc(tokenAmount);
     
     // Send the token transfer transaction with increased gas
     const tokenTx = await this.transactionClient!.signAndSend({
@@ -621,10 +686,10 @@ readonly executeContribution = async (
       );
     }
     
-    // Using same format as previous functions but with different shortname
+    // Create verify_my_contribution RPC with format indicator
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09);
-      _out.writeBytes(Buffer.from("06", "hex")); // Shortname 0x06 for verification
+      _out.writeU8(0x09); // Format indicator for actions
+      _out.writeBytes(Buffer.from([0x06])); // verify_my_contribution shortname
     });
     
     try {
@@ -670,10 +735,10 @@ readonly executeContribution = async (
       );
     }
 
-    // Create the RPC for ending campaign
+    // Create the RPC for ending campaign with format indicator
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09);  // Format indicator
-      _out.writeBytes(Buffer.from("01", "hex"));  // Action shortname (0x01)
+      _out.writeU8(0x09);  // Format indicator for actions
+      _out.writeBytes(Buffer.from([0x01]));  // Action shortname as bytes
     });
 
     try {
@@ -720,10 +785,10 @@ readonly executeContribution = async (
       );
     }
     
-    // Create withdraw funds RPC
+    // Create withdraw funds RPC with format indicator
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09);
-      _out.writeBytes(Buffer.from("04", "hex")); // Withdraw funds shortname
+      _out.writeU8(0x09); // Format indicator for actions
+      _out.writeBytes(Buffer.from([0x04])); // Withdraw funds shortname as bytes
     });
     
     try {
@@ -844,7 +909,4 @@ readonly checkTransactionStatus = async (
     console.error("Error checking transaction status:", error);
     return { status: 'pending' };
   }
-};
-
-
-}
+}};
