@@ -111,4 +111,22 @@ export class ShardedClient {
   private clientForAddress(address: string) {
     return this.getClient(this.shardForAddress(address));
   }
+
+  /**
+ * Check a transaction status directly in the explorer
+ * @param transactionId The transaction ID to check
+ * @returns The transaction data or null if not found
+ */
+public async checkTransactionInExplorer(transactionId: string): Promise<any> {
+  try {
+    const response = await fetch(`https://browser.testnet.partisiablockchain.com/api/transactions/${transactionId}`);
+    if (response.ok) {
+      return await response.json();
+    }
+    return null;
+  } catch (error) {
+    console.error("Error checking transaction in explorer:", error);
+    return null;
+  }
+}
 }

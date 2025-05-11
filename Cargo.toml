@@ -2,7 +2,7 @@
 resolver = "2"
 
 members = [
-    "zk-crowdfunding"
+    "contracts/zk-crowdfund"
 ]
 
 [workspace.package]

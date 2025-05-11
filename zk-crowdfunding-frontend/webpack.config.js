@@ -9,7 +9,7 @@ module.exports = (env) => {
   return {
     mode: "development",
     devtool: "eval-source-map",
-    entry: './src/main/Main.ts',
+    entry: './src/Main.ts',
     output: {
       path: path.resolve(__dirname, 'dist'),
       filename: '[name].[contenthash].js',
@@ -53,7 +53,7 @@ module.exports = (env) => {
     },
     plugins: [
       new HtmlWebpackPlugin({
-        template: './src/main/index.html',
+        template: './src/index.html',
         filename: 'index.html'
       }),
       new webpack.ProvidePlugin({
