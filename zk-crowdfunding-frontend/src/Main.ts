@@ -96,37 +96,131 @@ function initializeElements() {
 }
 
 /**
- * Helper function to update transaction display
- * @param txId Transaction ID
- * @param status Status of the transaction
- * @param container The container element to update
+ * Safely extract contract state with proper type checking
+ * @param contractData Raw contract data from API response
+ * @returns Buffer containing state data or throws with detailed error
  */
-function updateTransactionDisplay(txId: string, status: 'pending' | 'success' | 'failed' | 'unknown', container: HTMLElement | null) {
-  if (!container) return;
-  
-  let alertClass = 'alert-info';
-  let statusText = 'Processing';
-  
-  if (status === 'success') {
-    alertClass = 'alert-success';
-    statusText = 'Succeeded';
-  } else if (status === 'failed') {
-    alertClass = 'alert-error';
-    statusText = 'Failed';
-  } else if (status === 'unknown') {
-    alertClass = 'alert-warning';
-    statusText = 'Unknown (check explorer)';
+function safelyExtractContractState(contractData: any): { 
+  stateBuffer: Buffer, 
+  tokenAddress: string 
+} {
+  if (!contractData) {
+    throw new Error("Contract data is null or undefined");
   }
   
-  container.innerHTML = `
-    <div class="alert ${alertClass}">
-      <p>Transaction ${statusText}</p>
-      <p class="transaction-hash">Transaction ID: ${txId}</p>
-      <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-         class="transaction-link" target="_blank">View in Explorer</a>
-      ${status === 'pending' ? '<div class="spinner" style="margin-top: 10px;"></div>' : ''}
-    </div>
-  `;
+  if (typeof contractData !== 'object') {
+    throw new Error("Contract data is not an object");
+  }
+  
+  if (!contractData.serializedContract) {
+    throw new Error("Invalid contract data: missing serializedContract");
+  }
+  
+  const serializedContract = contractData.serializedContract;
+  
+  if (!serializedContract.openState || 
+      typeof serializedContract.openState !== 'object' ||
+      !serializedContract.openState.openState ||
+      typeof serializedContract.openState.openState !== 'object' ||
+      typeof serializedContract.openState.openState.data !== 'string') {
+    throw new Error("Invalid contract state format");
+  }
+  
+  // Now we can safely access the data property
+  const rawStateData = serializedContract.openState.openState.data;
+  const stateBuffer = Buffer.from(rawStateData, "base64");
+  
+  // Deserialize the contract state
+  const state = deserializeState(stateBuffer);
+  
+  // Get token address (handling both property names for compatibility)
+  const tokenAddress = (state.token_address || state.tokenAddress)?.asString();
+  
+  if (!tokenAddress) {
+    throw new Error("Contract does not have a token address configured");
+  }
+  
+  return { stateBuffer, tokenAddress };
+}
+
+/**
+ * Schedule periodic checks of a transaction's status
+ * @param txId Transaction ID to check
+ * @param api The CrowdfundingApi instance
+ * @param onSuccess Callback for success
+ * @param onFailure Callback for failure
+ * @param onPending Callback for pending status
+ * @param attempts Current attempt count
+ * @param maxAttempts Maximum number of attempts
+ */
+function scheduleTransactionStatusCheck(
+  txId: string,
+  api?: any, // Use your CrowdfundingApi type here
+  onSuccess?: (txId: string) => void,
+  onFailure?: (txId: string, error?: string) => void,
+  onPending?: (txId: string, attempt: number) => void,
+  attempts: number = 0,
+  maxAttempts: number = 10
+) {
+  if (!txId || attempts >= maxAttempts) {
+    console.log(`Transaction status check ended for ${txId}: Max attempts reached`);
+    return;
+  }
+
+  setTimeout(async () => {
+    try {
+      // First try to get the API from the global state if not provided
+      const checkApi = api || getCrowdfundingApi();
+      
+      if (!checkApi) {
+        console.warn("API not available for transaction check");
+        if (onPending) onPending(txId, attempts);
+        
+        // Try again with increased attempt count
+        scheduleTransactionStatusCheck(
+          txId, api, onSuccess, onFailure, onPending, attempts + 1, maxAttempts
+        );
+        return;
+      }
+
+      const result = await checkApi.checkTransactionStatus(txId);
+      
+      if (result.status === 'success') {
+        // Transaction successful
+        console.log(`Transaction ${txId} completed successfully`);
+        if (onSuccess) onSuccess(txId);
+        
+        // Update contract state to reflect changes
+        updateContractState();
+      } else if (result.status === 'failed') {
+        // Transaction failed
+        console.error(`Transaction ${txId} failed: ${result.errorMessage || 'Unknown error'}`);
+        if (onFailure) onFailure(txId, result.errorMessage);
+      } else {
+        // Transaction still pending, check again after delay
+        console.log(`Transaction ${txId} still pending (attempt ${attempts + 1}/${maxAttempts})`);
+        if (onPending) onPending(txId, attempts);
+        
+        // Try again with increased attempt count
+        scheduleTransactionStatusCheck(
+          txId, api, onSuccess, onFailure, onPending, attempts + 1, maxAttempts
+        );
+      }
+    } catch (error) {
+      console.error(`Error checking transaction status for ${txId}:`, error);
+      
+      // If we hit max retries, give up and notify failure
+      if (attempts >= maxAttempts - 1) {
+        console.warn(`Max retry attempts reached for transaction ${txId}`);
+        if (onFailure) onFailure(txId, "Max retry attempts reached");
+      } else {
+        // Continue checking if there was an error
+        scheduleTransactionStatusCheck(
+          txId, api, onSuccess, onFailure, onPending, attempts + 1, maxAttempts
+        );
+      }
+    }
+  }, 5000); // Check every 5 seconds
 }
 
 // Event handlers
@@ -374,15 +468,19 @@ async function addContributionFormAction() {
   }
   
   const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
+  if (!contributionInput) {
+    setConnectionStatus("Error: Contribution input field not found");
+    return;
+  }
 
-  if (parseFloat(contributionInput.value) < 0.000001 || parseFloat(contributionInput.value) > 1000) {
-    setConnectionStatus("Please enter a contribution amount between 0.000001 and 1000");
+  const contributionValue = parseFloat(contributionInput.value);
+  if (isNaN(contributionValue) || contributionValue <= 0) {
+    setConnectionStatus("Please enter a valid contribution amount greater than 0");
     return;
   }
   
-  // Use parseFloat to handle decimal values
-  if (!contributionInput || isNaN(parseFloat(contributionInput.value)) || parseFloat(contributionInput.value) <= 0) {
-    setConnectionStatus("Please enter a valid contribution amount greater than 0");
+  if (contributionValue < 0.000001 || contributionValue > 1000) {
+    setConnectionStatus("Please enter a contribution amount between 0.000001 and 1000");
     return;
   }
   
@@ -410,75 +508,40 @@ async function addContributionFormAction() {
   }
   
   try {
-    // Get token address from contract state data, with type safety
+    // Get contract data with proper error handling
     const contractData = await CLIENT.getContractData(address);
-    if (!contractData) {
-      throw new Error("Could not retrieve contract data");
-    }
     
-    // Safely access nested properties with optional chaining and type checking
-    const serializedContract = contractData.serializedContract;
-    if (!serializedContract) {
-      throw new Error("Contract data missing serializedContract");
-    }
-    
-    // Get raw state data
-    let rawStateData: string;
-    if ('openState' in serializedContract && 
-        serializedContract.openState && 
-        'openState' in serializedContract.openState && 
-        serializedContract.openState.openState && 
-        'data' in serializedContract.openState.openState) {
-      rawStateData = serializedContract.openState.openState.data;
-    } else {
-      throw new Error("Contract state data format not recognized");
-    }
-    
-    if (!rawStateData) {
-      throw new Error("Contract state data is empty");
-    }
-    
-    const stateBuffer = Buffer.from(rawStateData, "base64");
-    const state = deserializeState(stateBuffer);
-    
-    // Check if token_address exists - use both naming conventions for compatibility
-    const tokenAddress = (state.token_address || state.tokenAddress)?.asString();
-    if (!tokenAddress) {
-      throw new Error("Contract does not have a token address configured");
-    }
-    
-    const floatAmount = parseFloat(contributionInput.value);
+    // Safely extract token address from contract state
+    const { tokenAddress } = safelyExtractContractState(contractData);
     
     // Show processing status
     setConnectionStatus("Processing contribution...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Processing contribution of ${floatAmount} tokens...</p>
+          <p>Processing contribution of ${contributionValue} tokens...</p>
           <div class="spinner mt-2"></div>
         </div>
       `;
     }
     
     // Use the combined method that handles both approval and contribution
-    const result = await api.addContributionWithApproval(floatAmount, address, tokenAddress);
+    const result = await api.addContributionWithApproval(contributionValue, address, tokenAddress);
     
-    // Get transaction IDs safely
+    // Extract transaction IDs safely
     let zkTxId = "unknown";
     let tokenTxId = "unknown";
     
-    // Handle approval feedback first if applicable
+    // Handle approval feedback if applicable
     if (result.approvalResult) {
-      const approvalTxId = 
-        result.approvalResult.transaction?.transactionPointer?.identifier || "unknown";
-      
+      const approvalTxId = result.approvalResult.transaction?.transactionPointer?.identifier || "unknown";
       console.log("Approval transaction:", approvalTxId);
     }
     
-    // Handle the contribution transaction details
+    // Handle the contribution transaction details safely
     const contributionResult = result.contributionResult;
     if (contributionResult.metadata) {
-      // Extract transaction IDs with safe access
+      // Extract transaction IDs with proper type checks
       if (contributionResult.metadata.zkTransaction) {
         if (typeof contributionResult.metadata.zkTransaction === 'string') {
           zkTxId = contributionResult.metadata.zkTransaction;
@@ -496,10 +559,10 @@ async function addContributionFormAction() {
       }
     }
     
-    // Use ZK transaction ID for status checking
+    // Use ZK transaction ID for status checking, with proper fallbacks
     const primaryTxId = zkTxId !== "unknown" ? zkTxId : 
-                       (tokenTxId !== "unknown" ? tokenTxId : 
-                       (contributionResult.transaction?.transactionPointer?.identifier || "unknown"));
+                        (tokenTxId !== "unknown" ? tokenTxId : 
+                        (contributionResult.transaction?.transactionPointer?.identifier || "unknown"));
     
     console.log("Contribution transactions:", { zkTxId, tokenTxId, primaryTxId });
     
@@ -528,33 +591,80 @@ async function addContributionFormAction() {
     // Clear the input
     contributionInput.value = "";
     
-    // Schedule status checking with the improved function
-    scheduleTransactionStatusCheck(primaryTxId);
-    
-    // Set a fallback timer to update the state regardless of transaction status
-    setTimeout(() => {
-      updateContractState();
-      
-      // Also update UI to indicate refresh happened
-      const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
-      if (transactionLinkContainer && transactionLinkContainer.innerHTML.includes("processing")) {
-        transactionLinkContainer.innerHTML = `
-          <div class="alert alert-info">
-            <p>Contribution submitted</p>
-            <p class="transaction-hash">Transaction ID: ${primaryTxId}</p>
-            <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
-               class="transaction-link" target="_blank">View in Explorer</a>
-            <p>Contract state has been refreshed</p>
-            <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Again</button>
-          </div>
-        `;
+    // Schedule status checking
+    scheduleTransactionStatusCheck(
+      primaryTxId,
+      api,
+      (txId) => {
+        // Success callback
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-success">
+              <p>Contribution successful!</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                 class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
+            </div>
+          `;
+          
+          // Add event listener to the refresh button
+          const refreshBtn = document.querySelector("#refresh-state-btn");
+          if (refreshBtn) {
+            refreshBtn.addEventListener("click", updateContractState);
+          }
+        }
         
-        // Add event listener to the refresh button
-        const refreshBtn = document.querySelector("#refresh-state-btn");
-        if (refreshBtn) {
-          refreshBtn.addEventListener("click", updateContractState);
+        // Update contract state
+        updateContractState();
+      },
+      (txId, error) => {
+        // Failure callback
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-error">
+              <p>Contribution failed: ${error || 'Unknown error'}</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                 class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
+            </div>
+          `;
+          
+          // Add retry button
+          const retryBtn = document.querySelector("#retry-contribution");
+          if (retryBtn) {
+            retryBtn.addEventListener("click", () => {
+              // Reset UI
+              if (transactionLinkContainer) {
+                transactionLinkContainer.innerHTML = '';
+                transactionLinkContainer.classList.add("hidden");
+              }
+            });
+          }
+        }
+      },
+      (txId, attempt) => {
+        // Pending callback - show progress after a few attempts
+        if (attempt === 5) {
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-info">
+                <p>Transaction is still processing...</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                   class="transaction-link" target="_blank">View in Explorer</a>
+                <div class="spinner mt-2"></div>
+              </div>
+            `;
+          }
         }
       }
+    );
+    
+    // Set a fallback timer to update the state
+    setTimeout(() => {
+      updateContractState();
     }, 30000);
     
   } catch (error) {
@@ -592,249 +702,6 @@ async function addContributionFormAction() {
     if (addContributionBtn) {
       addContributionBtn.disabled = false;
       addContributionBtn.textContent = "Contribute";
-    }
-  }
-}
-
-// Helper function to schedule checking transaction status
-function scheduleTransactionStatusCheck(txId: string, attempts = 0) {
-  if (attempts > 10) return; // Limit to 10 attempts
-  
-  setTimeout(async () => {
-    try {
-      const api = getCrowdfundingApi();
-      if (!api) {
-        console.warn("API not available for transaction check");
-        return;
-      }
-      
-      const result = await api.checkTransactionStatus(txId, 'Shard0');
-      
-      const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
-      
-      if (result.status === 'success') {
-        // Transaction successful
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-success">
-              <p>Contribution successful!</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
-            </div>
-          `;
-          
-          // Add event listener to the refresh button
-          const refreshBtn = document.querySelector("#refresh-state-btn");
-          if (refreshBtn) {
-            refreshBtn.addEventListener("click", updateContractState);
-          }
-        }
-        
-        // Update contract state to reflect the new contribution
-        updateContractState();
-      } else if (result.status === 'failed') {
-        // Transaction failed
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-error">
-              <p>Contribution failed: ${result.errorMessage || 'Unknown error'}</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
-            </div>
-          `;
-          
-          // Add retry button
-          const retryBtn = document.querySelector("#retry-contribution");
-          if (retryBtn) {
-            retryBtn.addEventListener("click", () => {
-              // Reset UI
-              if (transactionLinkContainer) {
-                transactionLinkContainer.innerHTML = '';
-                transactionLinkContainer.classList.add("hidden");
-              }
-            });
-          }
-        }
-      } else {
-        // Transaction still pending, check again after delay
-        if (attempts === 5) {
-          // Show the "still processing" message after a few attempts
-          if (transactionLinkContainer) {
-            transactionLinkContainer.innerHTML = `
-              <div class="alert alert-info">
-                <p>Transaction is still processing...</p>
-                <p class="transaction-hash">Transaction ID: ${txId}</p>
-                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                   class="transaction-link" target="_blank">View in Explorer</a>
-                <div class="spinner mt-2"></div>
-              </div>
-            `;
-          }
-        }
-        
-        // Try again with increased attempt count
-        scheduleTransactionStatusCheck(txId, attempts + 1);
-      }
-    } catch (error) {
-      console.error("Error checking transaction status:", error);
-      
-      // If we hit max retries, update UI
-      if (attempts >= 8) {
-        const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-info">
-              <p>Unable to verify transaction status automatically</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
-            </div>
-          `;
-          
-          // Add event listener to the refresh button
-          const refreshBtn = document.querySelector("#refresh-state-btn");
-          if (refreshBtn) {
-            refreshBtn.addEventListener("click", updateContractState);
-          }
-        }
-      } else {
-        // Continue checking if there was an error
-        scheduleTransactionStatusCheck(txId, attempts + 1);
-      }
-    }
-  }, 5000); // Check every 5 seconds
-}
-
-function withdrawFundsAction() {
-  console.log("Withdraw funds button clicked");
-  
-  // User is connected
-  if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
-    return;
-  }
-  
-  // Get the contract address
-  const address = getContractAddress();
-  if (!address) {
-    setConnectionStatus("No contract address provided");
-    return;
-  }
-  
-  // Get API
-  const api = getCrowdfundingApi();
-  if (!api) {
-    setConnectionStatus("Error: API not initialized");
-    return;
-  }
-  
-  // Disable the button during processing
-  const withdrawFundsBtn = document.querySelector("#withdraw-funds-btn") as HTMLButtonElement;
-  if (withdrawFundsBtn) {
-    withdrawFundsBtn.disabled = true;
-    withdrawFundsBtn.textContent = "Processing...";
-  }
-  
-  // Show transaction info container
-  if (elements.withdrawFundsTransactionLink) {
-    elements.withdrawFundsTransactionLink.classList.remove("hidden");
-    elements.withdrawFundsTransactionLink.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
-  }
-  
-  // Create a timeout to ensure spinner doesn't run forever
-  const timeoutId = setTimeout(() => {
-    console.log("Withdraw funds transaction timed out after 60 seconds");
-    if (elements.withdrawFundsTransactionLink) {
-      elements.withdrawFundsTransactionLink.innerHTML = '<div class="alert alert-error">Transaction timed out. It may still be processing.</div>';
-    }
-    if (withdrawFundsBtn) {
-      withdrawFundsBtn.disabled = false;
-      withdrawFundsBtn.textContent = "Withdraw Funds";
-    }
-  }, 60000); // 60 second timeout
-  
-  console.log(`Withdrawing funds for address: ${address}`);
-  
-  // IMPORTANT: Pass the address to withdrawFunds
-  try {
-    api.withdrawFunds(address)
-      .then((result) => {
-        // Clear the timeout as we got a response
-        clearTimeout(timeoutId);
-        
-        console.log("Withdraw funds transaction successful:", result);
-        const txId = result.transactionPointer.identifier;
-        
-        // Update transaction info display
-        if (elements.withdrawFundsTransactionLink) {
-          elements.withdrawFundsTransactionLink.innerHTML = '';
-          
-          const txInfoDiv = document.createElement('div');
-          txInfoDiv.className = 'transaction-info';
-          
-          const txHashPara = document.createElement('p');
-          txHashPara.textContent = `Transaction: ${txId}`;
-          txInfoDiv.appendChild(txHashPara);
-          
-          const txLink = document.createElement('a');
-          txLink.href = `https://browser.testnet.partisiablockchain.com/transactions/${txId}`;
-          txLink.textContent = 'View in Explorer';
-          txLink.className = 'transaction-link';
-          txLink.target = '_blank';
-          txInfoDiv.appendChild(txLink);
-          
-          elements.withdrawFundsTransactionLink.appendChild(txInfoDiv);
-        }
-        
-        // Set status message
-        setConnectionStatus("Funds withdrawn successfully");
-        
-        // Update state to reflect the withdrawal
-        console.log("Setting timeout to update contract state");
-        setTimeout(() => {
-          console.log("Executing delayed state update after withdrawing funds");
-          updateContractState();
-        }, 5000);
-      })
-      .catch((error) => {
-        // Clear the timeout as we got a response
-        clearTimeout(timeoutId);
-        
-        console.error("Error withdrawing funds:", error);
-        
-        if (elements.withdrawFundsTransactionLink) {
-          elements.withdrawFundsTransactionLink.innerHTML = `<div class="alert alert-error">Error: ${error.message || String(error)}</div>`;
-        }
-        setConnectionStatus(`Error withdrawing funds: ${error.message || String(error)}`);
-      })
-      .finally(() => {
-        // Re-enable the button
-        if (withdrawFundsBtn) {
-          withdrawFundsBtn.disabled = false;
-          withdrawFundsBtn.textContent = "Withdraw Funds";
-        }
-      });
-  } catch (error) {
-    // Clear the timeout
-    clearTimeout(timeoutId);
-    
-    // Catch any errors that occur during API setup or call preparation
-    console.error("Pre-transaction error:", error);
-    
-    if (elements.withdrawFundsTransactionLink) {
-      elements.withdrawFundsTransactionLink.innerHTML = `<div class="alert alert-error">Setup Error: ${error.message || String(error)}</div>`;
-    }
-    setConnectionStatus(`Error preparing transaction: ${error.message || String(error)}`);
-    
-    // Re-enable the button
-    if (withdrawFundsBtn) {
-      withdrawFundsBtn.disabled = false;
-      withdrawFundsBtn.textContent = "Withdraw Funds";
     }
   }
 }
