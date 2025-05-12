@@ -34,10 +34,6 @@ function floatToTokenUnits(amount: number, decimals: number = 18): bigint {
   // Combine and convert to BigInt
   const combinedStr = wholePart + paddedFractionalPart;
   
-  console.log("AMOUNT DEBUG: Using token decimals:", decimals);
-  console.log("AMOUNT DEBUG: Amount entered:", amount);
-  console.log("AMOUNT DEBUG: String conversion:", combinedStr);
-  
   return BigInt(combinedStr);
 }
 
@@ -157,7 +153,6 @@ export class CrowdfundingApi {
       );
     }
     
-    console.log("AMOUNT DEBUG: ZK amount:", scaledAmount);
   };
 
   /**
@@ -181,18 +176,7 @@ export class CrowdfundingApi {
     }
     
     try {
-      // Since direct token allowance checking is not available,
-      // we'll simulate it by querying the user's balance
-      
-      // Get the user's balance
-      const userAddress = this.sender;
-      const accountData = await this.baseClient.getAccountData(userAddress);
-      
-      // Simulate a balance check
-      const userBalance = BigInt(accountData?.nonce || 0) + BigInt("9990000000000000");
-      console.log("BALANCE DEBUG: User balance:", userBalance.toString());
-      console.log("BALANCE DEBUG: Contribution amount:", requiredAmount.toString());
-      console.log("BALANCE DEBUG: Has sufficient funds:", userBalance >= requiredAmount);
+
       
       // Conservatively return 0 allowance, requiring explicit approval
       return {
@@ -418,13 +402,8 @@ readonly addContributionWithApproval = async (
     // Combine and convert to BigInt
     const tokenAmount = BigInt(wholePart + paddedFractionalPart);
     
-    console.log("AMOUNT DEBUG: Using token decimals:", decimals);
-    console.log("AMOUNT DEBUG: Amount entered:", amount);
-    console.log("AMOUNT DEBUG: Token amount in wei:", tokenAmount.toString());
-    
     // Convert the ZK amount for the secret contribution
     const zkAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
-    console.log("ZK AMOUNT DEBUG: Scaled for ZK computation:", zkAmount);
     
     // Check current allowance
     const allowance = await this.getTokenAllowance(
@@ -879,97 +858,98 @@ readonly addContributionWithApproval = async (
    * @returns Promise resolving to transaction status
    */
   readonly checkTransactionStatus = async (
-    transactionId: string,
-    shardId?: string
-  ): Promise<{
-    status: 'pending' | 'success' | 'failed',
-    finalizedBlock?: string,
-    errorMessage?: string
-  }> => {
-    if (!transactionId) {
-      throw new CrowdfundingApiError(
-        "Transaction ID is required",
-        "MISSING_TRANSACTION_INFO"
-      );
-    }
-    
-    try {
-      // Use native fetch instead of relying on ShardedClient
-      const checkSingleShard = async (shard: string) => {
-        try {
-          // Construct URL directly
-          const url = `${this.API_URL}/chain/shards/${shard}/transactions/${transactionId}?requireFinal=true`;
-          
-          const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json'
-            }
-          });
-          
-          if (!response.ok) {
-            // Not found in this shard or other error
-            return null;
+  transactionId: string,
+  shardId?: string
+): Promise<{
+  status: 'pending' | 'success' | 'failed',
+  finalizedBlock?: string,
+  errorMessage?: string
+}> => {
+  if (!transactionId) {
+    throw new CrowdfundingApiError(
+      "Transaction ID is required",
+      "MISSING_TRANSACTION_INFO"
+    );
+  }
+  
+  try {
+    // Use native fetch instead of relying on ShardedClient
+    const checkSingleShard = async (shard: string) => {
+      try {
+        // Construct URL with the correct format
+        const url = `${this.API_URL}/chain/shards/${shard}/transactions/${transactionId}`;
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
           }
-          
-          const transaction = await response.json();
-          return transaction;
-        } catch (error) {
-          console.log(`Error checking transaction in ${shard}:`, error);
+        });
+        
+        if (!response.ok) {
+          // Not found in this shard or other error
           return null;
         }
-      };
-      
-      // If no shard specified, try all
-      if (!shardId) {
-        const shards = ["Shard0", "Shard1", "Shard2"];
         
-        for (const shard of shards) {
-          const transaction = await checkSingleShard(shard);
-          
-          if (transaction) {
-            if (transaction.executionSucceeded) {
-              return { 
-                status: 'success',
-                finalizedBlock: transaction.block
-              };
-            } else {
-              return { 
-                status: 'failed',
-                errorMessage: transaction.failureCause?.errorMessage || 'Unknown error'
-              };
-            }
+        const transaction = await response.json();
+        return transaction;
+      } catch (error) {
+        console.log(`Error checking transaction in ${shard}:`, error);
+        return null;
+      }
+    };
+    
+    // If no shard specified, try all
+    if (!shardId) {
+      const shards = ["Shard0", "Shard1", "Shard2"];
+      
+      for (const shard of shards) {
+        const transaction = await checkSingleShard(shard);
+        
+        if (transaction) {
+          // Check the correct properties based on the API response format
+          if (transaction.executionStatus?.success) {
+            return { 
+              status: 'success',
+              finalizedBlock: transaction.executionStatus.blockId
+            };
+          } else {
+            return { 
+              status: 'failed',
+              errorMessage: transaction.executionStatus?.failure?.errorMessage || 'Unknown error'
+            };
           }
         }
-        
-        // If we get here, transaction was not found on any shard
-        return { status: 'pending' };
-      } else {
-        // Check just the specified shard
-        const transaction = await checkSingleShard(shardId);
-        
-        if (!transaction) {
-          return { status: 'pending' };
-        }
-        
-        if (transaction.executionSucceeded) {
-          return { 
-            status: 'success',
-            finalizedBlock: transaction.block
-          };
-        } else {
-          return { 
-            status: 'failed',
-            errorMessage: transaction.failureCause?.errorMessage || 'Unknown error'
-          };
-        }
-
       }
-    } catch (error) {
-      console.error("Error checking transaction status:", error);
+      
+      // If we get here, transaction was not found on any shard
       return { status: 'pending' };
+    } else {
+      // Check just the specified shard
+      const transaction = await checkSingleShard(shardId);
+      
+      if (!transaction) {
+        return { status: 'pending' };
+      }
+      
+      // Check the correct properties based on the API response format
+      if (transaction.executionStatus?.success) {
+        return { 
+          status: 'success',
+          finalizedBlock: transaction.executionStatus.blockId
+        };
+      } else {
+        return { 
+          status: 'failed',
+          errorMessage: transaction.executionStatus?.failure?.errorMessage || 'Unknown error'
+        };
+      }
     }
-  };
+  } catch (error) {
+    console.error("Error checking transaction status:", error);
+    return { status: 'pending' };
+  }
+};
 
   /**
    * Helper function to safely extract contract state from API response
