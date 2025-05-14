@@ -924,91 +924,151 @@ function countContributions(variables) {
   ).length;
 }
 
-// Update UI elements with contract state
-function updateUIWithContractState(state, variables) {
-  // Count the number of contributions
-  const contributionCount = countContributions(variables);
+/**
+ * Helper function to format token amounts with proper decimal handling
+ * @param {string|number} rawAmount - The raw token amount from contract
+ * @param {number} [tokenDecimals=18] - The number of decimals used by the token
+ * @param {number} [zkScaleFactor=1000000] - The scaling factor used in ZK computation
+ * @returns {string} Formatted token amount string
+ */
+function formatTokenAmount(rawAmount, tokenDecimals = 18, zkScaleFactor = 1000000) {
+  if (!rawAmount || rawAmount === "0") return "0";
   
-  // Update owner
-  const ownerValue = document.querySelector("#owner-value");
-  if (ownerValue) {
-    ownerValue.innerHTML = `Project Owner: ${state.owner.asString()}`;
-  }
+  // Convert to number/bigint for calculation
+  const amountValue = typeof rawAmount === 'string' ? Number(rawAmount) : rawAmount;
   
-  // Update title
-  const titleValue = document.querySelector("#title-value");
-  if (titleValue) {
-    titleValue.innerHTML = `<h4>${state.title}</h4>`;
-  }
-  
- // Update description
- const descriptionValue = document.querySelector("#description-value");
- if (descriptionValue) {
-   descriptionValue.innerHTML = `<p>${state.description}</p>`;
- }
- 
- // Update status
- const statusValue = document.querySelector("#status-value");
- if (statusValue) {
-   const statusText = CampaignStatus[state.status];
-   statusValue.innerHTML = `Status: <span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
- }
- 
- // Update funding target
- const fundingTargetValue = document.querySelector("#funding-target-value");
- if (fundingTargetValue) {
-   fundingTargetValue.innerHTML = `Funding Target: ${state.fundingTarget}`;
- }
- 
- // Update deadline
- const deadlineValue = document.querySelector("#deadline-value");
- if (deadlineValue) {
-   const deadlineDate = new Date(state.deadline);
-   if (state.deadline === 0) {
-     deadlineValue.innerHTML = `Deadline: No deadline set`;
-   } else {
-     deadlineValue.innerHTML = `Deadline: ${deadlineDate.toLocaleString()}`;
-   }
- }
- 
- // Update contributors
- const numContributors = document.querySelector("#num-contributors");
- if (numContributors) {
-   numContributors.innerHTML = `Number of Contributors: ${state.numContributors ?? contributionCount}`;
- }
- 
- // Update total raised
-const totalRaised = document.querySelector("#total-raised");
-if (totalRaised) {
-  if (state.isSuccessful) {
-    totalRaised.innerHTML = `Total Raised: ${state.totalRaised}`;
+  // If the value is very large (indicating it's in token base units with 18 decimals)
+  if (amountValue > 1000000000000) {
+    // Convert from base units to a readable format
+    const divisor = Math.pow(10, tokenDecimals);
+    const amountInTokens = amountValue / divisor;
+    
+    return amountInTokens.toLocaleString(undefined, { 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6
+    });
   } else {
-    totalRaised.innerHTML = `Total Raised: <span class="text-yellow-600">Not revealed (threshold not met)</span>`;
+    // Otherwise, it's likely the ZK scaled value (using 6 decimals)
+    const amountFromZk = amountValue / zkScaleFactor;
+    
+    return amountFromZk.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6 
+    });
   }
 }
- 
- // Update campaign result
- const campaignResult = document.querySelector("#campaign-result");
- if (campaignResult) {
-   if (state.status === CampaignStatus.Completed) {
-     const resultClass = state.isSuccessful ? "result-success" : "result-failure";
-     campaignResult.innerHTML = `Campaign Result: <span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
-     
-     // Show the result container if needed
-     const campaignResultContainer = document.querySelector("#campaign-result-container");
-     if (campaignResultContainer) {
-       campaignResultContainer.classList.remove("hidden");
-     }
-     
-     // Update result box styling
-     const resultBox = document.querySelector("#result-box");
-     if (resultBox) {
-       resultBox.className = state.isSuccessful ? "result-box success" : "result-box failure";
-     }
-   } else {
-     campaignResult.innerHTML = "Campaign Result: Not yet determined";
-   }
- }
+
+/**
+ * Enhanced function to update UI with contract state - improved token display
+ * @param {Object} state - The deserialized contract state
+ * @param {Array} variables - The contract variables array
+ */
+function updateUIWithContractState(state, variables) {
+  try {
+    // Count the number of contributions
+    const contributionCount = countContributions(variables);
+    
+    // Update owner
+    const ownerValue = document.querySelector("#owner-value");
+    if (ownerValue && state.owner) {
+      try {
+        ownerValue.innerHTML = `Project Owner: ${state.owner.asString()}`;
+      } catch (error) {
+        console.error("Error displaying owner address:", error);
+        ownerValue.innerHTML = `Project Owner: Unknown`;
+      }
+    }
+    
+    // Update title
+    const titleValue = document.querySelector("#title-value");
+    if (titleValue) {
+      titleValue.innerHTML = `<h4>${state.title || "Untitled Project"}</h4>`;
+    }
+    
+    // Update description
+    const descriptionValue = document.querySelector("#description-value");
+    if (descriptionValue) {
+      descriptionValue.innerHTML = `<p>${state.description || "No description available"}</p>`;
+    }
+    
+    // Update status
+    const statusValue = document.querySelector("#status-value");
+    if (statusValue && typeof state.status !== 'undefined') {
+      const statusText = CampaignStatus[state.status] || "Unknown";
+      statusValue.innerHTML = `Status: <span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
+    }
+    
+    // Update funding target - format with proper decimals
+    const fundingTargetValue = document.querySelector("#funding-target-value");
+    if (fundingTargetValue) {
+      const formattedTarget = formatTokenAmount(state.fundingTarget);
+      fundingTargetValue.innerHTML = `Funding Target: ${formattedTarget}`;
+    }
+    
+    // Update deadline if present
+    const deadlineValue = document.querySelector("#deadline-value");
+    if (deadlineValue && typeof state.deadline !== 'undefined') {
+      if (state.deadline === 0) {
+        deadlineValue.innerHTML = `Deadline: No deadline set`;
+      } else {
+        try {
+          const deadlineDate = new Date(state.deadline);
+          deadlineValue.innerHTML = `Deadline: ${deadlineDate.toLocaleString()}`;
+        } catch (error) {
+          console.error("Error formatting deadline:", error);
+          deadlineValue.innerHTML = `Deadline: ${state.deadline}`;
+        }
+      }
+    }
+    
+    // Update contributors
+    const numContributors = document.querySelector("#num-contributors");
+    if (numContributors) {
+      numContributors.innerHTML = `Number of Contributors: ${state.numContributors ?? contributionCount}`;
+    }
+    
+    // Update total raised - with improved formatting
+    const totalRaised = document.querySelector("#total-raised");
+    if (totalRaised) {
+      if (state.status === CampaignStatus.Completed && state.isSuccessful) {
+        // For completed successful campaigns, show the formatted amount
+        const formattedAmount = formatTokenAmount(state.totalRaised);
+        totalRaised.innerHTML = `Total Raised: ${formattedAmount}`;
+      } else if (state.status === CampaignStatus.Completed) {
+        // For completed unsuccessful campaigns
+        totalRaised.innerHTML = `Total Raised: <span class="text-yellow-600">Not revealed (threshold not met)</span>`;
+      } else {
+        // For campaigns in progress
+        totalRaised.innerHTML = `Total Raised: <span class="text-blue-600">In progress</span>`;
+      }
+    }
+    
+    // Update campaign result
+    const campaignResult = document.querySelector("#campaign-result");
+    if (campaignResult) {
+      if (state.status === CampaignStatus.Completed) {
+        const resultClass = state.isSuccessful ? "result-success" : "result-failure";
+        campaignResult.innerHTML = `Campaign Result: <span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
+        
+        // Show the campaign result container when completed
+        const campaignResultContainer = document.querySelector("#campaign-result-container");
+        if (campaignResultContainer) {
+          campaignResultContainer.classList.remove("hidden");
+          
+          // Update result box styling
+          const resultBox = document.querySelector("#result-box");
+          if (resultBox) {
+            resultBox.className = state.isSuccessful ? "result-box success" : "result-box failure";
+          }
+        }
+      } else {
+        campaignResult.innerHTML = "Campaign Result: Not yet determined";
+      }
+    }
+  } catch (error) {
+    console.error("Error updating UI with contract state:", error);
+    showErrorMessage(`Error updating UI: ${error.message}`);
+  }
 }
 
 // Update action visibility based on contract state
