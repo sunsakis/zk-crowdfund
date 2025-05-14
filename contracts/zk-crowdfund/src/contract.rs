@@ -294,8 +294,12 @@ fn open_sum_variable(
             .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution {}))
             .count() as u32;
         
+        // ZK scaling factor (contributions use 6 decimal places)
+        let zk_scaling_factor: u128 = 1_000_000;
+        
         // Determine if campaign was successful
-        let is_successful = total_raised as u128 >= state.funding_target;
+        // Need to multiply funding_target by scaling factor since total_raised is already scaled
+        let is_successful = (total_raised as u128) >= (state.funding_target * zk_scaling_factor);
         
         // Set the total_raised amount
         state.total_raised = Some(total_raised as u128);

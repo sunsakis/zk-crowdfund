@@ -1424,7 +1424,7 @@ function updateUIWithContractState(state, variables) {
         totalRaised.innerHTML = `Total Raised: <span class="text-yellow-600">Not revealed (threshold not met)</span>`;
       } else {
         // For campaigns in progress
-        totalRaised.innerHTML = `Total Raised: <span class="text-blue-600">Calculating</span>`;
+        totalRaised.innerHTML = `Total Raised: <span class="text-blue-600">Redacted</span>`;
       }
     }
     
