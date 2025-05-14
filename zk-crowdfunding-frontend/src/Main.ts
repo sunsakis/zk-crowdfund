@@ -882,6 +882,383 @@ function verifyContributionAction() {
     });
 }
 
+/**
+ * Handle End Campaign button click.
+ * This initiates the ZK computation process to calculate total contributions.
+ */
+async function endCampaignAction() {
+  console.log("End campaign button clicked");
+  
+  // Check if wallet is connected
+  if (!isConnected()) {
+    setConnectionStatus("Please connect your wallet first");
+    return;
+  }
+  
+  // Get the campaign address
+  const address = getContractAddress();
+  if (!address) {
+    setConnectionStatus("No campaign address found");
+    return;
+  }
+  
+  // Get the Crowdfunding API
+  const api = getCrowdfundingApi();
+  if (!api) {
+    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
+    return;
+  }
+  
+  // Disable button and show loading state
+  const endCampaignBtn = document.querySelector("#end-campaign-btn") as HTMLButtonElement;
+  if (endCampaignBtn) {
+    endCampaignBtn.disabled = true;
+    endCampaignBtn.textContent = "Processing...";
+  }
+  
+  // Show transaction info container
+  const transactionLinkContainer = document.querySelector("#end-campaign-transaction-link");
+  if (transactionLinkContainer) {
+    transactionLinkContainer.classList.remove("hidden");
+    transactionLinkContainer.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
+  }
+  
+  try {
+    // Show processing status
+    setConnectionStatus("Ending campaign and starting ZK computation...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Ending campaign and starting zero-knowledge computation...</p>
+          <div class="spinner mt-2"></div>
+        </div>
+      `;
+    }
+    
+    // End the campaign
+    const result = await api.endCampaign(address);
+    
+    // Get transaction ID for tracking
+    const txId = result.transaction?.transactionPointer?.identifier || 
+                result.metadata?.txId || 
+                "unknown";
+    
+    console.log("End campaign transaction sent:", txId);
+    
+    // Update UI with transaction info
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Campaign end request submitted successfully!</p>
+          <p class="transaction-hash">Transaction ID: ${txId}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p class="mt-2">Starting zero-knowledge computation...</p>
+          <p class="mt-2 text-sm">This process may take several minutes to complete.</p>
+          <div class="spinner"></div>
+        </div>
+      `;
+    }
+    
+    // Schedule status checking to track the computation
+    scheduleTransactionStatusCheck(
+      txId,
+      api,
+      (txId) => {
+        // Success callback
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-success">
+              <p>Campaign ended successfully! ZK computation started.</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                 class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="refresh-state-btn-end" class="btn btn-secondary mt-2">Refresh Contract State</button>
+            </div>
+          `;
+          
+          // Add event listener to the refresh button
+          const refreshBtn = document.querySelector("#refresh-state-btn-end");
+          if (refreshBtn) {
+            refreshBtn.addEventListener("click", updateContractState);
+          }
+        }
+        
+        // Update contract state
+        updateContractState();
+      },
+      (txId, error) => {
+        // Failure callback
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-error">
+              <p>Failed to end campaign: ${error || 'Unknown error'}</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                 class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="retry-end-campaign" class="btn btn-primary mt-2">Retry</button>
+            </div>
+          `;
+          
+          // Add retry button
+          const retryBtn = document.querySelector("#retry-end-campaign");
+          if (retryBtn) {
+            retryBtn.addEventListener("click", () => {
+              // Reset UI
+              if (transactionLinkContainer) {
+                transactionLinkContainer.innerHTML = '';
+                transactionLinkContainer.classList.add("hidden");
+              }
+            });
+          }
+        }
+      },
+      (txId, attempt) => {
+        // Pending callback - show progress after a few attempts
+        if (attempt >= 3) {
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-info">
+                <p>ZK computation in progress...</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                   class="transaction-link" target="_blank">View in Explorer</a>
+                <p class="text-sm mt-2">The computation may take 2-5 minutes to complete.</p>
+                <div class="spinner mt-2"></div>
+                <button id="refresh-state-during-compute" class="btn btn-secondary mt-2">Check Status</button>
+              </div>
+            `;
+            
+            // Add refresh button during computation
+            const refreshBtn = document.querySelector("#refresh-state-during-compute");
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
+          }
+        }
+      }
+    );
+    
+    // Set a fallback timer to update the state after a longer period
+    // This helps in case the computation takes a long time
+    setTimeout(() => {
+      updateContractState();
+    }, 120000); // 2 minutes
+    
+    // Set another refresh for 5 minutes
+    setTimeout(() => {
+      updateContractState();
+    }, 300000); // 5 minutes
+    
+  } catch (error) {
+    console.error("Error ending campaign:", error);
+    
+    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-error">
+          <p>Error ending campaign: ${error.message || String(error)}</p>
+          <p>Please try again or check the console for more details.</p>
+          <button id="retry-end-campaign" class="btn btn-primary mt-2">Retry</button>
+        </div>
+      `;
+      
+      // Add retry button
+      const retryBtn = document.querySelector("#retry-end-campaign");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", () => {
+          // Reset UI
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = '';
+          }
+          
+          // Re-enable the button for manual retry
+          if (endCampaignBtn) {
+            endCampaignBtn.disabled = false;
+            endCampaignBtn.textContent = "End Campaign";
+          }
+        });
+      }
+    }
+  } finally {
+    // Re-enable the button
+    if (endCampaignBtn) {
+      endCampaignBtn.disabled = false;
+      endCampaignBtn.textContent = "End Campaign";
+    }
+  }
+}
+
+/**
+ * Handle Withdraw Funds button click.
+ * This allows the campaign owner to withdraw funds if the campaign was successful.
+ */
+async function withdrawFundsAction() {
+  console.log("Withdraw funds button clicked");
+  
+  // Check if wallet is connected
+  if (!isConnected()) {
+    setConnectionStatus("Please connect your wallet first");
+    return;
+  }
+  
+  // Get the campaign address
+  const address = getContractAddress();
+  if (!address) {
+    setConnectionStatus("No campaign address found");
+    return;
+  }
+  
+  // Get the Crowdfunding API
+  const api = getCrowdfundingApi();
+  if (!api) {
+    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
+    return;
+  }
+  
+  // Disable button and show loading state
+  const withdrawFundsBtn = document.querySelector("#withdraw-funds-btn") as HTMLButtonElement;
+  if (withdrawFundsBtn) {
+    withdrawFundsBtn.disabled = true;
+    withdrawFundsBtn.textContent = "Processing...";
+  }
+  
+  // Show transaction info container
+  const transactionLinkContainer = document.querySelector("#withdraw-funds-transaction-link");
+  if (transactionLinkContainer) {
+    transactionLinkContainer.classList.remove("hidden");
+    transactionLinkContainer.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
+  }
+  
+  try {
+    // Show processing status
+    setConnectionStatus("Withdrawing funds...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Processing withdrawal request...</p>
+          <div class="spinner mt-2"></div>
+        </div>
+      `;
+    }
+    
+    // Withdraw the funds
+    const result = await api.withdrawFunds(address);
+    
+    // Get transaction ID for tracking
+    const txId = result.transaction?.transactionPointer?.identifier || 
+                result.metadata?.txId || 
+                "unknown";
+    
+    console.log("Withdraw funds transaction sent:", txId);
+    
+    // Update UI with transaction info
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Withdrawal request submitted successfully!</p>
+          <p class="transaction-hash">Transaction ID: ${txId}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p class="mt-2">Processing transaction...</p>
+          <div class="spinner"></div>
+        </div>
+      `;
+    }
+    
+    // Schedule status checking
+    scheduleTransactionStatusCheck(
+      txId,
+      api,
+      (txId) => {
+        // Success callback
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-success">
+              <p>Funds withdrawn successfully!</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                 class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="refresh-state-btn-withdraw" class="btn btn-secondary mt-2">Refresh Contract State</button>
+            </div>
+          `;
+          
+          // Add event listener to the refresh button
+          const refreshBtn = document.querySelector("#refresh-state-btn-withdraw");
+          if (refreshBtn) {
+            refreshBtn.addEventListener("click", updateContractState);
+          }
+        }
+        
+        // Update contract state
+        updateContractState();
+      },
+      (txId, error) => {
+        // Failure callback
+        if (transactionLinkContainer) {
+          transactionLinkContainer.innerHTML = `
+            <div class="alert alert-error">
+              <p>Failed to withdraw funds: ${error || 'Unknown error'}</p>
+              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                 class="transaction-link" target="_blank">View in Explorer</a>
+              <button id="retry-withdraw" class="btn btn-primary mt-2">Retry</button>
+            </div>
+          `;
+          
+          // Add retry button
+          const retryBtn = document.querySelector("#retry-withdraw");
+          if (retryBtn) {
+            retryBtn.addEventListener("click", () => {
+              // Reset UI
+              if (transactionLinkContainer) {
+                transactionLinkContainer.innerHTML = '';
+                transactionLinkContainer.classList.add("hidden");
+              }
+            });
+          }
+        }
+      }
+    );
+  } catch (error) {
+    console.error("Error withdrawing funds:", error);
+    
+    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-error">
+          <p>Error withdrawing funds: ${error.message || String(error)}</p>
+          <p>Please try again or check the console for more details.</p>
+          <button id="retry-withdraw" class="btn btn-primary mt-2">Retry</button>
+        </div>
+      `;
+      
+      // Add retry button
+      const retryBtn = document.querySelector("#retry-withdraw");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", () => {
+          // Reset UI
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = '';
+          }
+          
+          // Re-enable the button for manual retry
+          if (withdrawFundsBtn) {
+            withdrawFundsBtn.disabled = false;
+            withdrawFundsBtn.textContent = "Withdraw Funds";
+          }
+        });
+      }
+    }
+  } finally {
+    // Re-enable the button
+    if (withdrawFundsBtn) {
+      withdrawFundsBtn.disabled = false;
+      withdrawFundsBtn.textContent = "Withdraw Funds";
+    }
+  }
+}
+
 // Update UI elements based on wallet connection state
 export function updateWalletUI(address?: string) {
   console.log("Updating wallet UI:", address ? "Connected" : "Disconnected");
@@ -931,11 +1308,19 @@ function countContributions(variables) {
  * @param {number} [zkScaleFactor=1000000] - The scaling factor used in ZK computation
  * @returns {string} Formatted token amount string
  */
-function formatTokenAmount(rawAmount, tokenDecimals = 18, zkScaleFactor = 1000000) {
+function formatTokenAmount(rawAmount, tokenDecimals = 18, zkScaleFactor = 1000000, isFundingTarget = false) {
   if (!rawAmount || rawAmount === "0") return "0";
   
   // Convert to number/bigint for calculation
   const amountValue = typeof rawAmount === 'string' ? Number(rawAmount) : rawAmount;
+  
+  // For funding targets, don't apply scaling - just return the raw value
+  if (isFundingTarget) {
+    return amountValue.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6
+    });
+  }
   
   // If the value is very large (indicating it's in token base units with 18 decimals)
   if (amountValue > 1000000000000) {
@@ -1001,7 +1386,7 @@ function updateUIWithContractState(state, variables) {
     // Update funding target - format with proper decimals
     const fundingTargetValue = document.querySelector("#funding-target-value");
     if (fundingTargetValue) {
-      const formattedTarget = formatTokenAmount(state.fundingTarget);
+      const formattedTarget = formatTokenAmount(state.fundingTarget, 18, 1000000, true);
       fundingTargetValue.innerHTML = `Funding Target: ${formattedTarget}`;
     }
     
@@ -1039,7 +1424,7 @@ function updateUIWithContractState(state, variables) {
         totalRaised.innerHTML = `Total Raised: <span class="text-yellow-600">Not revealed (threshold not met)</span>`;
       } else {
         // For campaigns in progress
-        totalRaised.innerHTML = `Total Raised: <span class="text-blue-600">In progress</span>`;
+        totalRaised.innerHTML = `Total Raised: <span class="text-blue-600">Calculating</span>`;
       }
     }
     
