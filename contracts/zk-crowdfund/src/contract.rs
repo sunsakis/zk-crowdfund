@@ -298,8 +298,8 @@ fn open_sum_variable(
         let zk_scaling_factor: u128 = 1_000_000;
         
         // Determine if campaign was successful
-        // Need to multiply funding_target by scaling factor since total_raised is already scaled
-        let is_successful = (total_raised as u128) >= (state.funding_target * zk_scaling_factor);
+        let scaled_total = (total_raised as u128) / zk_scaling_factor;
+        let is_successful = scaled_total >= state.funding_target;
         
         // Set the total_raised amount
         state.total_raised = Some(total_raised as u128);
