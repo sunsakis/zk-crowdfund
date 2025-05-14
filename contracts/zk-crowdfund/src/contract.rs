@@ -294,12 +294,12 @@ fn open_sum_variable(
             .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution {}))
             .count() as u32;
         
-        // ZK scaling factor (contributions use 6 decimal places)
-        let zk_scaling_factor: u128 = 1_000_000;
+        // IMPORTANT: Interpret both values in ZK units (millionths of a token)
+        // This means the funding_target value from deployment is treated 
+        // as "millionths of a token" directly
         
-        // Determine if campaign was successful
-        let scaled_total = (total_raised as u128) / zk_scaling_factor;
-        let is_successful = scaled_total >= state.funding_target;
+        // Direct comparison in ZK units
+        let is_successful = (total_raised as u128) >= state.funding_target;
         
         // Set the total_raised amount
         state.total_raised = Some(total_raised as u128);
@@ -317,7 +317,6 @@ fn open_sum_variable(
     
     (state, vec![], zk_state_changes)
 }
-
 /// Allow the project owner to withdraw funds after a successful campaign
 #[action(shortname = 0x04, zk = true)]
 fn withdraw_funds(

@@ -1386,24 +1386,8 @@ function updateUIWithContractState(state, variables) {
     // Update funding target - format with proper decimals
     const fundingTargetValue = document.querySelector("#funding-target-value");
     if (fundingTargetValue) {
-      const formattedTarget = formatTokenAmount(state.fundingTarget, 18, 1000000, true);
+      const formattedTarget = formatTokenAmount(state.fundingTarget);
       fundingTargetValue.innerHTML = `Funding Target: ${formattedTarget}`;
-    }
-    
-    // Update deadline if present
-    const deadlineValue = document.querySelector("#deadline-value");
-    if (deadlineValue && typeof state.deadline !== 'undefined') {
-      if (state.deadline === 0) {
-        deadlineValue.innerHTML = `Deadline: No deadline set`;
-      } else {
-        try {
-          const deadlineDate = new Date(state.deadline);
-          deadlineValue.innerHTML = `Deadline: ${deadlineDate.toLocaleString()}`;
-        } catch (error) {
-          console.error("Error formatting deadline:", error);
-          deadlineValue.innerHTML = `Deadline: ${state.deadline}`;
-        }
-      }
     }
     
     // Update contributors
