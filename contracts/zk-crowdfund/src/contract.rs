@@ -58,13 +58,13 @@ struct ContractState {
     funding_target: u128,
     /// Current status of the crowdfunding campaign
     status: CampaignStatus,
-    /// Will contain the total raised amount when computation is complete
+    /// Will contain the total raised amount when computation is complete (in ZK units)
     total_raised: Option<u128>,
     /// Number of contributors
     num_contributors: Option<u32>,
     /// Whether the campaign was successful (reached funding target)
     is_successful: bool,
-    /// Map of contributor addresses to their contribution amounts (for refunds)
+    /// Map of contributor addresses to their contribution amounts (in token units)
     contributions: AvlTreeMap<Address, u128>,
 }
 
@@ -72,6 +72,13 @@ struct ContractState {
 const TOKEN_TRANSFER_FROM_SHORTNAME: u8 = 0x03;
 const TOKEN_TRANSFER_SHORTNAME: u8 = 0x01;
 const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
+
+// ZK scaling factor - 1 token = 10^6 ZK units
+//ZK_SCALE_FACTOR: u128 = 1_000_000;
+// Token decimals - 1 token = 10^18 base units
+//TOKEN_DECIMALS: u128 = 1_000_000_000_000_000_000;
+// Conversion factor from ZK units to token base units
+//ZK_TO_TOKEN_FACTOR: u128 = TOKEN_DECIMALS / ZK_SCALE_FACTOR; // 10^12
 
 /// Initializes contract - starts directly in Active state
 #[init(zk = true)]
@@ -97,7 +104,7 @@ fn initialize(
         title,
         description,
         token_address,
-        funding_target,
+        funding_target, // This is in ZK units (10^6 scale) as expected from frontend
         status: CampaignStatus::Active {},
         total_raised: None,
         num_contributors: None,
@@ -160,7 +167,7 @@ fn contribute_tokens(
         .argument(amount)
         .done();
     
-    // Record contribution for potential refund
+    // Record contribution for potential refund (but don't expose total)
     let current_contribution = state.contributions.get(&context.sender).unwrap_or(0);
     state.contributions.insert(context.sender, current_contribution + amount);
     
@@ -295,14 +302,16 @@ fn open_sum_variable(
             .count() as u32;
         
         // IMPORTANT: Interpret both values in ZK units (millionths of a token)
-        // This means the funding_target value from deployment is treated 
-        // as "millionths of a token" directly
-        
-        // Direct comparison in ZK units
+        // Check if the campaign is successful
         let is_successful = (total_raised as u128) >= state.funding_target;
         
-        // Set the total_raised amount
-        state.total_raised = Some(total_raised as u128);
+        // Only store the total_raised if the campaign was successful
+        // Otherwise, leave it as None to maintain privacy
+        if is_successful {
+            state.total_raised = Some(total_raised as u128);
+        } else {
+            state.total_raised = None; // Keep it private for unsuccessful campaigns
+        }
         
         // Set the contributor count and success flag
         state.num_contributors = Some(num_contributors);
@@ -317,6 +326,7 @@ fn open_sum_variable(
     
     (state, vec![], zk_state_changes)
 }
+
 /// Allow the project owner to withdraw funds after a successful campaign
 #[action(shortname = 0x04, zk = true)]
 fn withdraw_funds(
@@ -341,6 +351,13 @@ fn withdraw_funds(
         "Cannot withdraw funds from unsuccessful campaign"
     );
     
+    // Calculate total token amount only when needed (upon withdrawal)
+    // This ensures the total is only calculated after the campaign is successful
+    let mut total_amount: u128 = 0;
+    for (_, amount) in state.contributions.iter() {
+        total_amount += amount;
+    }
+    
     // Create event group for token transfer
     let mut events = Vec::new();
     
@@ -351,7 +368,7 @@ fn withdraw_funds(
     let mut event_group = EventGroup::builder();
     event_group.call(state.token_address, transfer_shortname)
         .argument(state.owner)
-        .argument(state.total_raised.unwrap_or(0))
+        .argument(total_amount) // Use calculated total
         .done();
     
     events.push(event_group.build());
@@ -377,7 +394,7 @@ fn claim_refund(
         "Cannot claim refund from successful campaign"
     );
     
-    // Get contribution amount
+    // Get contribution amount (already in token units)
     let amount = state.contributions.get(&context.sender).unwrap_or(0);
     assert!(amount > 0, "No contribution found for this address");
     
@@ -390,7 +407,7 @@ fn claim_refund(
     // Create Shortname from u8 value
     let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
     
-    // Set up transfer event
+    // Set up transfer event (amount is already in token units)
     let mut event_group = EventGroup::builder();
     event_group.call(state.token_address, transfer_shortname)
         .argument(context.sender)
