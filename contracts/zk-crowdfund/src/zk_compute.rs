@@ -2,6 +2,8 @@ use pbc_zk::*;
 
 #[allow(unused)]
 const CONTRIBUTION_VARIABLE_KIND: u8 = 0u8;
+#[allow(unused)]
+const SUM_RESULT_KIND: u8 = 1u8;
 
 /// Perform a zk computation on secret-shared data to sum all the secret contributions.
 ///
