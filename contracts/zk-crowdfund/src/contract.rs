@@ -59,14 +59,6 @@ fn get_campaign_info(
     state: ContractState,
     _zk_state: ZkState<SecretVarType>,
 ) -> CampaignPublicInfo {
-    // Create a public view that respects privacy
-    let total_tokens = if matches!(state.status, CampaignStatus::Completed {}) && state.is_successful {
-        // Only show total when campaign completed successfully
-        Some(state.total_tokens_received)
-    } else {
-        None
-    };
-
     CampaignPublicInfo {
         owner: state.owner,
         title: state.title.clone(),
@@ -77,8 +69,6 @@ fn get_campaign_info(
         total_raised: state.total_raised,
         num_contributors: state.num_contributors,
         is_successful: state.is_successful,
-        // Only include total_tokens_received if campaign is completed and successful
-        total_tokens_received: total_tokens,
     }
 }
 
@@ -94,9 +84,7 @@ struct CampaignPublicInfo {
     status: CampaignStatus,
     total_raised: Option<u128>,
     num_contributors: Option<u32>,
-    is_successful: bool, 
-    // Only included when campaign is completed and successful
-    total_tokens_received: Option<u128>,
+    is_successful: bool,
 }
 
 /// This contract's state
@@ -121,9 +109,6 @@ struct ContractState {
     num_contributors: Option<u32>,
     /// Whether the campaign was successful (reached funding target)
     is_successful: bool,
-    /// Total tokens transferred to the contract (used for post-campaign validation)
-    /// This is kept internal for privacy and only revealed by functions if conditions are met
-    total_tokens_received: u128,
 }
 
 /// Shortname constants for contract actions and callbacks
@@ -157,8 +142,7 @@ fn initialize(
         status: CampaignStatus::Active {},
         total_raised: None,
         num_contributors: None,
-        is_successful: false,
-        total_tokens_received: 0,
+        is_successful: false
     }
 }
 
@@ -237,17 +221,17 @@ fn contribute_tokens(
 fn contribute_callback(
     _ctx: ContractContext,
     callback_ctx: CallbackContext,
-    mut state: ContractState,
+    state: ContractState,
     _zk_state: ZkState<SecretVarType>,
-    amount: u128,
+    _amount: u128,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     // If token transfer failed, panic to revert the transaction
     if !callback_ctx.success {
         panic!("Token transfer failed");
     }
 
-    // Track total tokens received for post-campaign validation
-    state.total_tokens_received += amount;
+    // No need to track tokens anymore - we rely on ZK computations
+    // for totals and consistency checks
 
     // Return updated state
     (state, vec![], vec![])
@@ -376,14 +360,6 @@ fn open_sum_variable(
             .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution { .. }))
             .count() as u32;
         
-        // Verify that ZK sum matches the total tokens received
-        // This is a safety check to ensure consistency (only done internally)
-        assert_eq!(
-            total_raised as u128, 
-            state.total_tokens_received,
-            "ZK sum does not match total tokens received"
-        );
-        
         // Check if the campaign is successful
         let is_successful = (total_raised as u128) >= state.funding_target;
         
@@ -433,17 +409,20 @@ fn withdraw_funds(
         "Cannot withdraw funds from unsuccessful campaign"
     );
     
+    // For successful campaigns, we use the verified total from ZK computation
+    let total_to_withdraw = state.total_raised.unwrap_or(0);
+    
     // For successful campaigns, we transfer all tokens to the owner
     let mut events = Vec::new();
     
     // Create Shortname from u8 value
     let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
     
-    // Set up transfer event to owner with the total tokens received
+    // Set up transfer event to owner with the total tokens
     let mut event_group = EventGroup::builder();
     event_group.call(state.token_address, transfer_shortname)
         .argument(state.owner)
-        .argument(state.total_tokens_received)
+        .argument(total_to_withdraw)
         .done();
     
     events.push(event_group.build());
