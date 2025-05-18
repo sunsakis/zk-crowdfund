@@ -116,7 +116,9 @@ const TOKEN_TRANSFER_FROM_SHORTNAME: u8 = 0x03;
 const TOKEN_TRANSFER_SHORTNAME: u8 = 0x01;
 const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
 const SUM_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x42;
+const REFUND_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x43;
 const ZK_COMPUTATION_SHORTNAME: u32 = 0x61;
+const REFUND_COMPUTATION_SHORTNAME: u32 = 0x62;
 
 /// Initializes contract - starts directly in Active state
 #[init(zk = true)]
@@ -298,19 +300,16 @@ fn end_campaign(
     let on_complete_hook = Some(ShortnameZkComputeComplete::from_u32(SUM_COMPUTE_COMPLETE_SHORTNAME));
     
     // Create metadata for the output variable 
-    let output_metadata = vec![vec![1]]; // 1 is the discriminant for SumResult
+    let output_metadata = vec![SecretVarType::SumResult {}];
     
     // Start the computation
-    (
-        state,
-        vec![],
-        vec![ZkStateChange::StartComputation {
-            function_shortname,
-            output_variable_metadata: output_metadata,
-            input_arguments: vec![],
-            on_complete_function_shortname: on_complete_hook,
-        }],
-    )
+    let zk_change = ZkStateChange::start_computation(
+        function_shortname,
+        output_metadata,
+        on_complete_hook,
+    );
+    
+    (state, vec![], vec![zk_change])
 }
 
 /// Automatically called when the computation is completed
@@ -333,56 +332,112 @@ fn sum_compute_complete(
 
 /// Called when the sum variable is opened
 #[zk_on_variables_opened]
-fn open_sum_variable(
-    _context: ContractContext,
+fn open_variables(
+    context: ContractContext,
     mut state: ContractState,
     zk_state: ZkState<SecretVarType>,
     opened_variables: Vec<SecretVarId>,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
-    assert_eq!(
-        opened_variables.len(),
-        1,
-        "Unexpected number of output variables"
-    );
-    
-    let opened_variable = zk_state
-        .get_variable(*opened_variables.first().unwrap())
-        .unwrap();
-
-    if let SecretVarType::SumResult {} = opened_variable.metadata {
-        // Read the sum result
-        let total_raised = read_variable_u32_le(&opened_variable);
-        
-        // Count the number of contributions
-        let num_contributors = zk_state
-            .secret_variables
-            .iter()
-            .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution { .. }))
-            .count() as u32;
-        
-        // Check if the campaign is successful
-        let is_successful = (total_raised as u128) >= state.funding_target;
-        
-        // For successful campaigns, we can reveal the total
-        // For failed campaigns, we don't reveal the total
-        if is_successful {
-            state.total_raised = Some(total_raised as u128);
-        } else {
-            state.total_raised = None;
-        }
-        
-        // Set the contributor count and success flag
-        state.num_contributors = Some(num_contributors);
-        state.is_successful = is_successful;
-        
-        // Mark campaign as completed
-        state.status = CampaignStatus::Completed {};
-        
-        // Mark ZK contract as done
-        return (state, vec![], vec![ZkStateChange::ContractDone]);
+    // Skip processing if no opened variables
+    if opened_variables.is_empty() {
+        return (state, vec![], vec![]);
     }
     
+    // Get the first opened variable
+    let var_id = opened_variables.get(0).unwrap();
+    let opened_variable = zk_state.get_variable(*var_id).unwrap();
+    
+    // Process based on variable type
+    match opened_variable.metadata {
+        // Process SumResult variables (from campaign completion)
+        SecretVarType::SumResult {} => {
+            // Read the sum result
+            let total_raised = read_variable_u32_le(&opened_variable);
+            
+            // Count the number of contributions
+            let num_contributors = zk_state
+                .secret_variables
+                .iter()
+                .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution { .. }))
+                .count() as u32;
+            
+            // Check if the campaign is successful
+            let is_successful = (total_raised as u128) >= state.funding_target;
+            
+            // For successful campaigns, we can reveal the total
+            // For failed campaigns, we don't reveal the total
+            if is_successful {
+                state.total_raised = Some(total_raised as u128);
+            } else {
+                state.total_raised = None;
+            }
+            
+            // Set the contributor count and success flag
+            state.num_contributors = Some(num_contributors);
+            state.is_successful = is_successful;
+            
+            // Mark campaign as completed
+            state.status = CampaignStatus::Completed {};
+            
+            // IMPORTANT: Only mark ZK contract as done for successful campaigns
+            // For unsuccessful campaigns, we need to keep the ZK state active for refunds
+            if is_successful {
+                return (state, vec![], vec![ZkStateChange::ContractDone]);
+            }
+            
+            // For unsuccessful campaigns, just return the state updates without marking ZK as done
+            return (state, vec![], vec![]);
+        },
+        
+        // Process RefundProof variables (from refund claims)
+        SecretVarType::RefundProof { owner } => {
+            // Only process if campaign is completed and unsuccessful
+            if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
+                // Verify ownership
+                if owner == context.sender {
+                    // Get the refund amount
+                    let refund_amount = read_variable_u32_le(&opened_variable);
+                    
+                    // Create token transfer for the refund if amount is > 0
+                    if refund_amount > 0 {
+                        let mut event_group = EventGroup::builder();
+                        let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
+                        
+                        event_group.call(state.token_address, transfer_shortname)
+                            .argument(owner)
+                            .argument(refund_amount as u128)
+                            .done();
+                        
+                        return (state, vec![event_group.build()], vec![]);
+                    }
+                }
+            }
+        },
+        
+        // Skip other variable types
+        _ => {}
+    }
+    
+    // Default return if no processing was done
     (state, vec![], vec![])
+}
+
+/// Automatically called when the refund proof computation is completed
+#[zk_on_compute_complete(shortname = 0x43)]
+fn refund_proof_complete(
+    _context: ContractContext,
+    state: ContractState,
+    _zk_state: ZkState<SecretVarType>,
+    output_variables: Vec<SecretVarId>,
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
+    // Open/declassify the output variables
+    (
+        state,
+        vec![],
+        vec![ZkStateChange::OpenVariables {
+            variables: output_variables,
+        }],
+    )
 }
 
 /// Allow the project owner to withdraw funds after a successful campaign
@@ -430,9 +485,9 @@ fn withdraw_funds(
     (state, events)
 }
 
-/// Generate proof that a user contributed for claiming refunds
-#[action(shortname = 0x05, zk = true)]
-fn generate_refund_proof(
+/// Claim refund for unsuccessful campaigns
+#[action(shortname = 0x06, zk = true)]
+fn claim_refund(
     context: ContractContext,
     state: ContractState,
     zk_state: ZkState<SecretVarType>,
@@ -448,31 +503,22 @@ fn generate_refund_proof(
         "Cannot claim refund from successful campaign"
     );
     
-    // Check if user has a contribution
-    let has_contribution = zk_state
-        .secret_variables
-        .iter()
-        .any(|(_, var)| {
-            if let SecretVarType::Contribution { owner, .. } = &var.metadata {
-                *owner == context.sender
-            } else {
-                false
-            }
-        });
-    
+    // Ensure we're in the correct ZK state
     assert!(
-        has_contribution, 
-        "No contribution found for this address"
+        zk_state.calculation_state == CalculationStatus::Waiting,
+        "Cannot process refund at this time. Calculation state: {:?}",
+        zk_state.calculation_state
     );
     
     // Get all contribution variables from this user
-    let user_variables: Vec<SecretVarId> = zk_state
+    let user_variables = zk_state
         .secret_variables
         .iter()
         .filter_map(|(id, var)| {
             if let SecretVarType::Contribution { owner, .. } = &var.metadata {
                 if *owner == context.sender {
-                    Some(id.clone())
+                    // Use the id directly, since it's already a SecretVarId
+                    Some(id) 
                 } else {
                     None
                 }
@@ -480,77 +526,24 @@ fn generate_refund_proof(
                 None
             }
         })
-        .collect();
-
+        .collect::<Vec<SecretVarId>>();
+    
+    assert!(!user_variables.is_empty(), "No contributions found for this address");
+    
     // Create metadata for refund proof
-    let output_metadata = vec![SecretVarType::RefundProof { 
+    let refund_metadata = vec![SecretVarType::RefundProof { 
         owner: context.sender 
     }];
     
     // Start the computation for refund proof
-    let refund_compute = ZkStateChange::start_computation_with_inputs(
-        ShortnameZkComputation::from_u32(0x62), // Refund proof computation
-        output_metadata,
+    let zk_change = ZkStateChange::start_computation_with_inputs(
+        ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
+        refund_metadata,
         user_variables,
-        Some(ShortnameZkComputeComplete::from_u32(0x43)), // Refund proof complete
+        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME)),
     );
     
-    (state, vec![], vec![refund_compute])
-}
-
-/// Claim refund after receiving a proof
-#[action(shortname = 0x06, zk = true)]
-fn claim_refund(
-    context: ContractContext,
-    state: ContractState,
-    zk_state: ZkState<SecretVarType>,
-    proof_var_id: SecretVarId,
-) -> (ContractState, Vec<EventGroup>) {
-    // Verify campaign state
-    assert_eq!(
-        state.status, CampaignStatus::Completed {},
-        "Campaign must be completed before claiming refund"
-    );
-    
-    assert!(
-        !state.is_successful,
-        "Cannot claim refund from successful campaign"
-    );
-    
-    // Verify the proof variable exists and belongs to the sender
-    let proof_var = zk_state.get_variable(proof_var_id).unwrap_or_else(|| {
-        panic!("Refund proof variable not found");
-    });
-    
-    if let SecretVarType::RefundProof { owner } = &proof_var.metadata {
-        assert_eq!(
-            *owner, context.sender,
-            "Refund proof belongs to a different address"
-        );
-    } else {
-        panic!("Invalid variable type for refund proof");
-    }
-    
-    // Get the refund amount from the proof
-    let refund_amount = read_variable_u32_le(&proof_var);
-    assert!(refund_amount > 0, "Refund amount must be greater than 0");
-    
-    // Create event group for token transfer
-    let mut events = Vec::new();
-    
-    // Create Shortname from u8 value
-    let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
-    
-    // Set up transfer event with the refund amount
-    let mut event_group = EventGroup::builder();
-    event_group.call(state.token_address, transfer_shortname)
-        .argument(context.sender)
-        .argument(refund_amount as u128)
-        .done();
-    
-    events.push(event_group.build());
-    
-    (state, events)
+    (state, vec![], vec![zk_change])
 }
 
 /// Verify if the caller has made a contribution to this campaign

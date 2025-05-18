@@ -580,6 +580,164 @@ readonly addContributionWithApproval = async (
     );
   }
 };
+
+readonly generateRefundProof = async (address: string): Promise<TransactionResult> => {
+  if (!this.isWalletConnected()) {
+    throw new CrowdfundingApiError(
+      "Wallet not connected",
+      "WALLET_NOT_CONNECTED"
+    );
+  }
+  
+  if (!address) {
+    throw new CrowdfundingApiError(
+      "Campaign address is required",
+      "MISSING_CAMPAIGN_ADDRESS"
+    );
+  }
+  
+  // Create generate_refund_proof RPC with format indicator
+  const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+    _out.writeU8(0x09); // Format indicator for actions
+    _out.writeBytes(Buffer.from([0x05])); // generate_refund_proof shortname
+  });
+  
+  try {
+    const transaction = await this.transactionClient!.signAndSend(
+      { address, rpc }, 
+      200000 // Higher gas limit for ZK operations
+    );
+    
+    return {
+      transaction,
+      status: 'pending',
+      metadata: {
+        type: 'generateRefundProof'
+      }
+    };
+  } catch (error) {
+    console.error("Error generating refund proof:", error);
+    throw new CrowdfundingApiError(
+      `Error generating refund proof: ${error.message || error}`,
+      "REFUND_PROOF_GENERATION_FAILED"
+    );
+  }
+};
+
+/**
+ * Claim refund using a proof
+ * @param address The campaign contract address
+ * @param proofVarId The proof variable ID
+ * @returns Transaction result
+ */
+readonly claimRefund = async (
+  address: string, 
+  proofVarId: number
+): Promise<TransactionResult> => {
+  if (!this.isWalletConnected()) {
+    throw new CrowdfundingApiError(
+      "Wallet not connected",
+      "WALLET_NOT_CONNECTED"
+    );
+  }
+  
+  if (!address) {
+    throw new CrowdfundingApiError(
+      "Campaign address is required",
+      "MISSING_CAMPAIGN_ADDRESS"
+    );
+  }
+  
+  if (proofVarId === undefined || proofVarId === null) {
+    throw new CrowdfundingApiError(
+      "Proof variable ID is required",
+      "MISSING_PROOF_VAR_ID"
+    );
+  }
+  
+  // Create claim_refund RPC with format indicator
+  const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+    _out.writeU8(0x09); // Format indicator for actions
+    _out.writeBytes(Buffer.from([0x06])); // claim_refund shortname
+    _out.writeU32(proofVarId); // Write proof variable ID as u32
+  });
+  
+  try {
+    const transaction = await this.transactionClient!.signAndSend(
+      { address, rpc }, 
+      150000 // Gas limit for token transfer operations
+    );
+    
+    return {
+      transaction,
+      status: 'pending',
+      metadata: {
+        type: 'claimRefund',
+        proofVarId
+      }
+    };
+  } catch (error) {
+    console.error("Error claiming refund:", error);
+    throw new CrowdfundingApiError(
+      `Error claiming refund: ${error.message || error}`,
+      "CLAIM_REFUND_FAILED"
+    );
+  }
+};
+
+/**
+ * Find refund proof variable ID for the current user
+ * @param address The campaign contract address
+ * @returns Promise resolving to the proof variable ID or undefined if not found
+ */
+readonly findRefundProofVariableId = async (address: string): Promise<number | undefined> => {
+  if (!this.isWalletConnected()) {
+    throw new CrowdfundingApiError(
+      "Wallet not connected",
+      "WALLET_NOT_CONNECTED"
+    );
+  }
+  
+  try {
+    // Fetch contract data
+    const contractData = await this.baseClient.getContractData(address);
+    if (!contractData?.serializedContract?.variables) {
+      return undefined;
+    }
+    
+    // Get the current user address
+    const userAddress = this.sender;
+    
+    // Look for a RefundProof variable for the current user
+    // This requires parsing the variables and their metadata
+    const variables = contractData.serializedContract.variables;
+    for (const varEntry of variables) {
+      if (varEntry.value?.metadata && varEntry.value.information?.data) {
+        try {
+          // Try to parse metadata byte from base64
+          const metadataBytes = Buffer.from(varEntry.value.metadata, 'base64');
+          // Check if discriminant is 2 (RefundProof)
+          if (metadataBytes[0] === 2) {
+            // Parse owner address from metadata
+            const ownerBytes = metadataBytes.slice(1, 22); // 21 bytes for address
+            const ownerAddress = new BlockchainAddress(ownerBytes);
+            // Check if this proof belongs to current user
+            if (ownerAddress.asString() === userAddress) {
+              return varEntry.key;
+            }
+          }
+        } catch (error) {
+          console.warn("Error parsing variable metadata:", error);
+        }
+      }
+    }
+    
+    return undefined;
+  } catch (error) {
+    console.error("Error finding refund proof:", error);
+    return undefined;
+  }
+};
   
   /**
    * Execute the contribution in two coordinated transactions
