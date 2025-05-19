@@ -23,3 +23,21 @@ pub fn sum_contributions() -> Sbi32 {
 
     total_contributions
 }
+
+/// Compute the sum of a user's contributions for refunds
+/// This allows users to prove their contribution amount without revealing it
+#[zk_compute(shortname = 0x62)]
+pub fn compute_refund(input_variables: &[SecretVarId]) -> Sbi32 {
+    // Initialize the user's total contribution
+    let mut user_contribution: Sbi32 = Sbi32::from(0);
+    
+    // Sum up all the user's contributions
+    for var_id in input_variables {
+        // Load the contribution amount from each variable
+        let contribution_amount = load_sbi::<Sbi32>(*var_id);
+        user_contribution = user_contribution + contribution_amount;
+    }
+    
+    // Return the total amount the user contributed
+    user_contribution
+}

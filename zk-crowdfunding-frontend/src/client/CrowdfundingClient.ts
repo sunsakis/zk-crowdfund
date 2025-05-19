@@ -159,10 +159,10 @@ async approveTokens(
   try {
       console.log(`Approving ${amount} tokens for campaign ${campaignAddress}`);
 
-      // Build the approve RPC buffer (shortname 0x05 for approve)
+      // Build the approve RPC buffer 
       // For large numbers, we need to handle the serialization differently
       const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-          _out.writeU8(0x05); // approve shortname
+          _out.writeU8(0x05); 
           _out.writeAddress(BlockchainAddress.fromString(campaignAddress));
           
           // Convert BigInt to bytes and write it as a byte array
@@ -388,7 +388,7 @@ async addContribution(contractAddress: string, amount: number): Promise<SentTran
     }
     
     try {
-      // Create RPC for verify_my_contribution (shortname 0x06)
+      // Create RPC for verify_my_contribution
       const rpc = AbiByteOutput.serializeBigEndian((_out) => {
         _out.writeU8(0x09); // Format indicator
         _out.writeBytes(Buffer.from("06", "hex")); // Action shortname

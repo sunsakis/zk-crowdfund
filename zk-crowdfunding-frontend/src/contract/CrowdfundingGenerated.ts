@@ -266,7 +266,7 @@ export function withdrawFunds(): Buffer {
 export function claimRefund(): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeU8(0x09);
-    _out.writeBytes(Buffer.from("05", "hex"));
+    _out.writeBytes(Buffer.from("06", "hex"));
   });
 }
 

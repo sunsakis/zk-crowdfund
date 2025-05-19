@@ -599,7 +599,7 @@ readonly generateRefundProof = async (address: string): Promise<TransactionResul
   // Create generate_refund_proof RPC with format indicator
   const rpc = AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeU8(0x09); // Format indicator for actions
-    _out.writeBytes(Buffer.from([0x05])); // generate_refund_proof shortname
+    _out.writeBytes(Buffer.from([0x06])); // generate_refund_proof shortname
   });
   
   try {
