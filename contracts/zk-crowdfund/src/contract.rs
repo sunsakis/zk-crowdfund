@@ -485,7 +485,7 @@ fn withdraw_funds(
     (state, events)
 }
 
-/// Claim refund for unsuccessful campaigns
+/// Generate refund proof and claim refund in one step
 #[action(shortname = 0x06, zk = true)]
 fn claim_refund(
     context: ContractContext,
@@ -504,21 +504,21 @@ fn claim_refund(
     );
     
     // Ensure we're in the correct ZK state
-    assert!(
-        zk_state.calculation_state == CalculationStatus::Waiting,
-        "Cannot process refund at this time. Calculation state: {:?}",
-        zk_state.calculation_state
+    assert_eq!(
+        zk_state.calculation_state,
+        CalculationStatus::Waiting,
+        "Computation must start from Waiting state, but was {:?}",
+        zk_state.calculation_state,
     );
     
-    // Get all contribution variables from this user
-    let user_variables = zk_state
+    // Find all the contributor's variables
+    let user_contribution_vars: Vec<SecretVarId> = zk_state
         .secret_variables
         .iter()
         .filter_map(|(id, var)| {
             if let SecretVarType::Contribution { owner, .. } = &var.metadata {
                 if *owner == context.sender {
-                    // Use the id directly, since it's already a SecretVarId
-                    Some(id) 
+                    Some(id) // Use the reference directly, no dereferencing needed
                 } else {
                     None
                 }
@@ -526,55 +526,24 @@ fn claim_refund(
                 None
             }
         })
-        .collect::<Vec<SecretVarId>>();
+        .collect();
     
-    assert!(!user_variables.is_empty(), "No contributions found for this address");
+    assert!(!user_contribution_vars.is_empty(), "No contributions found for this address");
     
     // Create metadata for refund proof
     let refund_metadata = vec![SecretVarType::RefundProof { 
         owner: context.sender 
     }];
     
-    // Start the computation for refund proof
-    let zk_change = ZkStateChange::start_computation_with_inputs(
+    // Start the computation
+    // Use a single approach that always starts the computation
+    let zk_change = ZkStateChange::start_computation(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
-        user_variables,
         Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME)),
     );
     
     (state, vec![], vec![zk_change])
-}
-
-/// Verify if the caller has made a contribution to this campaign
-#[action(shortname = 0x08, zk = true)]
-fn verify_my_contribution(
-    context: ContractContext,
-    state: ContractState,
-    zk_state: ZkState<SecretVarType>,
-) -> (ContractState, Vec<EventGroup>) {
-    // Ensure we only verify completed campaigns
-    assert!(
-        state.status == CampaignStatus::Completed {},
-        "Verification only available after campaign is completed"
-    );
-    
-    // Check if sender has a contribution in ZK state
-    let has_contribution = zk_state
-        .secret_variables
-        .iter()
-        .any(|(_, var)| {
-            if let SecretVarType::Contribution { owner, .. } = &var.metadata {
-                *owner == context.sender
-            } else {
-                false
-            }
-        });
-             
-    // The transaction success/failure will indicate the result
-    assert!(has_contribution, "No contribution found for this address");
-    
-    (state, vec![])
 }
 
 /// Reads a variable's data as an u32

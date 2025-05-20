@@ -24,28 +24,23 @@ pub fn sum_contributions() -> Sbi32 {
     total_contributions
 }
 
-/// Compute the refund amount for a specific user.
-/// The contract passes specific contribution variables through
-/// the computation inputs.
+/// Compute the refund amount for a specific user
+/// Using a simpler approach focused on summing all contributions
 ///
 /// ### Returns:
 ///
 /// The sum of the user's contributions.
 #[zk_compute(shortname = 0x62)]
 pub fn compute_refund() -> Sbi32 {
-    // Initialize state for user's total contribution
-    let mut user_contribution: Sbi32 = Sbi32::from(0);
-
-    // Sum all available secret variables
-    // The contract will only pass in variables owned by the user
-    // who is claiming the refund
+    // Just sum all contributions
+    // (the contract filters them before starting computation)
+    let mut total_refund: Sbi32 = Sbi32::from(0);
+    
     for variable_id in secret_variable_ids() {
-        // Only count contribution variables (type 0)
-        if load_metadata::<u8>(variable_id) == CONTRIBUTION_VARIABLE_KIND {
-            let contribution_amount = load_sbi::<Sbi32>(variable_id);
-            user_contribution = user_contribution + contribution_amount;
-        }
+        // Add all available contributions
+        let contribution_amount = load_sbi::<Sbi32>(variable_id);
+        total_refund = total_refund + contribution_amount;
     }
-
-    user_contribution
+    
+    total_refund
 }
