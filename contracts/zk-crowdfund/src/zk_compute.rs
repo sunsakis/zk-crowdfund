@@ -27,8 +27,9 @@ pub fn sum_contributions() -> Sbi32 {
     total_contributions
 }
 
-/// Compute the refund amount for a specific user
-/// The contract ensures only variables from the specific user are provided for the computation
+/// Compute the refund amount for a specific user.
+/// This simply sums all contributions passed to the computation.
+/// We rely on the contract to filter and only pass the user's own contributions.
 ///
 /// ### Returns:
 /// The sum of the user's contributions.
@@ -39,7 +40,7 @@ pub fn compute_refund() -> Sbi32 {
     
     // Sum all contributions
     for variable_id in secret_variable_ids() {
-        // Check if this is a contribution variable (should already be filtered by contract)
+        // Check if this is a contribution variable
         if load_metadata::<u8>(variable_id) == CONTRIBUTION_VARIABLE_KIND {
             // Load and add the contribution amount
             let contribution_amount = load_sbi::<Sbi32>(variable_id);

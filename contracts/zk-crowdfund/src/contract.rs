@@ -548,10 +548,11 @@ fn claim_refund(
     }];
     
     // Start the computation
-    let zk_change = ZkStateChange::start_computation(
+    let zk_change = ZkStateChange::start_computation_with_inputs(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
-        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME)),
+        user_contribution_vars,
+        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME))
     );
     
     (state, vec![], vec![zk_change])
