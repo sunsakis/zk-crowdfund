@@ -106,15 +106,9 @@ function initializeElements() {
     // Campaign result elements
     campaignResultContainer: document.querySelector("#campaign-result-container"),
     resultBox: document.querySelector("#result-box"),
-    campaignResult: document.querySelector("#campaign-result"),
-    
-    // Refund elements
-    refundProofStatus: document.querySelector("#refund-proof-status"),
-    generateRefundProofBtn: document.querySelector("#generate-refund-proof-btn") as HTMLButtonElement,
-    claimRefundBtn: document.querySelector("#claim-refund-btn") as HTMLButtonElement
+    campaignResult: document.querySelector("#campaign-result")
   };
 }
-
 /**
  * Safely extract contract state with proper type checking
  * @param contractData Raw contract data from API response
@@ -328,14 +322,7 @@ function setupEventListeners() {
     console.warn("Withdraw funds button not found");
   }
 
-  // Refund actions
-  const generateRefundProofBtn = document.querySelector("#generate-refund-proof-btn");
-  if (generateRefundProofBtn) {
-    generateRefundProofBtn.addEventListener("click", generateRefundProofAction);
-  } else {
-    console.warn("Generate refund proof button not found");
-  }
-
+  // Simplified refund process - single button
   const claimRefundBtn = document.querySelector("#claim-refund-btn");
   if (claimRefundBtn) {
     claimRefundBtn.addEventListener("click", claimRefundAction);
@@ -558,7 +545,8 @@ async function generateRefundProofAction() {
 
 /**
  * Handle Claim Refund button click
- * This uses the generated proof to claim a refund of the exact contribution amount
+ * This initiates the ZK computation to calculate and return the exact refund
+ * in a single operation
  */
 async function claimRefundAction() {
   console.log("Claim refund button clicked");
@@ -576,19 +564,6 @@ async function claimRefundAction() {
     return;
   }
   
-  // Get the proof variable ID from the button's data attribute
-  const claimRefundBtn = document.querySelector("#claim-refund-btn") as HTMLButtonElement;
-  if (!claimRefundBtn || !claimRefundBtn.dataset.proofVarId) {
-    setConnectionStatus("No refund proof found. Please generate a proof first.");
-    return;
-  }
-  
-  const proofVarId = parseInt(claimRefundBtn.dataset.proofVarId);
-  if (isNaN(proofVarId)) {
-    setConnectionStatus("Invalid proof ID. Please try generating the proof again.");
-    return;
-  }
-  
   // Get the Crowdfunding API
   const api = getCrowdfundingApi();
   if (!api) {
@@ -597,6 +572,7 @@ async function claimRefundAction() {
   }
   
   // Disable button and show loading state
+  const claimRefundBtn = document.querySelector("#claim-refund-btn") as HTMLButtonElement;
   if (claimRefundBtn) {
     claimRefundBtn.disabled = true;
     claimRefundBtn.textContent = "Processing...";
@@ -616,13 +592,14 @@ async function claimRefundAction() {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
           <p>Processing refund claim...</p>
+          <p class="mt-2">This process automatically calculates your contribution and returns your funds.</p>
           <div class="spinner mt-2"></div>
         </div>
       `;
     }
     
-    // Claim the refund
-    const result = await api.claimRefund(address, proofVarId);
+    // Call the simplified refund method
+    const result = await api.claimRefund(address);
     
     // Get transaction ID for tracking
     const txId = result.transaction?.transactionPointer?.identifier || 
@@ -710,30 +687,40 @@ async function claimRefundAction() {
       // Add retry button
       const retryBtn = document.querySelector("#retry-claim-refund");
       if (retryBtn) {
-        retryBtn.addEventListener("click", () => {
-          // Reset UI
-          if (transactionLinkContainer) {
-            transactionLinkContainer.innerHTML = '';
-          }
-          
-          // Re-enable the button for manual retry
-          if (claimRefundBtn) {
-            claimRefundBtn.disabled = false;
-            claimRefundBtn.textContent = "Step 2: Claim Refund";
-          }
-        });
+        retryBtn.addEventListener("click", claimRefundAction);
       }
     }
   } finally {
     // Re-enable the button
     if (claimRefundBtn) {
       claimRefundBtn.disabled = false;
-      claimRefundBtn.textContent = "Step 2: Claim Refund";
+      claimRefundBtn.textContent = "Claim Refund";
     }
   }
 }
 
-// Reset all transaction displays
+/**
+ * Reset transaction displays for refunds
+ */
+function resetRefundDisplays() {
+  // Remove the refund proof status display that was used in the two-step process
+  const refundProofStatus = document.querySelector("#refund-proof-status");
+  if (refundProofStatus) {
+    refundProofStatus.classList.add("hidden");
+    refundProofStatus.innerHTML = '';
+  }
+  
+  // Clear and hide the transaction info container
+  const transactionLinkContainer = document.querySelector("#claim-refund-transaction-link");
+  if (transactionLinkContainer) {
+    transactionLinkContainer.classList.add("hidden");
+    transactionLinkContainer.innerHTML = '';
+  }
+}
+
+/**
+ * Update the main reset transaction displays function to include refund reset
+ */
 function resetTransactionDisplays() {
   console.log("Resetting all transaction displays");
   
@@ -741,27 +728,19 @@ function resetTransactionDisplays() {
     elements.addContributionTransactionLink,
     elements.endCampaignTransactionLink,
     elements.withdrawFundsTransactionLink,
-    document.querySelector("#claim-refund-transaction-link"),
-    document.querySelector("#refund-proof-status")
+    document.querySelector("#claim-refund-transaction-link")
   ];
   
   transactionInfoDisplays.forEach(display => {
     if (display) {
       display.classList.add("hidden");
-      // Clear content for status displays
-      if (display.id === "refund-proof-status") {
-        display.innerHTML = '';
-      }
+      // Clear content
+      display.innerHTML = '';
     }
   });
   
-  // Also hide the claim refund button
-  const claimRefundBtn = document.querySelector("#claim-refund-btn");
-  if (claimRefundBtn) {
-    claimRefundBtn.classList.add("hidden");
-    // Reset data attribute
-    claimRefundBtn.removeAttribute("data-proof-var-id");
-  }
+  // Also reset any remaining elements from the two-step process
+  resetRefundDisplays();
 }
 
 function contractAddressClick() {
@@ -1878,6 +1857,9 @@ function updateUIWithContractState(state, variables) {
   }
 }
 
+/**
+ * Update action visibility based on contract state
+ */
 function updateActionVisibility(state) {
   try {
     const addContributionSection = document.querySelector("#add-contribution-section");
@@ -1922,7 +1904,7 @@ function updateActionVisibility(state) {
           withdrawFundsSection.classList.remove("hidden");
         }
       } else {
-        // Show refund section for failed campaigns
+        // Show simplified refund section for failed campaigns
         if (claimRefundSection) {
           claimRefundSection.classList.remove("hidden");
         }

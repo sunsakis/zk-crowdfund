@@ -625,15 +625,12 @@ readonly generateRefundProof = async (address: string): Promise<TransactionResul
 };
 
 /**
- * Claim refund using a proof
+ * Claim refund in one step
+ * This handles the ZK computation and token refund in a single operation
  * @param address The campaign contract address
- * @param proofVarId The proof variable ID
  * @returns Transaction result
  */
-readonly claimRefund = async (
-  address: string, 
-  proofVarId: number
-): Promise<TransactionResult> => {
+readonly claimRefund = async (address: string): Promise<TransactionResult> => {
   if (!this.isWalletConnected()) {
     throw new CrowdfundingApiError(
       "Wallet not connected",
@@ -648,32 +645,23 @@ readonly claimRefund = async (
     );
   }
   
-  if (proofVarId === undefined || proofVarId === null) {
-    throw new CrowdfundingApiError(
-      "Proof variable ID is required",
-      "MISSING_PROOF_VAR_ID"
-    );
-  }
-  
   // Create claim_refund RPC with format indicator
   const rpc = AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeU8(0x09); // Format indicator for actions
     _out.writeBytes(Buffer.from([0x06])); // claim_refund shortname
-    _out.writeU32(proofVarId); // Write proof variable ID as u32
   });
   
   try {
     const transaction = await this.transactionClient!.signAndSend(
       { address, rpc }, 
-      150000 // Gas limit for token transfer operations
+      200000 // Higher gas limit for ZK operations
     );
     
     return {
       transaction,
       status: 'pending',
       metadata: {
-        type: 'claimRefund',
-        proofVarId
+        type: 'claimRefund'
       }
     };
   } catch (error) {
