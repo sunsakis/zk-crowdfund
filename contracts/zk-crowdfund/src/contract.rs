@@ -553,7 +553,7 @@ fn claim_refund(
         })
         .collect();
     
-    assert!(!user_contribution_vars.is_empty(), "No contributions found for this address");
+    assert!(!user_contribution_vars.is_empty(), "No contributions found for this address", {context.sender});
     
     // Identify variables to delete (all contribution variables that don't belong to the user)
     let variables_to_delete: Vec<SecretVarId> = all_contribution_vars
