@@ -119,6 +119,7 @@ const SUM_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x42;
 const REFUND_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x43;
 const ZK_COMPUTATION_SHORTNAME: u32 = 0x61;
 const REFUND_COMPUTATION_SHORTNAME: u32 = 0x62;
+const REFUND_CALLBACK_SHORTNAME: u32 = 0x44;
 
 /// Initializes contract - starts directly in Active state
 #[init(zk = true)]
@@ -344,11 +345,11 @@ fn open_variables(
     }
     
     // Get the first opened variable
-    let var_id = opened_variables.get(0).unwrap();
-    let opened_variable = zk_state.get_variable(*var_id).unwrap();
+    let var_id = *opened_variables.get(0).unwrap();
+    let opened_variable = zk_state.get_variable(var_id).unwrap();
     
     // Process based on variable type
-    match opened_variable.metadata {
+    match &opened_variable.metadata {
         // Process SumResult variables (from campaign completion)
         SecretVarType::SumResult {} => {
             // Read the sum result
@@ -394,17 +395,28 @@ fn open_variables(
             // Only process if campaign is completed and unsuccessful
             if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
                 // Verify ownership
-                if owner == context.sender {
+                if *owner == context.sender {
                     // Get the refund amount
                     let refund_amount = read_variable_u32_le(&opened_variable);
                     
                     // Create token transfer for the refund if amount is > 0
                     if refund_amount > 0 {
+                        // Debug log for troubleshooting
+                        println!("Processing refund of {} tokens to {}", refund_amount, owner.to_string());
+                        
+                        // Create the token transfer event with callback for monitoring
                         let mut event_group = EventGroup::builder();
                         let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
                         
+                        // Build the call with token transfer
                         event_group.call(state.token_address, transfer_shortname)
-                            .argument(owner)
+                            .argument(*owner)
+                            .argument(refund_amount as u128)
+                            .done();
+                        
+                        // Add the callback as a separate step
+                        event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
+                            .argument(*owner)
                             .argument(refund_amount as u128)
                             .done();
                         
@@ -518,7 +530,7 @@ fn claim_refund(
         .filter_map(|(id, var)| {
             if let SecretVarType::Contribution { owner, .. } = &var.metadata {
                 if *owner == context.sender {
-                    Some(id) // Use the reference directly, no dereferencing needed
+                    Some(id) // No dereferencing needed
                 } else {
                     None
                 }
@@ -536,7 +548,6 @@ fn claim_refund(
     }];
     
     // Start the computation
-    // Use a single approach that always starts the computation
     let zk_change = ZkStateChange::start_computation(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
@@ -544,6 +555,28 @@ fn claim_refund(
     );
     
     (state, vec![], vec![zk_change])
+}
+
+/// Callback for token refund to verify successful transfer
+#[callback(shortname = 0x44, zk = true)]
+fn refund_callback(
+    _ctx: ContractContext,
+    callback_ctx: CallbackContext,
+    state: ContractState,
+    _zk_state: ZkState<SecretVarType>,
+    recipient: Address,
+    amount: u128,
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
+    // If token transfer failed, panic to revert the transaction
+    if !callback_ctx.success {
+        panic!("Token refund transfer failed");
+    }
+    
+    // Log success for debugging
+    println!("Successfully refunded {} tokens to {}", amount, recipient.to_string());
+    
+    // Return unchanged state
+    (state, vec![], vec![])
 }
 
 /// Reads a variable's data as an u32
