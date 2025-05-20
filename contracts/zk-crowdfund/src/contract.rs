@@ -523,14 +523,27 @@ fn claim_refund(
         zk_state.calculation_state,
     );
     
-    // Find all the contributor's variables
+    // Collect all variable IDs of contribution variables
+    let all_contribution_vars: Vec<SecretVarId> = zk_state
+        .secret_variables
+        .iter()
+        .filter_map(|(id, var)| {
+            if matches!(var.metadata, SecretVarType::Contribution { .. }) {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    // Find the user's contribution variables
     let user_contribution_vars: Vec<SecretVarId> = zk_state
         .secret_variables
         .iter()
         .filter_map(|(id, var)| {
             if let SecretVarType::Contribution { owner, .. } = &var.metadata {
                 if *owner == context.sender {
-                    Some(id) // No dereferencing needed
+                    Some(id)
                 } else {
                     None
                 }
@@ -542,20 +555,35 @@ fn claim_refund(
     
     assert!(!user_contribution_vars.is_empty(), "No contributions found for this address");
     
-    // Create metadata for refund proof
+    // Identify variables to delete (all contribution variables that don't belong to the user)
+    let variables_to_delete: Vec<SecretVarId> = all_contribution_vars
+        .into_iter()
+        .filter(|id| !user_contribution_vars.contains(id))
+        .collect();
+    
+    // Create metadata for the refund proof output variable
     let refund_metadata = vec![SecretVarType::RefundProof { 
         owner: context.sender 
     }];
     
-    // Start the computation
-    let zk_change = ZkStateChange::start_computation_with_inputs(
+    // Create the sequence of state changes
+    let mut state_changes = Vec::new();
+    
+    // First delete non-user contribution variables
+    if !variables_to_delete.is_empty() {
+        state_changes.push(ZkStateChange::DeleteVariables {
+            variables_to_delete,
+        });
+    }
+    
+    // Then start the computation (which will now only use the user's contributions)
+    state_changes.push(ZkStateChange::start_computation(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
-        user_contribution_vars,
-        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME))
-    );
+        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME)),
+    ));
     
-    (state, vec![], vec![zk_change])
+    (state, vec![], state_changes)
 }
 
 /// Callback for token refund to verify successful transfer
