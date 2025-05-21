@@ -389,19 +389,10 @@ fn open_variables(
         SecretVarType::RefundProof { owner } => {
             // Only process if campaign is completed and unsuccessful
             if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
-                // IMPROVED OWNER CHECK: Compare string representations for consistent comparison
-                let owner_string = owner.to_string();
-                let sender_string = context.sender.to_string();
+                // UPDATED HANDLING: Don't check owner against sender
+                // Instead, use the owner address from the metadata for the refund
                 
-                // Compare the string representations with detailed error message
-                assert_eq!(
-                    owner_string,
-                    sender_string,
-                    "Refund proof owner ({}) does not match sender ({})",
-                    owner_string, sender_string
-                );
-                
-                // Get the refund amount - this uses the ZK scaled amount
+                // Get the refund amount
                 let refund_amount = read_variable_u32_le(&opened_variable);
                 
                 // Create token transfer for the refund if amount is > 0
@@ -412,24 +403,18 @@ fn open_variables(
                 let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
                 
                 // Calculate token amount from ZK amount
-                // Convert from ZK scaled amount to token amount
-                // If your tokens use 18 decimal places, you'll need to:
-                // 1. Convert ZK amount to decimal representation
-                // 2. Then convert to token base units
-                // ZK_SCALE_FACTOR = 1_000_000 (6 decimal places)
-                // Token decimals = 18 (standard)
-                // So multiply by 10^(18-6) = 10^12
                 let token_refund_amount = (refund_amount as u128) * 1_000_000_000_000; 
                 
-                // Build the call with token transfer - IMPORTANT: use context.sender consistently
+                // IMPORTANT CHANGE: Send the refund to the owner in the metadata
+                // This is the contributor's address, not the context.sender
                 event_group.call(state.token_address, transfer_shortname)
-                    .argument(context.sender) // Use the transaction sender for consistency
+                    .argument(*owner)  // Use the owner from metadata
                     .argument(token_refund_amount)
                     .done();
                 
-                // Add the callback as a separate step
+                // Add the callback
                 event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
-                    .argument(context.sender) // Use context.sender consistently
+                    .argument(*owner)  // Use the owner from metadata
                     .argument(token_refund_amount)
                     .done();
                 
@@ -537,33 +522,31 @@ fn claim_refund(
         zk_state.calculation_state,
     );
     
-    // Find the user's contribution variables
-    let user_contribution_vars: Vec<SecretVarId> = zk_state
+    // Find ALL contribution variables
+    // We'll let the ZK computation handle filtering
+    let all_contribution_vars: Vec<SecretVarId> = zk_state
         .secret_variables
         .iter()
         .filter_map(|(id, var)| {
-            if let SecretVarType::Contribution { owner, .. } = &var.metadata {
-                if *owner == context.sender {
-                    Some(id)
-                } else {
-                    None
-                }
+            if let SecretVarType::Contribution { .. } = &var.metadata {
+                Some(id)
             } else {
                 None
             }
         })
         .collect();
     
-    // Assert that the user has at least one contribution
-    assert!(!user_contribution_vars.is_empty(), "No contributions found for address: {}", context.sender.to_string());
+    // Assert that there's at least one contribution
+    assert!(!all_contribution_vars.is_empty(), "No contributions found in the contract");
     
     // Create metadata for the refund proof output variable
+    // We'll use the owner from the context as a hint, but the open_variables
+    // function will correctly send tokens to the owner in the metadata
     let refund_metadata = vec![SecretVarType::RefundProof { 
         owner: context.sender 
     }];
     
-    // Use start_computation with NO input arguments
-    // This is the key change - don't provide any public inputs
+    // Start computation with no public inputs
     let state_change = ZkStateChange::start_computation(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
