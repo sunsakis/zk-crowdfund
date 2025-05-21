@@ -332,6 +332,7 @@ fn sum_compute_complete(
 }
 
 /// Handle opened variables from ZK computation
+/// Handle opened variables from ZK computation
 #[zk_on_variables_opened]
 fn open_variables(
     context: ContractContext,
@@ -388,8 +389,17 @@ fn open_variables(
         SecretVarType::RefundProof { owner } => {
             // Only process if campaign is completed and unsuccessful
             if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
-                // Verify ownership
-                assert_eq!(*owner, context.sender, "Refund proof owner does not match sender");
+                // IMPROVED OWNER CHECK: Compare string representations for consistent comparison
+                let owner_string = owner.to_string();
+                let sender_string = context.sender.to_string();
+                
+                // Compare the string representations with detailed error message
+                assert_eq!(
+                    owner_string,
+                    sender_string,
+                    "Refund proof owner ({}) does not match sender ({})",
+                    owner_string, sender_string
+                );
                 
                 // Get the refund amount - this uses the ZK scaled amount
                 let refund_amount = read_variable_u32_le(&opened_variable);
@@ -411,15 +421,15 @@ fn open_variables(
                 // So multiply by 10^(18-6) = 10^12
                 let token_refund_amount = (refund_amount as u128) * 1_000_000_000_000; 
                 
-                // Build the call with token transfer
+                // Build the call with token transfer - IMPORTANT: use context.sender consistently
                 event_group.call(state.token_address, transfer_shortname)
-                    .argument(*owner)
+                    .argument(context.sender) // Use the transaction sender for consistency
                     .argument(token_refund_amount)
                     .done();
                 
                 // Add the callback as a separate step
                 event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
-                    .argument(*owner)
+                    .argument(context.sender) // Use context.sender consistently
                     .argument(token_refund_amount)
                     .done();
                 
