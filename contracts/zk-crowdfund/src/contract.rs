@@ -520,7 +520,6 @@ fn claim_refund(
     );
     
     // Check if the computation is already in progress
-    // If it's not in Waiting state, we should not start another computation
     assert_eq!(
         zk_state.calculation_state,
         CalculationStatus::Waiting,
@@ -553,13 +552,12 @@ fn claim_refund(
         owner: context.sender 
     }];
     
-    // Start computation with only the user's contributions
-    // Create the state change to start computation
-    let state_change = ZkStateChange::start_computation_with_inputs(
+    // Use start_computation with NO input arguments
+    // This is the key change - don't provide any public inputs
+    let state_change = ZkStateChange::start_computation(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
-        user_contribution_vars,
-        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME)),
+        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME))
     );
     
     (state, vec![], vec![state_change])
