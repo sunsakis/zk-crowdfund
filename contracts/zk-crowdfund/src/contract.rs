@@ -400,7 +400,7 @@ fn open_variables(
                 let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
                 
                 // Calculate token amount from ZK amount
-                let token_refund_amount = (refund_amount as u128) * 1_000_000_000_000;
+                let token_refund_amount = (refund_amount as u128) * 500_000_000_000;
                 
                 // Build the call with token transfer using the documented approach
                 // Note the explicit with_cost() method from the example
