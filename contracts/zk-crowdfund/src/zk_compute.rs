@@ -38,14 +38,12 @@ pub fn compute_refund() -> Sbi32 {
     // Initialize refund amount
     let mut total_refund: Sbi32 = Sbi32::from(0);
     
-    // Sum all contributions
+    // Sum all contributions that were passed to this computation
+    // The contract should have filtered to include only the user's contributions
     for variable_id in secret_variable_ids() {
-        // Check if this is a contribution variable
-        if load_metadata::<u8>(variable_id) == CONTRIBUTION_VARIABLE_KIND {
-            // Load and add the contribution amount
-            let contribution_amount = load_sbi::<Sbi32>(variable_id);
-            total_refund = total_refund + contribution_amount;
-        }
+        // Load and add the contribution amount
+        let contribution_amount = load_sbi::<Sbi32>(variable_id);
+        total_refund = total_refund + contribution_amount;
     }
     
     total_refund

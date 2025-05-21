@@ -385,13 +385,10 @@ fn open_variables(
             return (state, vec![], vec![]);
         },
         
-        // Process RefundProof variables (from refund claims)
+       // Process RefundProof variables (from refund claims)
         SecretVarType::RefundProof { owner } => {
             // Only process if campaign is completed and unsuccessful
             if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
-                // UPDATED HANDLING: Don't check owner against sender
-                // Instead, use the owner address from the metadata for the refund
-                
                 // Get the refund amount
                 let refund_amount = read_variable_u32_le(&opened_variable);
                 
@@ -403,19 +400,21 @@ fn open_variables(
                 let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
                 
                 // Calculate token amount from ZK amount
-                let token_refund_amount = (refund_amount as u128) * 1_000_000_000_000; 
+                let token_refund_amount = (refund_amount as u128) * 1_000_000_000_000;
                 
-                // IMPORTANT CHANGE: Send the refund to the owner in the metadata
-                // This is the contributor's address, not the context.sender
+                // Build the call with token transfer using the documented approach
+                // Note the explicit with_cost() method from the example
                 event_group.call(state.token_address, transfer_shortname)
                     .argument(*owner)  // Use the owner from metadata
                     .argument(token_refund_amount)
+                    .with_cost(18000)  // Explicitly allocate gas - adjust as needed
                     .done();
                 
-                // Add the callback
+                // Add the callback following the documented approach
                 event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
-                    .argument(*owner)  // Use the owner from metadata
+                    .argument(*owner)
                     .argument(token_refund_amount)
+                    .with_cost(5000)  // Explicitly allocate gas for callback
                     .done();
                 
                 return (state, vec![event_group.build()], vec![]);
