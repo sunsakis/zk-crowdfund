@@ -331,7 +331,7 @@ fn sum_compute_complete(
     )
 }
 
-/// Called when the sum variable is opened
+/// Handle opened variables from ZK computation
 #[zk_on_variables_opened]
 fn open_variables(
     context: ContractContext,
@@ -340,9 +340,7 @@ fn open_variables(
     opened_variables: Vec<SecretVarId>,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     // Skip processing if no opened variables
-    if opened_variables.is_empty() {
-        return (state, vec![], vec![]);
-    }
+    assert!(!opened_variables.is_empty(), "No opened variables to process");
     
     // Get the first opened variable
     let var_id = *opened_variables.get(0).unwrap();
@@ -380,13 +378,9 @@ fn open_variables(
             // Mark campaign as completed
             state.status = CampaignStatus::Completed {};
             
-            // IMPORTANT: Only mark ZK contract as done for successful campaigns
+            // IMPORTANT: We DO NOT mark the contract as done for either outcome
+            // For successful campaigns, we return funds to the owner
             // For unsuccessful campaigns, we need to keep the ZK state active for refunds
-            if is_successful {
-                return (state, vec![], vec![ZkStateChange::ContractDone]);
-            }
-            
-            // For unsuccessful campaigns, just return the state updates without marking ZK as done
             return (state, vec![], vec![]);
         },
         
@@ -395,34 +389,41 @@ fn open_variables(
             // Only process if campaign is completed and unsuccessful
             if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
                 // Verify ownership
-                if *owner == context.sender {
-                    // Get the refund amount
-                    let refund_amount = read_variable_u32_le(&opened_variable);
-                    
-                    // Create token transfer for the refund if amount is > 0
-                    if refund_amount > 0 {
-                        // Debug log for troubleshooting
-                        println!("Processing refund of {} tokens to {}", refund_amount, owner.to_string());
-                        
-                        // Create the token transfer event with callback for monitoring
-                        let mut event_group = EventGroup::builder();
-                        let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
-                        
-                        // Build the call with token transfer
-                        event_group.call(state.token_address, transfer_shortname)
-                            .argument(*owner)
-                            .argument(refund_amount as u128)
-                            .done();
-                        
-                        // Add the callback as a separate step
-                        event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
-                            .argument(*owner)
-                            .argument(refund_amount as u128)
-                            .done();
-                        
-                        return (state, vec![event_group.build()], vec![]);
-                    }
-                }
+                assert_eq!(*owner, context.sender, "Refund proof owner does not match sender");
+                
+                // Get the refund amount - this uses the ZK scaled amount
+                let refund_amount = read_variable_u32_le(&opened_variable);
+                
+                // Create token transfer for the refund if amount is > 0
+                assert!(refund_amount > 0, "Refund amount must be greater than 0");
+                
+                // Create the token transfer event with callback for monitoring
+                let mut event_group = EventGroup::builder();
+                let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
+                
+                // Calculate token amount from ZK amount
+                // Convert from ZK scaled amount to token amount
+                // If your tokens use 18 decimal places, you'll need to:
+                // 1. Convert ZK amount to decimal representation
+                // 2. Then convert to token base units
+                // ZK_SCALE_FACTOR = 1_000_000 (6 decimal places)
+                // Token decimals = 18 (standard)
+                // So multiply by 10^(18-6) = 10^12
+                let token_refund_amount = (refund_amount as u128) * 1_000_000_000_000; 
+                
+                // Build the call with token transfer
+                event_group.call(state.token_address, transfer_shortname)
+                    .argument(*owner)
+                    .argument(token_refund_amount)
+                    .done();
+                
+                // Add the callback as a separate step
+                event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
+                    .argument(*owner)
+                    .argument(token_refund_amount)
+                    .done();
+                
+                return (state, vec![event_group.build()], vec![]);
             }
         },
         
@@ -434,7 +435,7 @@ fn open_variables(
     (state, vec![], vec![])
 }
 
-/// Automatically called when the refund proof computation is completed
+//// Automatically called when the refund proof computation is completed
 #[zk_on_compute_complete(shortname = 0x43)]
 fn refund_proof_complete(
     _context: ContractContext,
@@ -442,6 +443,9 @@ fn refund_proof_complete(
     _zk_state: ZkState<SecretVarType>,
     output_variables: Vec<SecretVarId>,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
+    // Make sure the output variables are properly opened
+    assert!(!output_variables.is_empty(), "No output variables from refund computation");
+    
     // Open/declassify the output variables
     (
         state,
@@ -515,26 +519,14 @@ fn claim_refund(
         "Cannot claim refund from successful campaign"
     );
     
-    // Ensure we're in the correct ZK state
+    // Check if the computation is already in progress
+    // If it's not in Waiting state, we should not start another computation
     assert_eq!(
         zk_state.calculation_state,
         CalculationStatus::Waiting,
         "Computation must start from Waiting state, but was {:?}",
         zk_state.calculation_state,
     );
-    
-    // Collect all variable IDs of contribution variables
-    let all_contribution_vars: Vec<SecretVarId> = zk_state
-        .secret_variables
-        .iter()
-        .filter_map(|(id, var)| {
-            if matches!(var.metadata, SecretVarType::Contribution { .. }) {
-                Some(id)
-            } else {
-                None
-            }
-        })
-        .collect();
     
     // Find the user's contribution variables
     let user_contribution_vars: Vec<SecretVarId> = zk_state
@@ -553,42 +545,24 @@ fn claim_refund(
         })
         .collect();
     
-    // Add some debug logging before assertion
-    println!("Address requesting refund: {}", context.sender.to_string());
-    println!("Found {} user contribution variables", user_contribution_vars.len());
-    
-    // Fix the assert syntax
+    // Assert that the user has at least one contribution
     assert!(!user_contribution_vars.is_empty(), "No contributions found for address: {}", context.sender.to_string());
-    
-    // Identify variables to delete (all contribution variables that don't belong to the user)
-    let variables_to_delete: Vec<SecretVarId> = all_contribution_vars
-        .into_iter()
-        .filter(|id| !user_contribution_vars.contains(id))
-        .collect();
     
     // Create metadata for the refund proof output variable
     let refund_metadata = vec![SecretVarType::RefundProof { 
         owner: context.sender 
     }];
     
-    // Create the sequence of state changes
-    let mut state_changes = Vec::new();
-    
-    // First delete non-user contribution variables
-    if !variables_to_delete.is_empty() {
-        state_changes.push(ZkStateChange::DeleteVariables {
-            variables_to_delete,
-        });
-    }
-    
-    // Then start the computation (which will now only use the user's contributions)
-    state_changes.push(ZkStateChange::start_computation(
+    // Start computation with only the user's contributions
+    // Create the state change to start computation
+    let state_change = ZkStateChange::start_computation_with_inputs(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
+        user_contribution_vars,
         Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME)),
-    ));
+    );
     
-    (state, vec![], state_changes)
+    (state, vec![], vec![state_change])
 }
 
 /// Callback for token refund to verify successful transfer
@@ -602,12 +576,7 @@ fn refund_callback(
     amount: u128,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     // If token transfer failed, panic to revert the transaction
-    if !callback_ctx.success {
-        panic!("Token refund transfer failed");
-    }
-    
-    // Log success for debugging
-    println!("Successfully refunded {} tokens to {}", amount, recipient.to_string());
+    assert!(callback_ctx.success, "Token refund transfer failed");
     
     // Return unchanged state
     (state, vec![], vec![])
