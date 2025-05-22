@@ -674,6 +674,54 @@ readonly claimRefund = async (address: string): Promise<TransactionResult> => {
 };
 
 /**
+ * Prepare refund by deleting other users' variables
+ * @param address The campaign contract address
+ * @returns Transaction result
+ */
+readonly prepareRefund = async (address: string): Promise<TransactionResult> => {
+  if (!this.isWalletConnected()) {
+    throw new CrowdfundingApiError(
+      "Wallet not connected",
+      "WALLET_NOT_CONNECTED"
+    );
+  }
+  
+  if (!address) {
+    throw new CrowdfundingApiError(
+      "Campaign address is required",
+      "MISSING_CAMPAIGN_ADDRESS"
+    );
+  }
+  
+  // Create prepare_refund RPC with format indicator
+  const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+    _out.writeU8(0x09); // Format indicator for actions
+    _out.writeBytes(Buffer.from([0x05])); // prepare_refund shortname
+  });
+  
+  try {
+    const transaction = await this.transactionClient!.signAndSend(
+      { address, rpc }, 
+      100000 // Gas limit
+    );
+    
+    return {
+      transaction,
+      status: 'pending',
+      metadata: {
+        type: 'prepareRefund'
+      }
+    };
+  } catch (error) {
+    console.error("Error preparing refund:", error);
+    throw new CrowdfundingApiError(
+      `Error preparing refund: ${error.message || error}`,
+      "PREPARE_REFUND_FAILED"
+    );
+  }
+};
+
+/**
  * Find refund proof variable ID for the current user
  * @param address The campaign contract address
  * @returns Promise resolving to the proof variable ID or undefined if not found

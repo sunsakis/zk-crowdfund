@@ -109,6 +109,10 @@ struct ContractState {
     num_contributors: Option<u32>,
     /// Whether the campaign was successful (reached funding target)
     is_successful: bool,
+    /// Track addresses that have already claimed refunds
+    refund_claimed: Vec<Address>,
+    /// Track variables that have been processed for refunds (to avoid reuse)
+    processed_variables: Vec<SecretVarId>,
 }
 
 /// Shortname constants for contract actions and callbacks
@@ -145,7 +149,9 @@ fn initialize(
         status: CampaignStatus::Active {},
         total_raised: None,
         num_contributors: None,
-        is_successful: false
+        is_successful: false,
+        refund_claimed: Vec::new(),
+        processed_variables: Vec::new(),
     }
 }
 
@@ -331,7 +337,83 @@ fn sum_compute_complete(
     )
 }
 
-/// Handle opened variables from ZK computation
+/// Claim refund by processing only the requesting user's contribution variables
+#[action(shortname = 0x06, zk = true)]
+fn claim_refund(
+    context: ContractContext,
+    mut state: ContractState,
+    zk_state: ZkState<SecretVarType>,
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
+    // Verify campaign state
+    assert_eq!(
+        state.status, CampaignStatus::Completed {},
+        "Campaign must be completed before claiming refund"
+    );
+    
+    assert!(
+        !state.is_successful,
+        "Cannot claim refund from successful campaign"
+    );
+    
+    // Check if user has already claimed refund
+    assert!(
+        !state.refund_claimed.contains(&context.sender),
+        "Refund already claimed for this address"
+    );
+    
+    // Check if the computation is already in progress
+    assert_eq!(
+        zk_state.calculation_state,
+        CalculationStatus::Waiting,
+        "Computation must start from Waiting state, but was {:?}",
+        zk_state.calculation_state,
+    );
+    
+    // Find ALL of this user's contribution variables (both processed and unprocessed)
+    let mut user_variables = Vec::new();
+    let mut variables_to_temporarily_delete = Vec::new();
+    
+    for (var_id, var) in zk_state.secret_variables.iter() {
+        if let SecretVarType::Contribution { owner, .. } = &var.metadata {
+            if owner == &context.sender {
+                user_variables.push(var_id);
+            } else {
+                // Mark other users' variables for temporary deletion
+                variables_to_temporarily_delete.push(var_id);
+            }
+        }
+    }
+    
+    assert!(!user_variables.is_empty(), 
+           "No contributions found for this address: {:?}", context.sender);
+    
+    // Mark user as having claimed refund BEFORE starting computation
+    state.refund_claimed.push(context.sender);
+    
+    let mut state_changes = Vec::new();
+    
+    // Temporarily delete other users' variables (they won't be permanently deleted)
+    if !variables_to_temporarily_delete.is_empty() {
+        state_changes.push(ZkStateChange::DeleteVariables {
+            variables_to_delete: variables_to_temporarily_delete
+        });
+    }
+    
+    // Create metadata for the refund proof output variable
+    let refund_metadata = vec![SecretVarType::RefundProof { 
+        owner: context.sender 
+    }];
+    
+    // Start computation with only this user's variables remaining
+    state_changes.push(ZkStateChange::start_computation(
+        ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
+        refund_metadata,
+        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME))
+    ));
+    
+    (state, vec![], state_changes)
+}
+
 /// Handle opened variables from ZK computation
 #[zk_on_variables_opened]
 fn open_variables(
@@ -379,9 +461,6 @@ fn open_variables(
             // Mark campaign as completed
             state.status = CampaignStatus::Completed {};
             
-            // IMPORTANT: We DO NOT mark the contract as done for either outcome
-            // For successful campaigns, we return funds to the owner
-            // For unsuccessful campaigns, we need to keep the ZK state active for refunds
             return (state, vec![], vec![]);
         },
         
@@ -418,6 +497,16 @@ fn open_variables(
                     .argument(token_refund_amount)
                     .with_cost(5000)
                     .done();
+                
+                // After processing refund, mark the user's variables as processed
+                // by adding them to processed_variables list
+                for (var_id, var) in zk_state.secret_variables.iter() {  // Add .iter()
+                    if let SecretVarType::Contribution { owner: var_owner, .. } = &var.metadata {
+                        if var_owner == owner {  // owner is already &Address, var_owner is Address
+                            state.processed_variables.push(var_id);
+                        }
+                    }
+                }
                 
                 return (state, vec![event_group.build()], vec![]);
             }
@@ -497,9 +586,8 @@ fn withdraw_funds(
     (state, events)
 }
 
-/// Generate refund proof and claim refund in one step
-#[action(shortname = 0x06, zk = true)]
-fn claim_refund(
+#[action(shortname = 0x05, zk = true)]
+fn prepare_refund(
     context: ContractContext,
     state: ContractState,
     zk_state: ZkState<SecretVarType>,
@@ -515,6 +603,12 @@ fn claim_refund(
         "Cannot claim refund from successful campaign"
     );
     
+    // Check if user has already claimed refund
+    assert!(
+        !state.refund_claimed.contains(&context.sender),
+        "Refund already claimed for this address"
+    );
+    
     // Check if the computation is already in progress
     assert_eq!(
         zk_state.calculation_state,
@@ -527,10 +621,9 @@ fn claim_refund(
     let mut variables_to_delete = Vec::new();
     let mut user_contribution_count = 0;
     
-    // Use iter() method to iterate over the AvlTreeMap
     for (var_id, var) in zk_state.secret_variables.iter() {
         if let SecretVarType::Contribution { owner, .. } = &var.metadata {
-            if owner == &context.sender {  // Compare references directly
+            if owner == &context.sender {
                 user_contribution_count += 1;
             } else {
                 // Mark other users' contributions for deletion
@@ -542,29 +635,15 @@ fn claim_refund(
     assert!(user_contribution_count > 0, 
            "No contributions found for this address: {:?}", context.sender);
     
-    // Create state changes
-    let mut state_changes = Vec::new();
-    
-    // First, delete other users' variables if any exist
+    // Delete other users' variables
     if !variables_to_delete.is_empty() {
-        state_changes.push(ZkStateChange::DeleteVariables {
+        (state, vec![], vec![ZkStateChange::DeleteVariables {
             variables_to_delete
-        });
+        }])
+    } else {
+        // No variables to delete, can proceed directly to computation
+        (state, vec![], vec![])
     }
-    
-    // Create metadata for the refund proof output variable
-    let refund_metadata = vec![SecretVarType::RefundProof { 
-        owner: context.sender 
-    }];
-    
-    // Start computation (now only user's variables remain)
-    state_changes.push(ZkStateChange::start_computation(
-        ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
-        refund_metadata,
-        Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME))
-    ));
-    
-    (state, vec![], state_changes)
 }
 
 /// Callback for token refund to verify successful transfer

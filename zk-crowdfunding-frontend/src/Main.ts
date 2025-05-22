@@ -544,9 +544,7 @@ async function generateRefundProofAction() {
 }
 
 /**
- * Handle Claim Refund button click
- * This initiates the ZK computation to calculate and return the exact refund
- * in a single operation
+ * Handle Claim Refund button click - now a two-step process
  */
 async function claimRefundAction() {
   console.log("Claim refund button clicked");
@@ -586,19 +584,37 @@ async function claimRefundAction() {
   }
   
   try {
-    // Show processing status
-    setConnectionStatus("Claiming refund...");
+    // Step 1: Prepare refund (delete other users' variables)
+    setConnectionStatus("Step 1: Preparing refund...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Processing refund claim...</p>
-          <p class="mt-2">This process automatically calculates your contribution and returns your funds.</p>
+          <p>Step 1: Preparing refund (removing other users' data)...</p>
           <div class="spinner mt-2"></div>
         </div>
       `;
     }
     
-    // Call the simplified refund method
+    const prepareResult = await api.prepareRefund(address);
+    const prepareTxId = prepareResult.transaction?.transactionPointer?.identifier || "unknown";
+    
+    console.log("Prepare refund transaction sent:", prepareTxId);
+    
+    // Wait for preparation to complete
+    await new Promise(resolve => setTimeout(resolve, 15000)); // Wait 15 seconds
+    
+    // Step 2: Claim refund
+    setConnectionStatus("Step 2: Claiming refund...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>Step 2: Processing refund claim...</p>
+          <p class="mt-2">This automatically calculates your contribution and returns your funds.</p>
+          <div class="spinner mt-2"></div>
+        </div>
+      `;
+    }
+    
     const result = await api.claimRefund(address);
     
     // Get transaction ID for tracking
@@ -640,14 +656,12 @@ async function claimRefundAction() {
             </div>
           `;
           
-          // Add event listener to the refresh button
           const refreshBtn = document.querySelector("#refresh-state-btn-refund");
           if (refreshBtn) {
             refreshBtn.addEventListener("click", updateContractState);
           }
         }
         
-        // Update contract state
         updateContractState();
       },
       (txId, error) => {
@@ -663,7 +677,6 @@ async function claimRefundAction() {
             </div>
           `;
           
-          // Add retry button
           const retryBtn = document.querySelector("#retry-claim-refund");
           if (retryBtn) {
             retryBtn.addEventListener("click", claimRefundAction);
@@ -684,7 +697,6 @@ async function claimRefundAction() {
         </div>
       `;
       
-      // Add retry button
       const retryBtn = document.querySelector("#retry-claim-refund");
       if (retryBtn) {
         retryBtn.addEventListener("click", claimRefundAction);

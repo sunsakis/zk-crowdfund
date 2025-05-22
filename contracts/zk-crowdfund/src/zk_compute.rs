@@ -23,15 +23,15 @@ pub fn sum_contributions() -> Sbi32 {
     total_contributions
 }
 
-/// Compute the refund amount for a specific user.
-/// This function expects to receive ONLY the requesting user's contributions
-/// as input variables (filtered by the contract before starting computation).
+/// Compute the refund amount for the remaining contribution variables.
+/// This function processes ALL remaining contribution variables in the contract.
+/// The contract must ensure only the requesting user's variables remain before calling this.
 #[zk_compute(shortname = 0x62)]
 pub fn compute_refund() -> Sbi32 {
     // Initialize refund amount
     let mut total_refund: Sbi32 = Sbi32::from(0);
     
-    // Sum all remaining contribution variables (should only be user's contributions)
+    // Sum all remaining contribution variables
     for variable_id in secret_variable_ids() {
         // Check if this is a contribution variable
         if load_metadata::<u8>(variable_id) == CONTRIBUTION_VARIABLE_KIND {
