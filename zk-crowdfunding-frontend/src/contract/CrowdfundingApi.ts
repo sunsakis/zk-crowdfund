@@ -460,7 +460,7 @@ readonly addContributionWithApproval = async (
       console.log(`Approval transaction ID: ${approvalTxId}`);
       
       // Wait longer for approval to be fully confirmed on-chain 
-      await new Promise(resolve => setTimeout(resolve, 30000)); // 30 seconds
+      await new Promise(resolve => setTimeout(resolve, 20000)); // 30 seconds
       
       try {
         // Verify approval status 
