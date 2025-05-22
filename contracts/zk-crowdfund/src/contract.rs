@@ -566,7 +566,7 @@ fn withdraw_funds(
     );
     
     // For successful campaigns, we use the verified total from ZK computation
-    let total_to_withdraw = state.total_raised.unwrap_or(0);
+    let total_to_withdraw = state.total_raised.unwrap_or(0) * 1_000_000_000_000_u128;
     
     // For successful campaigns, we transfer all tokens to the owner
     let mut events = Vec::new();

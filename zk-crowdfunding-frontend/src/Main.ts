@@ -1786,7 +1786,7 @@ function updateUIWithContractState(state, variables) {
     const ownerValue = document.querySelector("#owner-value");
     if (ownerValue && state.owner) {
       try {
-        ownerValue.innerHTML = `Project Owner: ${state.owner.asString()}`;
+        ownerValue.innerHTML = `${state.owner.asString()}`;
       } catch (error) {
         console.error("Error displaying owner address:", error);
         ownerValue.innerHTML = `Project Owner: Unknown`;
@@ -1809,20 +1809,20 @@ function updateUIWithContractState(state, variables) {
     const statusValue = document.querySelector("#status-value");
     if (statusValue && typeof state.status !== 'undefined') {
       const statusText = CampaignStatus[state.status] || "Unknown";
-      statusValue.innerHTML = `Status: <span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
+      statusValue.innerHTML = `<span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
     }
     
     // Update funding target - format with proper decimals
     const fundingTargetValue = document.querySelector("#funding-target-value");
     if (fundingTargetValue) {
       const formattedTarget = formatTokenAmount(state.fundingTarget);
-      fundingTargetValue.innerHTML = `Funding Target: ${formattedTarget}`;
+      fundingTargetValue.innerHTML = `${formattedTarget}`;
     }
     
     // Update contributors
     const numContributors = document.querySelector("#num-contributors");
     if (numContributors) {
-      numContributors.innerHTML = `Number of Contributors: ${state.numContributors ?? contributionCount}`;
+      numContributors.innerHTML = `${state.numContributors ?? contributionCount}`;
     }
     
     // Update total raised - with improved formatting
@@ -1831,13 +1831,13 @@ function updateUIWithContractState(state, variables) {
       if (state.status === CampaignStatus.Completed && state.isSuccessful) {
         // For completed successful campaigns, show the formatted amount
         const formattedAmount = formatTokenAmount(state.totalRaised);
-        totalRaised.innerHTML = `Total Raised: ${formattedAmount}`;
+        totalRaised.innerHTML = `${formattedAmount}`;
       } else if (state.status === CampaignStatus.Completed) {
         // For completed unsuccessful campaigns
-        totalRaised.innerHTML = `Total Raised: <span class="text-yellow-600">Not revealed (threshold not met)</span>`;
+        totalRaised.innerHTML = `<span class="text-yellow-600">Not revealed (threshold not met)</span>`;
       } else {
         // For campaigns in progress
-        totalRaised.innerHTML = `Total Raised: <span class="text-blue-600">Redacted</span>`;
+        totalRaised.innerHTML = `<span class="text-blue-600">Redacted</span>`;
       }
     }
     
@@ -1846,7 +1846,7 @@ function updateUIWithContractState(state, variables) {
     if (campaignResult) {
       if (state.status === CampaignStatus.Completed) {
         const resultClass = state.isSuccessful ? "result-success" : "result-failure";
-        campaignResult.innerHTML = `Campaign Result: <span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
+        campaignResult.innerHTML = `<span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
         
         // Show the campaign result container when completed
         const campaignResultContainer = document.querySelector("#campaign-result-container");
@@ -1860,7 +1860,7 @@ function updateUIWithContractState(state, variables) {
           }
         }
       } else {
-        campaignResult.innerHTML = "Campaign Result: Not yet determined";
+        campaignResult.innerHTML = "Not yet determined";
       }
     }
   } catch (error) {
