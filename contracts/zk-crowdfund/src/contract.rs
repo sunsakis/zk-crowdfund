@@ -385,36 +385,38 @@ fn open_variables(
             return (state, vec![], vec![]);
         },
         
-       // Process RefundProof variables (from refund claims)
+        // Process RefundProof variables (from refund claims)
         SecretVarType::RefundProof { owner } => {
             // Only process if campaign is completed and unsuccessful
             if matches!(state.status, CampaignStatus::Completed {}) && !state.is_successful {
-                // Get the refund amount
-                let refund_amount = read_variable_u32_le(&opened_variable);
+                // Get the refund amount (this is the ZK-scaled amount)
+                let zk_refund_amount = read_variable_u32_le(&opened_variable);
                 
                 // Create token transfer for the refund if amount is > 0
-                assert!(refund_amount > 0, "Refund amount must be greater than 0");
+                assert!(zk_refund_amount > 0, "Refund amount must be greater than 0");
+                
+                // Convert ZK amount back to token amount
+                // ZK uses 6 decimal places (1_000_000 scale factor)
+                // Token uses 18 decimal places
+                // So we need to scale up by 10^12 to convert from ZK to token units
+                let token_refund_amount = (zk_refund_amount as u128) * 1_000_000_000_000_u128;
                 
                 // Create the token transfer event with callback for monitoring
                 let mut event_group = EventGroup::builder();
                 let transfer_shortname = Shortname::from_u32(TOKEN_TRANSFER_SHORTNAME as u32);
                 
-                // Calculate token amount from ZK amount
-                let token_refund_amount = (refund_amount as u128) * 500_000_000_000;
-                
-                // Build the call with token transfer using the documented approach
-                // Note the explicit with_cost() method from the example
+                // Build the call with token transfer
                 event_group.call(state.token_address, transfer_shortname)
                     .argument(*owner)  // Use the owner from metadata
                     .argument(token_refund_amount)
-                    .with_cost(18000)  // Explicitly allocate gas - adjust as needed
+                    .with_cost(18000)
                     .done();
                 
-                // Add the callback following the documented approach
+                // Add the callback
                 event_group.with_callback(ShortnameCallback::from_u32(REFUND_CALLBACK_SHORTNAME))
                     .argument(*owner)
                     .argument(token_refund_amount)
-                    .with_cost(5000)  // Explicitly allocate gas for callback
+                    .with_cost(5000)
                     .done();
                 
                 return (state, vec![event_group.build()], vec![]);
@@ -521,38 +523,48 @@ fn claim_refund(
         zk_state.calculation_state,
     );
     
-    // Find ALL contribution variables
-    // We'll let the ZK computation handle filtering
-    let all_contribution_vars: Vec<SecretVarId> = zk_state
-        .secret_variables
-        .iter()
-        .filter_map(|(id, var)| {
-            if let SecretVarType::Contribution { .. } = &var.metadata {
-                Some(id)
-            } else {
-                None
-            }
-        })
-        .collect();
+    // Find variables that DON'T belong to this user and user's contribution count
+    let mut variables_to_delete = Vec::new();
+    let mut user_contribution_count = 0;
     
-    // Assert that there's at least one contribution
-    assert!(!all_contribution_vars.is_empty(), "No contributions found in the contract");
+    // Use iter() method to iterate over the AvlTreeMap
+    for (var_id, var) in zk_state.secret_variables.iter() {
+        if let SecretVarType::Contribution { owner, .. } = &var.metadata {
+            if owner == &context.sender {  // Compare references directly
+                user_contribution_count += 1;
+            } else {
+                // Mark other users' contributions for deletion
+                variables_to_delete.push(var_id);
+            }
+        }
+    }
+    
+    assert!(user_contribution_count > 0, 
+           "No contributions found for this address: {:?}", context.sender);
+    
+    // Create state changes
+    let mut state_changes = Vec::new();
+    
+    // First, delete other users' variables if any exist
+    if !variables_to_delete.is_empty() {
+        state_changes.push(ZkStateChange::DeleteVariables {
+            variables_to_delete
+        });
+    }
     
     // Create metadata for the refund proof output variable
-    // We'll use the owner from the context as a hint, but the open_variables
-    // function will correctly send tokens to the owner in the metadata
     let refund_metadata = vec![SecretVarType::RefundProof { 
         owner: context.sender 
     }];
     
-    // Start computation with no public inputs
-    let state_change = ZkStateChange::start_computation(
+    // Start computation (now only user's variables remain)
+    state_changes.push(ZkStateChange::start_computation(
         ShortnameZkComputation::from_u32(REFUND_COMPUTATION_SHORTNAME),
         refund_metadata,
         Some(ShortnameZkComputeComplete::from_u32(REFUND_COMPUTE_COMPLETE_SHORTNAME))
-    );
+    ));
     
-    (state, vec![], vec![state_change])
+    (state, vec![], state_changes)
 }
 
 /// Callback for token refund to verify successful transfer

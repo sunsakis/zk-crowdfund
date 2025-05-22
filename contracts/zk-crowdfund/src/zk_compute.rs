@@ -5,10 +5,6 @@ use pbc_zk::*;
 const CONTRIBUTION_VARIABLE_KIND: u8 = 0u8;  // Matches SecretVarType::Contribution discriminant
 
 /// Perform a zk computation on secret-shared data to sum all the secret contributions.
-///
-/// Runs in zero-knowledge in MPC nodes after the campaign ends.
-/// Takes all of the contribution variables and sums them up.
-/// Returns the total amount raised as a privacy-preserving result.
 #[zk_compute(shortname = 0x61)]
 pub fn sum_contributions() -> Sbi32 {
     // Initialize state
@@ -28,22 +24,20 @@ pub fn sum_contributions() -> Sbi32 {
 }
 
 /// Compute the refund amount for a specific user.
-/// This simply sums all contributions passed to the computation.
-/// We rely on the contract to filter and only pass the user's own contributions.
-///
-/// ### Returns:
-/// The sum of the user's contributions.
+/// This function expects to receive ONLY the requesting user's contributions
+/// as input variables (filtered by the contract before starting computation).
 #[zk_compute(shortname = 0x62)]
 pub fn compute_refund() -> Sbi32 {
     // Initialize refund amount
     let mut total_refund: Sbi32 = Sbi32::from(0);
     
-    // Sum all contributions that were passed to this computation
-    // The contract should have filtered to include only the user's contributions
+    // Sum all remaining contribution variables (should only be user's contributions)
     for variable_id in secret_variable_ids() {
-        // Load and add the contribution amount
-        let contribution_amount = load_sbi::<Sbi32>(variable_id);
-        total_refund = total_refund + contribution_amount;
+        // Check if this is a contribution variable
+        if load_metadata::<u8>(variable_id) == CONTRIBUTION_VARIABLE_KIND {
+            let contribution_amount = load_sbi::<Sbi32>(variable_id);
+            total_refund = total_refund + contribution_amount;
+        }
     }
     
     total_refund
