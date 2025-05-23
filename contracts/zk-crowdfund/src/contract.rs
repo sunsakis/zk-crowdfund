@@ -114,7 +114,6 @@ const TOKEN_TRANSFER_SHORTNAME: u8 = 0x01;
 const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
 const SUM_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x42;
 const ZK_COMPUTATION_SHORTNAME: u32 = 0x61;
-const WITHDRAWAL_COMPLETE_SHORTNAME: u32 = 0x43;
 
 /// Conversion factor
 const WEI_PER_TOKEN_UNIT: u128 = 1_000_000_000_000; // 1e12
@@ -393,20 +392,13 @@ fn withdraw_funds(
     let balance_tracker_id = state.balance_tracker_id
         .expect("Balance tracker should exist after campaign completion");
     
-    // Start a ZK computation to extract the balance for withdrawal
-    let function_shortname = ShortnameZkComputation::from_u32(0x64); // Withdrawal computation
-    let output_metadata = vec![SecretVarType::SumResult {}];
-    
-    let zk_change = ZkStateChange::start_computation_with_inputs(
-        function_shortname,
-        output_metadata,
-        vec![balance_tracker_id],
-        Some(ShortnameZkComputeComplete::from_u32(WITHDRAWAL_COMPLETE_SHORTNAME)),
-    );
-    
+    // Since we know the campaign was successful, we can directly open the balance tracker
+    // instead of running another computation
     state.funds_withdrawn = true;
     
-    (state, vec![], vec![zk_change])
+    (state, vec![], vec![ZkStateChange::OpenVariables {
+        variables: vec![balance_tracker_id],
+    }])
 }
 
 /// Handle withdrawal completion
