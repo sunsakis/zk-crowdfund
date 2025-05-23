@@ -35,7 +35,6 @@ interface DOMElements {
   addContributionTransactionLink: HTMLElement | null;
   endCampaignTransactionLink: HTMLElement | null;
   withdrawFundsTransactionLink: HTMLElement | null;
-  claimRefundTransactionLink: HTMLElement | null; 
 
   // Campaign result elements
   campaignResultContainer: HTMLElement | null;
@@ -45,7 +44,6 @@ interface DOMElements {
   // Refund elements - Added for refund functionality
   refundProofStatus: HTMLElement | null;
   generateRefundProofBtn: HTMLButtonElement | null;
-  claimRefundBtn: HTMLButtonElement | null;
 }
 
 let elements: DOMElements = {
@@ -101,7 +99,6 @@ function initializeElements() {
     addContributionTransactionLink: document.querySelector("#add-contribution-transaction-link"),
     endCampaignTransactionLink: document.querySelector("#end-campaign-transaction-link"),
     withdrawFundsTransactionLink: document.querySelector("#withdraw-funds-transaction-link"),
-    claimRefundTransactionLink: document.querySelector("#claim-refund-transaction-link"),
 
     // Campaign result elements
     campaignResultContainer: document.querySelector("#campaign-result-container"),
@@ -320,394 +317,6 @@ function setupEventListeners() {
     withdrawFundsBtn.addEventListener("click", withdrawFundsAction);
   } else {
     console.warn("Withdraw funds button not found");
-  }
-
-  // Simplified refund process - single button
-  const claimRefundBtn = document.querySelector("#claim-refund-btn");
-  if (claimRefundBtn) {
-    claimRefundBtn.addEventListener("click", claimRefundAction);
-  } else {
-    console.warn("Claim refund button not found");
-  }
-}
-
-/**
- * Handle Generate Refund Proof button click
- * This initiates the ZK computation to generate a proof of the user's contribution
- */
-async function generateRefundProofAction() {
-  console.log("Generate refund proof button clicked");
-  
-  // Check if wallet is connected
-  if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
-    return;
-  }
-  
-  // Get the campaign address
-  const address = getContractAddress();
-  if (!address) {
-    setConnectionStatus("No campaign address found");
-    return;
-  }
-  
-  // Get the Crowdfunding API
-  const api = getCrowdfundingApi();
-  if (!api) {
-    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
-    return;
-  }
-  
-  // Disable button and show loading state
-  const generateProofBtn = document.querySelector("#generate-refund-proof-btn") as HTMLButtonElement;
-  if (generateProofBtn) {
-    generateProofBtn.disabled = true;
-    generateProofBtn.textContent = "Processing...";
-  }
-  
-  // Show refund proof status container
-  const refundProofStatus = document.querySelector("#refund-proof-status");
-  if (refundProofStatus) {
-    refundProofStatus.classList.remove("hidden");
-    refundProofStatus.innerHTML = `
-      <div class="alert alert-info">
-        <p>Generating refund proof...</p>
-        <div class="spinner mt-2"></div>
-      </div>
-    `;
-  }
-  
-  try {
-    // Generate the refund proof
-    const result = await api.generateRefundProof(address);
-    
-    // Get transaction ID for tracking
-    const txId = result.transaction?.transactionPointer?.identifier || 
-                result.metadata?.txId || 
-                "unknown";
-    
-    console.log("Generate refund proof transaction sent:", txId);
-    
-    // Update UI with transaction info
-    if (refundProofStatus) {
-      refundProofStatus.innerHTML = `
-        <div class="alert alert-info">
-          <p>Refund proof generation in progress...</p>
-          <p class="transaction-hash">Transaction ID: ${txId}</p>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-             class="transaction-link" target="_blank">View in Explorer</a>
-          <p class="mt-2">This may take 30-60 seconds to complete...</p>
-          <div class="spinner"></div>
-        </div>
-      `;
-    }
-    
-    // Schedule status checking
-    scheduleTransactionStatusCheck(
-      txId,
-      api,
-      async (txId) => {
-        // Success callback
-        try {
-          // Try to find the proof variable ID
-          const proofVarId = await api.findRefundProofVariableId(address);
-          
-          if (proofVarId) {
-            // Store proof variable ID in a data attribute for later use
-            const claimRefundBtn = document.querySelector("#claim-refund-btn") as HTMLButtonElement;
-            if (claimRefundBtn) {
-              claimRefundBtn.dataset.proofVarId = proofVarId.toString();
-              claimRefundBtn.classList.remove("hidden");
-            }
-            
-            if (refundProofStatus) {
-              refundProofStatus.innerHTML = `
-                <div class="alert alert-success">
-                  <p>Refund proof generated successfully!</p>
-                  <p>Your contribution has been confirmed and you can now claim your refund.</p>
-                  <p class="text-sm mt-2">Proof ID: ${proofVarId}</p>
-                </div>
-              `;
-            }
-          } else {
-            // Could not find proof variable
-            if (refundProofStatus) {
-              refundProofStatus.innerHTML = `
-                <div class="alert alert-warning">
-                  <p>Proof generated, but could not locate the proof ID.</p>
-                  <p>Please try refreshing the page and generating the proof again.</p>
-                  <button id="refresh-state-btn-proof" class="btn btn-secondary mt-2">Refresh Contract State</button>
-                </div>
-              `;
-              
-              // Add event listener to the refresh button
-              const refreshBtn = document.querySelector("#refresh-state-btn-proof");
-              if (refreshBtn) {
-                refreshBtn.addEventListener("click", updateContractState);
-              }
-            }
-          }
-        } catch (error) {
-          console.error("Error finding proof variable ID:", error);
-          if (refundProofStatus) {
-            refundProofStatus.innerHTML = `
-              <div class="alert alert-warning">
-                <p>Proof generated, but could not locate the proof ID: ${error.message || error}</p>
-                <p>Please try refreshing the page or generating the proof again.</p>
-                <button id="retry-generate-proof" class="btn btn-primary mt-2">Try Again</button>
-              </div>
-            `;
-            
-            // Add retry button
-            const retryBtn = document.querySelector("#retry-generate-proof");
-            if (retryBtn) {
-              retryBtn.addEventListener("click", generateRefundProofAction);
-            }
-          }
-        }
-      },
-      (txId, error) => {
-        // Failure callback
-        if (refundProofStatus) {
-          refundProofStatus.innerHTML = `
-            <div class="alert alert-error">
-              <p>Failed to generate refund proof: ${error || 'Unknown error'}</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="retry-generate-proof" class="btn btn-primary mt-2">Try Again</button>
-            </div>
-          `;
-          
-          // Add retry button
-          const retryBtn = document.querySelector("#retry-generate-proof");
-          if (retryBtn) {
-            retryBtn.addEventListener("click", generateRefundProofAction);
-          }
-        }
-      },
-      (txId, attempt) => {
-        // Pending callback - show progress after a few attempts
-        if (attempt >= 3) {
-          if (refundProofStatus) {
-            refundProofStatus.innerHTML = `
-              <div class="alert alert-info">
-                <p>ZK proof computation in progress...</p>
-                <p class="transaction-hash">Transaction ID: ${txId}</p>
-                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                   class="transaction-link" target="_blank">View in Explorer</a>
-                <p class="text-sm mt-2">The computation may take 30-60 seconds to complete.</p>
-                <div class="spinner mt-2"></div>
-              </div>
-            `;
-          }
-        }
-      }
-    );
-  } catch (error) {
-    console.error("Error generating refund proof:", error);
-    
-    setConnectionStatus(`Error: ${error.message || String(error)}`);
-    if (refundProofStatus) {
-      refundProofStatus.innerHTML = `
-        <div class="alert alert-error">
-          <p>Error generating refund proof: ${error.message || String(error)}</p>
-          <p>Please try again or check the console for more details.</p>
-          <button id="retry-generate-proof" class="btn btn-primary mt-2">Try Again</button>
-        </div>
-      `;
-      
-      // Add retry button
-      const retryBtn = document.querySelector("#retry-generate-proof");
-      if (retryBtn) {
-        retryBtn.addEventListener("click", () => {
-          // Reset UI
-          if (refundProofStatus) {
-            refundProofStatus.innerHTML = '';
-          }
-          
-          // Re-enable the button for manual retry
-          if (generateProofBtn) {
-            generateProofBtn.disabled = false;
-            generateProofBtn.textContent = "Step 1: Generate Refund Proof";
-          }
-        });
-      }
-    }
-  } finally {
-    // Re-enable the button
-    if (generateProofBtn) {
-      generateProofBtn.disabled = false;
-      generateProofBtn.textContent = "Step 1: Generate Refund Proof";
-    }
-  }
-}
-
-/**
- * Handle Claim Refund button click - now a two-step process
- */
-async function claimRefundAction() {
-  console.log("Claim refund button clicked");
-  
-  // Check if wallet is connected
-  if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
-    return;
-  }
-  
-  // Get the campaign address
-  const address = getContractAddress();
-  if (!address) {
-    setConnectionStatus("No campaign address found");
-    return;
-  }
-  
-  // Get the Crowdfunding API
-  const api = getCrowdfundingApi();
-  if (!api) {
-    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
-    return;
-  }
-  
-  // Disable button and show loading state
-  const claimRefundBtn = document.querySelector("#claim-refund-btn") as HTMLButtonElement;
-  if (claimRefundBtn) {
-    claimRefundBtn.disabled = true;
-    claimRefundBtn.textContent = "Processing...";
-  }
-  
-  // Show transaction info container
-  const transactionLinkContainer = document.querySelector("#claim-refund-transaction-link");
-  if (transactionLinkContainer) {
-    transactionLinkContainer.classList.remove("hidden");
-    transactionLinkContainer.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
-  }
-  
-  try {
-    // Step 1: Prepare refund (delete other users' variables)
-    setConnectionStatus("Step 1: Preparing refund...");
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Step 1: Preparing refund (removing other users' data)...</p>
-          <div class="spinner mt-2"></div>
-        </div>
-      `;
-    }
-    
-    const prepareResult = await api.prepareRefund(address);
-    const prepareTxId = prepareResult.transaction?.transactionPointer?.identifier || "unknown";
-    
-    console.log("Prepare refund transaction sent:", prepareTxId);
-    
-    // Wait for preparation to complete
-    await new Promise(resolve => setTimeout(resolve, 15000)); // Wait 15 seconds
-    
-    // Step 2: Claim refund
-    setConnectionStatus("Step 2: Claiming refund...");
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Step 2: Processing refund claim...</p>
-          <p class="mt-2">This automatically calculates your contribution and returns your funds.</p>
-          <div class="spinner mt-2"></div>
-        </div>
-      `;
-    }
-    
-    const result = await api.claimRefund(address);
-    
-    // Get transaction ID for tracking
-    const txId = result.transaction?.transactionPointer?.identifier || 
-                result.metadata?.txId || 
-                "unknown";
-    
-    console.log("Claim refund transaction sent:", txId);
-    
-    // Update UI with transaction info
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Refund claim submitted successfully!</p>
-          <p class="transaction-hash">Transaction ID: ${txId}</p>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-             class="transaction-link" target="_blank">View in Explorer</a>
-          <p class="mt-2">Processing transaction...</p>
-          <div class="spinner"></div>
-        </div>
-      `;
-    }
-    
-    // Schedule status checking
-    scheduleTransactionStatusCheck(
-      txId,
-      api,
-      (txId) => {
-        // Success callback
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-success">
-              <p>Refund claimed successfully!</p>
-              <p>Your tokens have been returned to your wallet.</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="refresh-state-btn-refund" class="btn btn-secondary mt-2">Refresh Contract State</button>
-            </div>
-          `;
-          
-          const refreshBtn = document.querySelector("#refresh-state-btn-refund");
-          if (refreshBtn) {
-            refreshBtn.addEventListener("click", updateContractState);
-          }
-        }
-        
-        updateContractState();
-      },
-      (txId, error) => {
-        // Failure callback
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-error">
-              <p>Failed to claim refund: ${error || 'Unknown error'}</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="retry-claim-refund" class="btn btn-primary mt-2">Try Again</button>
-            </div>
-          `;
-          
-          const retryBtn = document.querySelector("#retry-claim-refund");
-          if (retryBtn) {
-            retryBtn.addEventListener("click", claimRefundAction);
-          }
-        }
-      }
-    );
-  } catch (error) {
-    console.error("Error claiming refund:", error);
-    
-    setConnectionStatus(`Error: ${error.message || String(error)}`);
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-error">
-          <p>Error claiming refund: ${error.message || String(error)}</p>
-          <p>Please try again or check the console for more details.</p>
-          <button id="retry-claim-refund" class="btn btn-primary mt-2">Try Again</button>
-        </div>
-      `;
-      
-      const retryBtn = document.querySelector("#retry-claim-refund");
-      if (retryBtn) {
-        retryBtn.addEventListener("click", claimRefundAction);
-      }
-    }
-  } finally {
-    // Re-enable the button
-    if (claimRefundBtn) {
-      claimRefundBtn.disabled = false;
-      claimRefundBtn.textContent = "Claim Refund";
-    }
   }
 }
 
@@ -1878,14 +1487,12 @@ function updateActionVisibility(state) {
     const endCampaignSection = document.querySelector("#end-campaign-section");
     const withdrawFundsSection = document.querySelector("#withdraw-funds-section");
     const verificationSection = document.querySelector("#verification-section");
-    const claimRefundSection = document.querySelector("#claim-refund-section");
 
     // Reset all to hidden
     if (addContributionSection) addContributionSection.classList.add("hidden");
     if (endCampaignSection) endCampaignSection.classList.add("hidden");
     if (withdrawFundsSection) withdrawFundsSection.classList.add("hidden");
     if (verificationSection) verificationSection.classList.add("hidden");
-    if (claimRefundSection) claimRefundSection.classList.add("hidden");
 
     // Only show actions if user is connected
     if (!isConnected()) {
@@ -1900,7 +1507,7 @@ function updateActionVisibility(state) {
       if (addContributionSection) {
         addContributionSection.classList.remove("hidden");
       }
-      // Anyone can end campaign (owner or anyone after deadline)
+      // owner can end campaign
       if (endCampaignSection) {
         endCampaignSection.classList.remove("hidden");
       }
@@ -1910,17 +1517,11 @@ function updateActionVisibility(state) {
         verificationSection.classList.remove("hidden");
       }
       
-      if (state.isSuccessful) {
-        // Only show withdraw if campaign was successful
+      if (state.isSuccessful || !state.isSuccessful) {
         if (withdrawFundsSection) {
           withdrawFundsSection.classList.remove("hidden");
         }
-      } else {
-        // Show simplified refund section for failed campaigns
-        if (claimRefundSection) {
-          claimRefundSection.classList.remove("hidden");
-        }
-      }
+      } 
     }
   } catch (error) {
     console.error("Error updating action visibility:", error);

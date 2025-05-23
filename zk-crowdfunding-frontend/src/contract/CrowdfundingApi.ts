@@ -3,9 +3,9 @@ import {
   BlockchainTransactionClient,
   SentTransaction
 } from "@partisiablockchain/blockchain-api-transaction-client";
-import { RealZkClient, Client } from "@partisiablockchain/zk-client";
+import { RealZkClient } from "@partisiablockchain/zk-client";
 import { Buffer } from "buffer";
-import { AbiBitOutput, AbiByteOutput, AbiByteInput, BN } from "@partisiablockchain/abi-client";
+import { AbiBitOutput, AbiByteOutput, BN } from "@partisiablockchain/abi-client";
 import { ShardedClient } from "../client/ShardedClient";
 import { deserializeState } from '../contract/CrowdfundingGenerated';
 
@@ -82,7 +82,6 @@ export class CrowdfundingApi {
   
   // Constants for gas limits with some buffer
   private readonly TOKEN_APPROVAL_GAS = 15000;
-  private readonly CONTRIBUTION_GAS = 200000;
   private readonly END_CAMPAIGN_GAS = 150000;
   private readonly WITHDRAW_FUNDS_GAS = 30000;
   private readonly VERIFY_CONTRIBUTION_GAS = 15000;
@@ -621,157 +620,6 @@ readonly generateRefundProof = async (address: string): Promise<TransactionResul
       `Error generating refund proof: ${error.message || error}`,
       "REFUND_PROOF_GENERATION_FAILED"
     );
-  }
-};
-
-/**
- * Claim refund in one step
- * This handles the ZK computation and token refund in a single operation
- * @param address The campaign contract address
- * @returns Transaction result
- */
-readonly claimRefund = async (address: string): Promise<TransactionResult> => {
-  if (!this.isWalletConnected()) {
-    throw new CrowdfundingApiError(
-      "Wallet not connected",
-      "WALLET_NOT_CONNECTED"
-    );
-  }
-  
-  if (!address) {
-    throw new CrowdfundingApiError(
-      "Campaign address is required",
-      "MISSING_CAMPAIGN_ADDRESS"
-    );
-  }
-  
-  // Create claim_refund RPC with format indicator
-  const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-    _out.writeU8(0x09); // Format indicator for actions
-    _out.writeBytes(Buffer.from([0x06])); // claim_refund shortname
-  });
-  
-  try {
-    const transaction = await this.transactionClient!.signAndSend(
-      { address, rpc }, 
-      200000 // Higher gas limit for ZK operations
-    );
-    
-    return {
-      transaction,
-      status: 'pending',
-      metadata: {
-        type: 'claimRefund'
-      }
-    };
-  } catch (error) {
-    console.error("Error claiming refund:", error);
-    throw new CrowdfundingApiError(
-      `Error claiming refund: ${error.message || error}`,
-      "CLAIM_REFUND_FAILED"
-    );
-  }
-};
-
-/**
- * Prepare refund by deleting other users' variables
- * @param address The campaign contract address
- * @returns Transaction result
- */
-readonly prepareRefund = async (address: string): Promise<TransactionResult> => {
-  if (!this.isWalletConnected()) {
-    throw new CrowdfundingApiError(
-      "Wallet not connected",
-      "WALLET_NOT_CONNECTED"
-    );
-  }
-  
-  if (!address) {
-    throw new CrowdfundingApiError(
-      "Campaign address is required",
-      "MISSING_CAMPAIGN_ADDRESS"
-    );
-  }
-  
-  // Create prepare_refund RPC with format indicator
-  const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-    _out.writeU8(0x09); // Format indicator for actions
-    _out.writeBytes(Buffer.from([0x05])); // prepare_refund shortname
-  });
-  
-  try {
-    const transaction = await this.transactionClient!.signAndSend(
-      { address, rpc }, 
-      100000 // Gas limit
-    );
-    
-    return {
-      transaction,
-      status: 'pending',
-      metadata: {
-        type: 'prepareRefund'
-      }
-    };
-  } catch (error) {
-    console.error("Error preparing refund:", error);
-    throw new CrowdfundingApiError(
-      `Error preparing refund: ${error.message || error}`,
-      "PREPARE_REFUND_FAILED"
-    );
-  }
-};
-
-/**
- * Find refund proof variable ID for the current user
- * @param address The campaign contract address
- * @returns Promise resolving to the proof variable ID or undefined if not found
- */
-readonly findRefundProofVariableId = async (address: string): Promise<number | undefined> => {
-  if (!this.isWalletConnected()) {
-    throw new CrowdfundingApiError(
-      "Wallet not connected",
-      "WALLET_NOT_CONNECTED"
-    );
-  }
-  
-  try {
-    // Fetch contract data
-    const contractData = await this.baseClient.getContractData(address);
-    if (!contractData?.serializedContract?.variables) {
-      return undefined;
-    }
-    
-    // Get the current user address
-    const userAddress = this.sender;
-    
-    // Look for a RefundProof variable for the current user
-    // This requires parsing the variables and their metadata
-    const variables = contractData.serializedContract.variables;
-    for (const varEntry of variables) {
-      if (varEntry.value?.metadata && varEntry.value.information?.data) {
-        try {
-          // Try to parse metadata byte from base64
-          const metadataBytes = Buffer.from(varEntry.value.metadata, 'base64');
-          // Check if discriminant is 2 (RefundProof)
-          if (metadataBytes[0] === 2) {
-            // Parse owner address from metadata
-            const ownerBytes = metadataBytes.slice(1, 22); // 21 bytes for address
-            const ownerAddress = new BlockchainAddress(ownerBytes);
-            // Check if this proof belongs to current user
-            if (ownerAddress.asString() === userAddress) {
-              return varEntry.key;
-            }
-          }
-        } catch (error) {
-          console.warn("Error parsing variable metadata:", error);
-        }
-      }
-    }
-    
-    return undefined;
-  } catch (error) {
-    console.error("Error finding refund proof:", error);
-    return undefined;
   }
 };
   
