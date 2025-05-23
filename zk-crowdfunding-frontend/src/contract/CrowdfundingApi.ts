@@ -351,180 +351,219 @@ export class CrowdfundingApi {
     }
   };
 
-  /**
-   * Build and send add contribution transaction with automatic approval
-   * @param displayAmount The contribution amount (e.g., 0.000001)
-   * @param campaignAddress Campaign contract address
-   * @param tokenAddress Token contract address
-   * @returns Transaction result
-   */
-  readonly addContributionWithApproval = async (
-    displayAmount: number,
-    campaignAddress: string, 
-    tokenAddress: string
-  ): Promise<{
-    approvalResult?: TransactionResult,
-    contributionResult: TransactionResult
-  }> => {
-    if (!this.isWalletConnected()) {
+  // In your CrowdfundingApi.ts file, replace the existing addContributionWithApproval method:
+
+/**
+ * Enhanced contribution flow with proper ZK transaction verification
+ */
+readonly addContributionWithApproval = async (
+  displayAmount: number,
+  campaignAddress: string, 
+  tokenAddress: string
+): Promise<{
+  approvalResult?: TransactionResult,
+  contributionResult: TransactionResult
+}> => {
+  
+  console.log(`=== CONTRIBUTION FLOW DEBUG ===`);
+  console.log(`Display amount: ${displayAmount}`);
+  console.log(`Campaign address: ${campaignAddress}`);
+  console.log(`Token address: ${tokenAddress}`);
+  console.log(`Wallet address: ${this.getWalletAddress()}`);
+  
+  if (!this.isWalletConnected()) {
+    throw new CrowdfundingApiError(
+      "Wallet not connected", 
+      "WALLET_NOT_CONNECTED"
+    );
+  }
+  
+  try {
+    // Step 1: Calculate amounts
+    this.validateAmount(displayAmount);
+    const tokenUnits = displayAmountToTokenUnits(displayAmount);
+    const weiAmount = tokenUnitsToWei(tokenUnits);
+    
+    console.log(`Converted amounts: ${displayAmount} -> ${tokenUnits} token units -> ${weiAmount} wei`);
+    
+    // Step 2: Handle token approval if needed
+    console.log(`\n=== TOKEN APPROVAL PHASE ===`);
+    const allowance = await this.getTokenAllowance(tokenAddress, campaignAddress, weiAmount);
+    
+    let approvalResult: TransactionResult | undefined;
+    if (!allowance.sufficientAllowance) {
+      console.log(`Approving ${weiAmount} wei tokens...`);
+      approvalResult = await this.approveTokens(tokenAddress, campaignAddress, weiAmount);
+      const approvalTxId = approvalResult.transaction.transactionPointer?.identifier || "unknown";
+      
+      console.log(`Approval transaction sent: ${approvalTxId}`);
+      
+      // Wait for approval with timeout
+      const approvalConfirmed = await this.waitForTransactionConfirmation(
+        approvalTxId, undefined, 60, "Token approval"
+      );
+      
+      if (!approvalConfirmed) {
+        throw new CrowdfundingApiError("Token approval timeout", "APPROVAL_TIMEOUT");
+      }
+      
+      console.log(`✅ Token approval confirmed`);
+    } else {
+      console.log(`✅ Token allowance already sufficient`);
+    }
+    
+    // Step 3: Submit ZK input transaction
+    console.log(`\n=== ZK INPUT PHASE ===`);
+    
+    const secretInput = AbiBitOutput.serialize((_out) => {
+      _out.writeU32(tokenUnits);
+    });
+    
+    const publicRpc = Buffer.from([0x40]);
+    
+    console.log(`Building ZK transaction with ${tokenUnits} token units...`);
+    
+    const zkTransaction = await this.zkClient.buildOnChainInputTransaction(
+      this.sender,
+      secretInput,
+      publicRpc
+    );
+    
+    console.log(`Sending ZK transaction...`);
+    const zkTx = await this.transactionClient!.signAndSend(zkTransaction, 200000);
+    
+    const zkTxId = zkTx.transactionPointer?.identifier || "unknown";
+    const zkShardId = zkTx.transactionPointer?.destinationShardId || "unknown";
+    
+    console.log(`ZK transaction sent: ${zkTxId} (shard: ${zkShardId})`);
+    
+    // Step 4: Wait for ZK transaction confirmation with extended timeout
+    console.log(`\n=== WAITING FOR ZK CONFIRMATION ===`);
+    const zkConfirmed = await this.waitForTransactionConfirmation(
+      zkTxId, zkShardId, 120, "ZK contribution" // 2 minutes timeout
+    );
+    
+    if (!zkConfirmed) {
       throw new CrowdfundingApiError(
-        "Wallet not connected", 
-        "WALLET_NOT_CONNECTED"
+        `ZK transaction timeout - transaction ${zkTxId} not confirmed`,
+        "ZK_TIMEOUT"
       );
     }
     
+    console.log(`✅ ZK transaction confirmed`);
+    
+    // Step 5: Wait additional time for ZK state propagation
+    console.log(`\n=== WAITING FOR ZK STATE PROPAGATION ===`);
+    console.log(`Waiting 15 seconds for ZK state to propagate across all nodes...`);
+    await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second wait
+    
+    // Step 6: Submit token transfer transaction
+    console.log(`\n=== TOKEN TRANSFER PHASE ===`);
+    
+    const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
+      _out.writeU8(0x09);
+      _out.writeBytes(Buffer.from([0x07]));
+      _out.writeU32(tokenUnits);
+    });
+    
+    console.log(`Sending token transfer transaction with ${tokenUnits} token units...`);
+    
+    const tokenTx = await this.transactionClient!.signAndSend({
+      address: campaignAddress,
+      rpc: contributeTokensRpc
+    }, 200000);
+    
+    const tokenTxId = tokenTx.transactionPointer?.identifier || "unknown";
+    const tokenShardId = tokenTx.transactionPointer?.destinationShardId || "unknown";
+    
+    console.log(`Token transaction sent: ${tokenTxId} (shard: ${tokenShardId})`);
+    
+    // Step 7: Wait for token transaction confirmation
+    console.log(`\n=== WAITING FOR TOKEN CONFIRMATION ===`);
+    const tokenConfirmed = await this.waitForTransactionConfirmation(
+      tokenTxId, tokenShardId, 60, "Token transfer"
+    );
+    
+    if (!tokenConfirmed) {
+      console.warn(`Token transaction timeout - but ZK input was successful`);
+    } else {
+      console.log(`✅ Token transaction confirmed`);
+    }
+    
+    console.log(`\n=== CONTRIBUTION COMPLETE ===`);
+    
+    const contributionResult: TransactionResult = {
+      transaction: zkTx,
+      status: tokenConfirmed ? 'success' : 'pending',
+      metadata: {
+        zkTransaction: { id: zkTxId, shard: zkShardId },
+        tokenTransaction: { id: tokenTxId, shard: tokenShardId },
+        tokenUnits,
+        weiAmount: weiAmount.toString(),
+        displayAmount
+      }
+    };
+    
+    return {
+      approvalResult,
+      contributionResult
+    };
+    
+  } catch (error) {
+    console.error(`\n=== CONTRIBUTION FAILED ===`);
+    console.error("Error details:", error);
+    
+    if (error instanceof CrowdfundingApiError) {
+      throw error;
+    }
+    
+    throw new CrowdfundingApiError(
+      `Contribution failed: ${error.message}`,
+      "CONTRIBUTION_FLOW_FAILED"
+    );
+  }
+};
+
+/**
+ * Wait for transaction confirmation with detailed logging
+ */
+private async waitForTransactionConfirmation(
+  txId: string,
+  shardId: string | undefined,
+  timeoutSeconds: number,
+  transactionType: string
+): Promise<boolean> {
+  
+  const maxAttempts = Math.floor(timeoutSeconds / 3);
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      // Validate inputs and calculate amounts
-      this.validateAmount(displayAmount);
+      const status = await this.checkTransactionStatus(txId, shardId);
       
-      // Convert display amount to internal representations
-      const tokenUnits = displayAmountToTokenUnits(displayAmount);
-      const weiAmount = tokenUnitsToWei(tokenUnits);
-      
-      console.log(`Processing contribution: Display=${displayAmount} -> TokenUnits=${tokenUnits} -> Wei=${weiAmount.toString()}`);
-      
-      // Check current allowance
-      const allowance = await this.getTokenAllowance(
-        tokenAddress,
-        campaignAddress,
-        weiAmount
-      );
-      
-      // If insufficient allowance, first approve tokens
-      let approvalResult: TransactionResult | undefined;
-      if (!allowance.sufficientAllowance) {
-        console.log(`Approving tokens: Required ${weiAmount}, Current ${allowance.currentAllowance}`);
-        
-        // Approve the wei amount for token transfer
-        approvalResult = await this.approveTokens(tokenAddress, campaignAddress, weiAmount);
-        
-        // Wait for approval to be confirmed on chain
-        console.log("Waiting for approval to be processed...");
-        
-        // Get the approval transaction ID for logging/tracking
-        const approvalTxId = approvalResult.transaction?.transactionPointer?.identifier || "unknown";
-        console.log(`Approval transaction ID: ${approvalTxId}`);
-        
-        // Wait longer for approval to be fully confirmed on-chain 
-        await new Promise(resolve => setTimeout(resolve, 20000)); // 20 seconds
-        
-        try {
-          // Verify approval status 
-          const approvalStatus = await this.checkTransactionStatus(approvalTxId);
-          console.log(`Approval transaction status: ${approvalStatus.status}`);
-          
-          if (approvalStatus.status === 'failed') {
-            throw new CrowdfundingApiError(
-              `Token approval failed: ${approvalStatus.errorMessage || 'Unknown error'}`,
-              "APPROVAL_FAILED",
-              approvalTxId
-            );
-          }
-        } catch (statusError) {
-          console.warn("Could not verify approval status, continuing anyway:", statusError);
-        }
-      } else {
-        console.log("Allowance already sufficient, making direct contribution");
+      if (status.status === 'success') {
+        console.log(`✅ ${transactionType} confirmed after ${attempt * 3}s`);
+        return true;
+      } else if (status.status === 'failed') {
+        throw new CrowdfundingApiError(
+          `${transactionType} failed: ${status.errorMessage}`,
+          "TRANSACTION_FAILED"
+        );
       }
       
-      // Now execute the contribution (combining ZK input and token transfer)
-      console.log("Executing contribution...");
-      
-      // Phase 1: Submit ZK input (using raw token units)
-      const secretInput = AbiBitOutput.serialize((_out) => {
-        _out.writeU32(tokenUnits); // Raw token units for ZK computation
-      });
-      
-      // Create public RPC for add_contribution (shortname 0x40)
-      const publicRpc = Buffer.from([0x40]);
-      
-      // Build the ZK input transaction
-      const zkTransaction = await this.zkClient.buildOnChainInputTransaction(
-        this.sender,
-        secretInput,
-        publicRpc
-      );
-      
-      // Send the ZK input transaction with increased gas
-      const zkTx = await this.transactionClient!.signAndSend(
-        zkTransaction, 
-        200000 // Increased gas for ZK operations
-      );
-      
-      // Store ZK transaction details safely with null checks
-      const zkTxId = zkTx.transactionPointer?.identifier || "unknown";
-      const zkShardId = zkTx.transactionPointer?.destinationShardId || null;
-      
-      console.log("ZK transaction sent:", {
-        transactionId: zkTxId,
-        shardId: zkShardId,
-        tokenUnits: tokenUnits,
-        weiAmount: weiAmount.toString()
-      });
-      
-      // Wait for the ZK transaction to be processed by the network
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // Phase 2: Send the token contribution transaction (using raw token units)
-      const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
-        _out.writeU8(0x09); // Format indicator for actions
-        _out.writeBytes(Buffer.from([0x07])); // contribute_tokens shortname
-        _out.writeU32(tokenUnits); // Raw token units (the contract will convert to wei internally)
-      });
-      
-      // Send the token transfer transaction with increased gas
-      const tokenTx = await this.transactionClient!.signAndSend({
-        address: campaignAddress,
-        rpc: contributeTokensRpc
-      }, 200000); // Increased gas for token operations
-      
-      // Store token transaction details safely with null checks
-      const tokenTxId = tokenTx.transactionPointer?.identifier || "unknown";
-      const tokenShardId = tokenTx.transactionPointer?.destinationShardId || null;
-      
-      console.log("Token transaction sent:", {
-        transactionId: tokenTxId,
-        shardId: tokenShardId,
-        tokenUnits: tokenUnits,
-        weiAmount: weiAmount.toString()
-      });
-      
-      // Create the final contribution result
-      const contributionResult: TransactionResult = {
-        transaction: zkTx,
-        status: 'pending',
-        metadata: {
-          zkTransaction: {
-            id: zkTxId,
-            shard: zkShardId
-          },
-          tokenTransaction: {
-            id: tokenTxId,
-            shard: tokenShardId
-          },
-          tokenUnits: tokenUnits,
-          weiAmount: weiAmount.toString(),
-          displayAmount: displayAmount
-        }
-      };
-      
-      // Return both results
-      return {
-        approvalResult,
-        contributionResult
-      };
+      if (attempt % 5 === 0) {
+        console.log(`⏳ ${transactionType} still pending... (${attempt * 3}s / ${timeoutSeconds}s)`);
+      }
       
     } catch (error) {
-      console.error("Error in addContributionWithApproval:", error);
-      if (error instanceof CrowdfundingApiError) {
-        throw error;
-      }
-      throw new CrowdfundingApiError(
-        `Error processing contribution with approval: ${error.message || String(error)}`,
-        "CONTRIBUTION_WITH_APPROVAL_FAILED"
-      );
+      console.log(`⚠️ Error checking ${transactionType} status:`, error.message);
     }
-  };
+    
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  
+  console.log(`❌ ${transactionType} timeout after ${timeoutSeconds}s`);
+  return false;
+}
 
   /**
    * Execute the contribution in two coordinated transactions
