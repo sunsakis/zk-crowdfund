@@ -106,6 +106,7 @@ function initializeElements() {
     campaignResult: document.querySelector("#campaign-result")
   };
 }
+
 /**
  * Safely extract contract state with proper type checking
  * @param contractData Raw contract data from API response
@@ -375,14 +376,14 @@ function contractAddressClick() {
   const address = elements.addressInput.value;
   
   if (!address) {
-    setConnectionStatus("Please enter a campaign contract address");
+    showApplicationMessage("Please enter a campaign contract address");
     return;
   }
   
   // Validate that address is 21 bytes in hexadecimal format
   const regex = /^[0-9A-Fa-f]{42}$/;
   if (address.length != 42 || !regex.test(address)) {
-    setConnectionStatus(`${address} is not a valid Partisia Blockchain address`);
+    showApplicationMessage(`${address} is not a valid Partisia Blockchain address`);
     return;
   }
   
@@ -408,7 +409,7 @@ function contractAddressClick() {
     updateContractState();
   } catch (error) {
     console.error("Error setting contract address:", error);
-    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    showApplicationMessage(`Error: ${error.message || String(error)}`);
   }
 }
 
@@ -501,24 +502,24 @@ async function addContributionFormAction() {
   
   // Test if a user has connected
   if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
+    showApplicationMessage("Please connect your wallet first");
     return;
   }
   
   const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
   if (!contributionInput) {
-    setConnectionStatus("Error: Contribution input field not found");
+    showApplicationMessage("Error: Contribution input field not found");
     return;
   }
 
   const contributionValue = parseFloat(contributionInput.value);
   if (isNaN(contributionValue) || contributionValue <= 0) {
-    setConnectionStatus("Please enter a valid contribution amount greater than 0");
+    showApplicationMessage("Please enter a valid contribution amount greater than 0");
     return;
   }
   
   if (contributionValue < 0.000001 || contributionValue > 1000) {
-    setConnectionStatus("Please enter a contribution amount between 0.000001 and 1000");
+    showApplicationMessage("Please enter a contribution amount between 0.000001 and 1000");
     return;
   }
   
@@ -527,7 +528,7 @@ async function addContributionFormAction() {
   const address = getContractAddress();
   
   if (!api || !address) {
-    setConnectionStatus("API or address not initialized");
+    showApplicationMessage("API or address not initialized");
     return;
   }
   
@@ -553,7 +554,7 @@ async function addContributionFormAction() {
     const { tokenAddress } = safelyExtractContractState(contractData);
     
     // Show processing status
-    setConnectionStatus("Processing contribution...");
+    showApplicationMessage("Processing contribution...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
@@ -708,7 +709,7 @@ async function addContributionFormAction() {
   } catch (error) {
     console.error("Error in contribution process:", error);
     
-    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    showApplicationMessage(`Error: ${error.message || String(error)}`);
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-error">
@@ -748,19 +749,19 @@ function verifyContributionAction() {
   console.log("Verify contribution button clicked");
   
   if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
+    showApplicationMessage("Please connect your wallet first");
     return;
   }
   
   const address = getContractAddress();
   if (!address) {
-    setConnectionStatus("No campaign address found");
+    showApplicationMessage("No campaign address found");
     return;
   }
   
   const api = getCrowdfundingApi();
   if (!api) {
-    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
+    showApplicationMessage("API not initialized. Please try reconnecting your wallet");
     return;
   }
   
@@ -841,7 +842,7 @@ function verifyContributionAction() {
                     </div>
                   `;
                 }
-                setConnectionStatus("Your contribution has been verified successfully");
+                showApplicationMessage("Your contribution has been verified successfully");
               } else {
                 // Transaction failed, meaning no contribution found
                 if (verificationStatusEl) {
@@ -856,7 +857,7 @@ function verifyContributionAction() {
                     </div>
                   `;
                 }
-                setConnectionStatus("No contribution found for your wallet address");
+                showApplicationMessage("No contribution found for your wallet address");
               }
             })
             .catch((error) => {
@@ -929,21 +930,21 @@ async function endCampaignAction() {
   
   // Check if wallet is connected
   if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
+    showApplicationMessage("Please connect your wallet first");
     return;
   }
   
   // Get the campaign address
   const address = getContractAddress();
   if (!address) {
-    setConnectionStatus("No campaign address found");
+    showApplicationMessage("No campaign address found");
     return;
   }
   
   // Get the Crowdfunding API
   const api = getCrowdfundingApi();
   if (!api) {
-    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
+    showApplicationMessage("API not initialized. Please try reconnecting your wallet");
     return;
   }
   
@@ -963,7 +964,7 @@ async function endCampaignAction() {
   
   try {
     // Show processing status
-    setConnectionStatus("Ending campaign and starting ZK computation...");
+    showApplicationMessage("Ending campaign and starting ZK computation...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
@@ -1091,7 +1092,7 @@ async function endCampaignAction() {
   } catch (error) {
     console.error("Error ending campaign:", error);
     
-    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    showApplicationMessage(`Error: ${error.message || String(error)}`);
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-error">
@@ -1136,21 +1137,21 @@ async function withdrawFundsAction() {
   
   // Check if wallet is connected
   if (!isConnected()) {
-    setConnectionStatus("Please connect your wallet first");
+    showApplicationMessage("Please connect your wallet first");
     return;
   }
   
   // Get the campaign address
   const address = getContractAddress();
   if (!address) {
-    setConnectionStatus("No campaign address found");
+    showApplicationMessage("No campaign address found");
     return;
   }
   
   // Get the Crowdfunding API
   const api = getCrowdfundingApi();
   if (!api) {
-    setConnectionStatus("API not initialized. Please try reconnecting your wallet");
+    showApplicationMessage("API not initialized. Please try reconnecting your wallet");
     return;
   }
   
@@ -1170,7 +1171,7 @@ async function withdrawFundsAction() {
   
   try {
     // Show processing status
-    setConnectionStatus("Withdrawing funds...");
+    showApplicationMessage("Withdrawing funds...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
@@ -1261,7 +1262,7 @@ async function withdrawFundsAction() {
   } catch (error) {
     console.error("Error withdrawing funds:", error);
     
-    setConnectionStatus(`Error: ${error.message || String(error)}`);
+    showApplicationMessage(`Error: ${error.message || String(error)}`);
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-error">
@@ -1311,10 +1312,13 @@ export function updateWalletUI(address?: string) {
     if (elements.walletAddressDisplay) {
       elements.walletAddressDisplay.textContent = address;
     }
+    // Update connection status to show connected wallet
+    setWalletConnectionStatus(`Connected: ${address}`);
   } else {
     // Disconnected state
     if (walletConnectSection) walletConnectSection.classList.remove("hidden");
     if (walletDisconnectSection) walletDisconnectSection.classList.add("hidden");
+    setWalletConnectionStatus("Currently not logged in.");
   }
 }
 
@@ -1547,13 +1551,30 @@ export function updateCampaignResult(isSuccessful: boolean, totalRaised: number,
  }
 }
 
-// Helper function to set connection status
-function setConnectionStatus(status: string) {
- console.log("Status update:", status);
- const statusElement = document.querySelector("#connection-status p");
- if (statusElement) {
-   statusElement.textContent = status;
- }
+// FIXED: Separate wallet connection status from general application messages
+function setWalletConnectionStatus(status: string) {
+  console.log("Wallet connection status update:", status);
+  const statusElement = document.querySelector("#connection-status p");
+  if (statusElement) {
+    statusElement.textContent = status;
+  }
+}
+
+// NEW: Separate function for general application messages
+function showApplicationMessage(message: string) {
+  console.log("Application message:", message);
+  // Show in a temporary notification area or console only
+  // Don't overwrite the wallet connection status
+  
+  // You could create a separate message area for these if needed
+  const messageArea = document.querySelector("#application-messages");
+  if (messageArea) {
+    messageArea.textContent = message;
+    // Auto-clear after 5 seconds
+    setTimeout(() => {
+      messageArea.textContent = "";
+    }, 5000);
+  }
 }
 
 // Helper function to show error messages

@@ -12,9 +12,9 @@ import { deserializeState, CampaignStatus } from "./contract/CrowdfundingGenerat
 import { connectPrivateKey } from "./shared/PrivateKeySignatureProvider";
 
 /**
- * Set connection status
+ * Set wallet connection status only (don't use for general messages)
  */
-const setConnectionStatus = (status: string) => {
+const setWalletConnectionStatus = (status: string) => {
   const statusText = document.querySelector("#connection-status p");
   if (statusText != null) {
     statusText.innerHTML = status;
@@ -85,7 +85,7 @@ export const connectPrivateKeyWalletClick = (privateKeyValue?: string) => {
   
   if (!privateKeyInput) {
     console.error("No private key provided");
-    setConnectionStatus("Error: No private key provided");
+    setWalletConnectionStatus("Error: No private key provided");
     return;
   }
   
@@ -95,7 +95,7 @@ export const connectPrivateKeyWalletClick = (privateKeyValue?: string) => {
     handleWalletConnect(connectPrivateKey(sender, keyPair));
   } catch (error) {
     console.error("Error connecting with private key:", error);
-    setConnectionStatus(`Error connecting wallet: ${error.message || error}`);
+    setWalletConnectionStatus(`Error connecting wallet: ${error.message || error}`);
   }
 };
 
@@ -104,13 +104,14 @@ export const connectPrivateKeyWalletClick = (privateKeyValue?: string) => {
  */
 const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
   resetAccount();
-  setConnectionStatus("Connecting...");
+  setWalletConnectionStatus("Connecting...");
   connect
     .then((userAccount) => {
       setAccount(userAccount);
 
-      // Fix UI
-      setConnectionStatus(`Logged in: ${userAccount.getAddress()}`);
+      // Fix UI - set the connection status and keep it
+      const address = userAccount.getAddress();
+      setWalletConnectionStatus(`Connected: ${address}`);
       toggleVisibility("#private-key-connect");
       toggleVisibility("#wallet-disconnect");
       updateInteractionVisibility();
@@ -122,9 +123,9 @@ const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
     })
     .catch((error) => {
       if (error && typeof error === 'object' && 'message' in error) {
-        setConnectionStatus(error.message as string);
+        setWalletConnectionStatus(error.message as string);
       } else {
-        setConnectionStatus("An error occurred trying to connect wallet: " + error);
+        setWalletConnectionStatus("An error occurred trying to connect wallet: " + error);
       }
     });
 };
@@ -134,7 +135,7 @@ const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
  */
 export const disconnectWalletClick = () => {
   resetAccount();
-  setConnectionStatus("Disconnected account");
+  setWalletConnectionStatus("Currently not logged in.");
   toggleVisibility("#private-key-connect");
   toggleVisibility("#wallet-disconnect");
   updateInteractionVisibility();
@@ -253,10 +254,10 @@ function updateUIWithContractState(state, variables) {
     const ownerValue = <HTMLElement>document.querySelector("#owner-value");
     if (ownerValue && state.owner) {
       try {
-        ownerValue.innerHTML = `Project Owner: ${state.owner.asString()}`;
+        ownerValue.innerHTML = `${state.owner.asString()}`;
       } catch (error) {
         console.error("Error displaying owner address:", error);
-        ownerValue.innerHTML = `Project Owner: Unknown`;
+        ownerValue.innerHTML = `Unknown`;
       }
     }
     
@@ -276,27 +277,27 @@ function updateUIWithContractState(state, variables) {
     const statusValue = <HTMLElement>document.querySelector("#status-value");
     if (statusValue && typeof state.status !== 'undefined') {
       const statusText = CampaignStatus[state.status] || "Unknown";
-      statusValue.innerHTML = `Status: <span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
+      statusValue.innerHTML = `<span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
     }
     
     // Update funding target
     const fundingTargetValue = <HTMLElement>document.querySelector("#funding-target-value");
     if (fundingTargetValue) {
-      fundingTargetValue.innerHTML = `Funding Target: ${state.fundingTarget || "Not set"}`;
+      fundingTargetValue.innerHTML = `${state.fundingTarget || "Not set"}`;
     }
     
     // Update deadline if present
     const deadlineValue = <HTMLElement>document.querySelector("#deadline-value");
     if (deadlineValue && typeof state.deadline !== 'undefined') {
       if (state.deadline === 0) {
-        deadlineValue.innerHTML = `Deadline: No deadline set`;
+        deadlineValue.innerHTML = `No deadline set`;
       } else {
         try {
           const deadlineDate = new Date(state.deadline);
-          deadlineValue.innerHTML = `Deadline: ${deadlineDate.toLocaleString()}`;
+          deadlineValue.innerHTML = `${deadlineDate.toLocaleString()}`;
         } catch (error) {
           console.error("Error formatting deadline:", error);
-          deadlineValue.innerHTML = `Deadline: ${state.deadline}`;
+          deadlineValue.innerHTML = `${state.deadline}`;
         }
       }
     }
@@ -304,7 +305,7 @@ function updateUIWithContractState(state, variables) {
     // Update contributors
     const numContributors = <HTMLElement>document.querySelector("#num-contributors");
     if (numContributors) {
-      numContributors.innerHTML = `Number of Contributors: ${state.numContributors ?? contributionCount}`;
+      numContributors.innerHTML = `${state.numContributors ?? contributionCount}`;
     }
     
     // Update total raised
@@ -313,7 +314,7 @@ function updateUIWithContractState(state, variables) {
       const totalRaisedText = state.totalRaised !== undefined && state.totalRaised !== null
         ? state.totalRaised.toString()
         : "Not yet revealed";
-      totalRaised.innerHTML = `Total Raised: ${totalRaisedText}`;
+      totalRaised.innerHTML = `${totalRaisedText}`;
     }
     
     // Update campaign result
@@ -321,7 +322,7 @@ function updateUIWithContractState(state, variables) {
     if (campaignResult) {
       if (state.status === CampaignStatus.Completed) {
         const resultClass = state.isSuccessful ? "result-success" : "result-failure";
-        campaignResult.innerHTML = `Campaign Result: <span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
+        campaignResult.innerHTML = `<span class="result-indicator ${resultClass}">${state.isSuccessful ? "Successful" : "Failed"}</span>`;
         
         // Show the campaign result container when completed
         const campaignResultContainer = <HTMLElement>document.querySelector("#campaign-result-container");
@@ -335,7 +336,7 @@ function updateUIWithContractState(state, variables) {
           }
         }
       } else {
-        campaignResult.innerHTML = "Campaign Result: Not yet determined";
+        campaignResult.innerHTML = "Not yet determined";
       }
     }
   } catch (error) {

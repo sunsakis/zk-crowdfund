@@ -16,11 +16,16 @@
         <p>Privacy-preserving crowdfunding with threshold-based reveal using zero-knowledge proofs on Partisia Blockchain</p>
       </header>
 
+      <!-- Application Messages (for temporary status updates) -->
+      <div id="application-messages" class="alert alert-info hidden" style="margin-bottom: 1rem;">
+        <!-- Temporary messages appear here and auto-clear -->
+      </div>
+
       <!-- Address & Login Card -->
       <div class="card">
         <h2 class="card-title">Connect Your Wallet</h2>
 
-        <!-- Connection Status -->
+        <!-- Connection Status (ONLY for wallet connection state) -->
         <div id="connection-status" class="mb-4">
           <p>Currently not logged in.</p>
         </div>
@@ -178,6 +183,18 @@
           <div id="withdraw-funds-transaction-link" class="transaction-info hidden">
             <span class="transaction-hash" id="withdraw-funds-tx-hash"></span>
             <a href="#" class="transaction-link" id="withdraw-funds-tx-link" target="_blank">View in Explorer</a>
+          </div>
+        </div>
+
+        <!-- Verification Section -->
+        <div id="verification-section" class="card hidden">
+          <h2 class="card-title">Verify Your Contribution</h2>
+          <p class="action-description">Check if your contribution was included in the campaign without revealing the amount.</p>
+          
+          <button id="verify-contribution-btn" class="btn btn-primary btn-full">Verify My Contribution</button>
+          
+          <div id="verification-status">
+            <!-- Verification results will appear here -->
           </div>
         </div>
       </div>
