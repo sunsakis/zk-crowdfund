@@ -14,7 +14,7 @@ use pbc_contract_common::address::ShortnameCallback;
 use pbc_contract_common::zk::{CalculationStatus, SecretVarId, ZkInputDef, ZkState, ZkStateChange};
 use pbc_contract_common::address::Shortname;
 use pbc_contract_common::shortname::{ShortnameZkComputation, ShortnameZkComputeComplete};
-use pbc_zk::Sbu128;
+use pbc_zk::Sbu32; // Changed from Sbu128 to Sbu32 for consistency
 use read_write_rpc_derive::ReadWriteRPC;
 use read_write_state_derive::ReadWriteState;
 use create_type_spec_derive::CreateTypeSpec;
@@ -47,7 +47,6 @@ enum CampaignStatus {
 }
 
 /// Get current campaign state with privacy-preserving information
-/// For external view functions
 #[action(shortname = 0x10, zk = true)]
 fn get_campaign_info(
     _context: ContractContext,
@@ -68,16 +67,15 @@ fn get_campaign_info(
 }
 
 /// Public campaign information structure
-/// Used for privacy-preserving external views
 #[derive(ReadWriteState, ReadWriteRPC, Debug, Clone, CreateTypeSpec)]
 struct CampaignPublicInfo {
     owner: Address,
     title: String,
     description: String,
     token_address: Address,
-    funding_target: u128,
+    funding_target: u32, // Changed to u32 - raw token units
     status: CampaignStatus,
-    total_raised: Option<u128>,
+    total_raised: Option<u32>, // Changed to u32 - raw token units  
     num_contributors: Option<u32>,
     is_successful: bool,
 }
@@ -93,13 +91,13 @@ struct ContractState {
     description: String,
     /// Token contract address
     token_address: Address,
-    /// Funding target (threshold to reveal total and release funds)
-    funding_target: u128,
+    /// Funding target in raw token units (1 = 1 token unit = 0.000001 display)
+    funding_target: u32,
     /// Current status of the crowdfunding campaign
     status: CampaignStatus,
-    /// Will contain the total raised amount when computation is complete (in token units)
+    /// Total raised in raw token units (1 = 1 token unit = 0.000001 display)
     /// Only revealed if campaign is successful
-    total_raised: Option<u128>,
+    total_raised: Option<u32>,
     /// Number of contributors
     num_contributors: Option<u32>,
     /// Whether the campaign was successful (reached funding target)
@@ -117,6 +115,20 @@ const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
 const SUM_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x42;
 const ZK_COMPUTATION_SHORTNAME: u32 = 0x61;
 
+/// Conversion factor: 1 token unit = 1e18 wei (18 decimals)
+const TOKEN_DECIMALS: u32 = 18;
+const WEI_PER_TOKEN_UNIT: u128 = 1_000_000_000_000; // 1e18
+
+/// Convert raw token units to wei for blockchain transfers
+fn token_units_to_wei(token_units: u32) -> u128 {
+    (token_units as u128) * WEI_PER_TOKEN_UNIT
+}
+
+/// Convert wei to raw token units (for internal storage)
+fn wei_to_token_units(wei: u128) -> u32 {
+    (wei / WEI_PER_TOKEN_UNIT) as u32
+}
+
 /// Initializes contract - starts directly in Active state
 #[init(zk = true)]
 fn initialize(
@@ -125,7 +137,7 @@ fn initialize(
     title: String,
     description: String,
     token_address: Address,
-    funding_target: u128,
+    funding_target: u32, // Raw token units
 ) -> ContractState {
     // Validate inputs
     assert!(!title.is_empty(), "Title cannot be empty");
@@ -137,7 +149,7 @@ fn initialize(
         title,
         description,
         token_address,
-        funding_target,
+        funding_target, // Store as raw token units
         status: CampaignStatus::Active {},
         total_raised: None,
         num_contributors: None,
@@ -147,7 +159,7 @@ fn initialize(
 }
 
 /// Add a contribution as a secret input
-/// The contribution amount will be provided as the secret value
+/// The contribution amount will be provided as the secret value in raw token units
 #[zk_on_secret_input(shortname = 0x40)]
 fn add_contribution(
     context: ContractContext,
@@ -156,7 +168,7 @@ fn add_contribution(
 ) -> (
     ContractState,
     Vec<EventGroup>,
-    ZkInputDef<SecretVarType, Sbu128>,
+    ZkInputDef<SecretVarType, Sbu32>, // Changed to Sbu32
 ) {
     // Check campaign status
     assert_eq!(
@@ -183,7 +195,7 @@ fn contribute_tokens(
     context: ContractContext,
     state: ContractState,
     zk_state: ZkState<SecretVarType>,
-    amount: u128,
+    amount: u32, // Raw token units
 ) -> (ContractState, Vec<EventGroup>) {
     // Check campaign status
     assert_eq!(
@@ -203,19 +215,22 @@ fn contribute_tokens(
     
     assert!(has_contribution, "Must create contribution commitment first");
     
+    // Convert raw token units to wei for the actual transfer
+    let wei_amount = token_units_to_wei(amount);
+    
     // Create token transfer event group
     let mut event_group = EventGroup::builder();
     
-    // Create token transfer call with the specified amount
+    // Create token transfer call with the wei amount
     event_group.call(state.token_address, Shortname::from_u32(TOKEN_TRANSFER_FROM_SHORTNAME as u32))
         .argument(context.sender)
         .argument(context.contract_address)
-        .argument(amount)
+        .argument(wei_amount) // Use wei amount for actual transfer
         .done();
     
     // Add callback to verify the token transfer succeeded
     event_group.with_callback(ShortnameCallback::from_u32(CONTRIBUTION_CALLBACK_SHORTNAME))
-        .argument(amount)
+        .argument(amount) // Pass raw token units to callback
         .done();
     
     (state, vec![event_group.build()])
@@ -228,7 +243,7 @@ fn contribute_callback(
     callback_ctx: CallbackContext,
     state: ContractState,
     _zk_state: ZkState<SecretVarType>,
-    _amount: u128, // Prefixed with underscore to indicate intentionally unused
+    _amount: u32, // Raw token units
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     // If token transfer failed, panic to revert the transaction
     if !callback_ctx.success {
@@ -343,15 +358,15 @@ fn open_sum_variable(
         
         // Extract the actual sum value from the opened variable data
         if let Some(sum_data) = &sum_variable.data {
-            // The sum is stored as u128 in the opened data (16 bytes, little-endian)
-            if sum_data.len() >= 16 {
-                let sum_bytes: [u8; 16] = sum_data[0..16].try_into().unwrap_or([0u8; 16]);
-                let sum_value = u128::from_le_bytes(sum_bytes);
+            // The sum is stored as u32 in the opened data (4 bytes, little-endian)
+            if sum_data.len() >= 4 {
+                let sum_bytes: [u8; 4] = sum_data[0..4].try_into().unwrap_or([0u8; 4]);
+                let sum_value = u32::from_le_bytes(sum_bytes);
                 
                 // Transition to Completed state
                 state.status = CampaignStatus::Completed {};
                 
-                // Check if funding target was reached
+                // Check if funding target was reached (both in raw token units)
                 if sum_value >= state.funding_target {
                     state.is_successful = true;
                     state.total_raised = Some(sum_value);
@@ -421,13 +436,10 @@ fn balance_callback(
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     assert!(callback_ctx.success, "Balance check failed");
     
-    // Extract the balance from the callback results
-    let balance: u128 = if !callback_ctx.results.is_empty() {
-        // Get the first result and extract the return data
+    // Extract the balance from the callback results (in wei)
+    let wei_balance: u128 = if !callback_ctx.results.is_empty() {
         let return_data = &callback_ctx.results[0].return_data;
         
-        // Parse the return data as u128 (assuming the token contract returns balance as u128)
-        // The exact parsing method depends on how the token contract serializes the return value
         if return_data.len() >= 16 {
             // Read as little-endian u128 (16 bytes)
             let balance_bytes: [u8; 16] = return_data[0..16].try_into().unwrap_or([0u8; 16]);
@@ -451,16 +463,19 @@ fn balance_callback(
     assert!(!state.funds_withdrawn, "Funds have already been withdrawn");
     
     // Ensure there are funds to withdraw
-    assert!(balance > 0, "No funds to withdraw");
+    assert!(wei_balance > 0, "No funds to withdraw");
     
     // Create token transfer event to owner
     let mut events = Vec::new();
     
     // For successful campaigns, only withdraw the revealed amount
-    // For unsuccessful campaigns, withdraw the full balance (for refunds)
-    let withdraw_amount = if state.is_successful {
-        // Withdraw only up to the revealed total
-        std::cmp::min(balance, state.total_raised.unwrap_or(0))
+    let withdraw_amount_wei = if state.is_successful {
+        // Convert revealed total from token units to wei and withdraw that amount
+        let revealed_token_units = state.total_raised.unwrap_or(0);
+        let target_wei = token_units_to_wei(revealed_token_units);
+        
+        // Withdraw the minimum of actual balance and target amount
+        std::cmp::min(wei_balance, target_wei)
     } else {
         // For unsuccessful campaigns, the owner shouldn't withdraw
         // This should be handled by individual refunds
@@ -472,7 +487,7 @@ fn balance_callback(
     let mut event_group = EventGroup::builder();
     event_group.call(state.token_address, transfer_shortname)
         .argument(state.owner)
-        .argument(withdraw_amount)
+        .argument(withdraw_amount_wei) // Transfer in wei
         .done();
     
     events.push(event_group.build());
@@ -501,12 +516,6 @@ fn withdraw_funds(
     assert_eq!(
         state.status, CampaignStatus::Completed {},
         "Campaign must be completed before withdrawing"
-    );
-    
-    // Verify campaign was successful
-    assert!(
-        state.is_successful,
-        "Can only withdraw from successful campaigns"
     );
     
     // Prevent double withdrawal

@@ -25,6 +25,22 @@ import {
 
 type Option<K> = K | undefined;
 
+/**
+ * Convert raw token units to display amount
+ * Raw units: 1 -> Display: 0.000001
+ */
+function tokenUnitsToDisplayAmount(tokenUnits: number): number {
+  return tokenUnits / 1_000_000;
+}
+
+/**
+ * Convert display amount to raw token units  
+ * Display: 0.000001 -> Raw units: 1
+ */
+function displayAmountToTokenUnits(displayAmount: number): number {
+  return Math.round(displayAmount * 1_000_000);
+}
+
 // CampaignStatus enum - This needs to be exported directly for compatibility with existing code
 export enum CampaignStatus {
   Active = 0,
@@ -85,13 +101,19 @@ export class CrowdfundingGenerated {
         tokenAddress = new BlockchainAddress(Buffer.alloc(21));
       }
       
-      // Read funding target - support both BN and number formats
-      let fundingTarget: BN | number;
+      // Read funding target as u32 (raw token units)
+      let fundingTarget: number;
       try {
-        fundingTarget = _input.readUnsignedBigInteger(16);
-      } catch (error) {
-        console.warn("Could not read funding target as BN, trying as u32");
         fundingTarget = _input.readU32();
+      } catch (error) {
+        console.warn("Could not read funding target as u32, trying as BN");
+        try {
+          const bn = _input.readUnsignedBigInteger(16);
+          fundingTarget = bn.toNumber();
+        } catch (bnError) {
+          console.warn("Could not read funding target, defaulting to 0");
+          fundingTarget = 0;
+        }
       }
       
       // Read status - support both discriminant object and direct enum value
@@ -104,17 +126,22 @@ export class CrowdfundingGenerated {
         status = _input.readU8();
       }
       
-      // Read total raised
-      let totalRaised: Option<BN | number> = undefined;
+      // Read total raised as u32 (raw token units)
+      let totalRaised: Option<number> = undefined;
       const totalRaised_isSome = _input.readBoolean();
       if (totalRaised_isSome) {
         try {
-          const totalRaised_option: BN = _input.readUnsignedBigInteger(16);
-          totalRaised = totalRaised_option;
-        } catch (error) {
-          console.warn("Could not read totalRaised as BN, trying as u32");
           const totalRaised_option: number = _input.readU32();
           totalRaised = totalRaised_option;
+        } catch (error) {
+          console.warn("Could not read totalRaised as u32, trying as BN");
+          try {
+            const totalRaised_bn: BN = _input.readUnsignedBigInteger(16);
+            totalRaised = totalRaised_bn.toNumber();
+          } catch (bnError) {
+            console.warn("Could not read totalRaised, setting to undefined");
+            totalRaised = undefined;
+          }
         }
       }
       
@@ -128,6 +155,15 @@ export class CrowdfundingGenerated {
       
       // Read success flag
       const isSuccessful: boolean = _input.readBoolean();
+      
+      // Read funds_withdrawn flag
+      let fundsWithdrawn: boolean = false;
+      try {
+        fundsWithdrawn = _input.readBoolean();
+      } catch (error) {
+        console.warn("Could not read funds_withdrawn, defaulting to false");
+        fundsWithdrawn = false;
+      }
       
       // Read contributions map if it exists
       let contributions: AvlTreeMap<BlockchainAddress, BN> | undefined;
@@ -162,11 +198,12 @@ export class CrowdfundingGenerated {
         description,
         tokenAddress,   // For auto-generated format
         token_address: tokenAddress, // For manual format compatibility
-        fundingTarget, 
+        fundingTarget, // Raw token units
         status, 
-        totalRaised, 
+        totalRaised, // Raw token units
         numContributors, 
         isSuccessful,
+        fundsWithdrawn,
         contributions
       };
     } catch (error) {
@@ -220,11 +257,12 @@ export interface ContractState {
   description: string;
   tokenAddress: BlockchainAddress;        // Auto-generated field name
   token_address: BlockchainAddress;       // Manual version field name
-  fundingTarget: BN | number;             // Support both formats
+  fundingTarget: number;                  // Raw token units (u32)
   status: CampaignStatus;                 // Use the simple enum
-  totalRaised: Option<BN | number>;       // Support both formats
+  totalRaised: Option<number>;            // Raw token units (u32)
   numContributors: Option<number>;
   isSuccessful: boolean;
+  fundsWithdrawn?: boolean;               // Optional for backward compatibility
   contributions?: AvlTreeMap<BlockchainAddress, BN>; // Optional for compatibility
 }
 
@@ -232,20 +270,14 @@ export function initialize(
   title: string, 
   description: string, 
   tokenAddress: BlockchainAddress, 
-  fundingTarget: BN | number
+  fundingTarget: number // Raw token units
 ): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeBytes(Buffer.from("ffffffff0f", "hex"));
     _out.writeString(title);
     _out.writeString(description);
     _out.writeAddress(tokenAddress);
-    
-    // Handle both number and BN formats
-    if (typeof fundingTarget === 'number') {
-      _out.writeU32(fundingTarget);
-    } else {
-      _out.writeUnsignedBigInteger(fundingTarget, 16);
-    }
+    _out.writeU32(fundingTarget); // Raw token units
   });
 }
 
@@ -277,17 +309,11 @@ export function verifyMyContribution(): Buffer {
   });
 }
 
-export function contributeTokens(amount: BN | number): Buffer {
+export function contributeTokens(amount: number): Buffer { // Raw token units
   return AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeU8(0x09);
     _out.writeBytes(Buffer.from("07", "hex"));
-    
-    // Handle both number and BN formats
-    if (typeof amount === 'number') {
-      _out.writeU32(amount);
-    } else {
-      _out.writeUnsignedBigInteger(amount, 16);
-    }
+    _out.writeU32(amount); // Raw token units
   });
 }
 
@@ -298,7 +324,7 @@ export function addContribution(): SecretInputBuilder<number> {
   
   const _secretInput = (secret_input_lambda: number): any => {
     return AbiBitOutput.serialize((_out) => {
-      _out.writeI32(secret_input_lambda);
+      _out.writeU32(secret_input_lambda); // Raw token units as u32
     });
   };
   
@@ -334,4 +360,20 @@ export function deserializeState(
     console.error("Error deserializing state:", error);
     throw new Error(`Failed to deserialize state: ${error.message}`);
   }
+}
+
+/**
+ * Helper function to convert contract state values to display format
+ * @param state Contract state with raw token units
+ * @returns Contract state with display amounts
+ */
+export function stateToDisplayFormat(state: ContractState): ContractState & {
+  fundingTargetDisplay: number;
+  totalRaisedDisplay?: number;
+} {
+  return {
+    ...state,
+    fundingTargetDisplay: tokenUnitsToDisplayAmount(state.fundingTarget),
+    totalRaisedDisplay: state.totalRaised ? tokenUnitsToDisplayAmount(state.totalRaised) : undefined,
+  };
 }

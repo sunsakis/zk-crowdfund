@@ -5,11 +5,27 @@ import {
   updateInteractionVisibility,
 } from "./WalletIntegration";
 import './App.css';
-import { deserializeState, CampaignStatus } from "./contract/CrowdfundingGenerated";
+import { deserializeState, CampaignStatus, stateToDisplayFormat } from "./contract/CrowdfundingGenerated";
 
 // ============================================================================
 // Update the DOMElements interface in Main.ts
 // ============================================================================
+
+/**
+ * Convert raw token units to display amount
+ * Raw units: 1 -> Display: 0.000001
+ */
+function tokenUnitsToDisplayAmount(tokenUnits: number): number {
+  return tokenUnits / 1_000_000;
+}
+
+/**
+ * Convert display amount to raw token units  
+ * Display: 0.000001 -> Raw units: 1
+ */
+function displayAmountToTokenUnits(displayAmount: number): number {
+  return Math.round(displayAmount * 1_000_000);
+}
 
 // DOM Elements cache
 interface DOMElements {
@@ -518,8 +534,9 @@ async function addContributionFormAction() {
     return;
   }
   
-  if (contributionValue < 0.000001 || contributionValue > 1000) {
-    showApplicationMessage("Please enter a contribution amount between 0.000001 and 1000");
+  // Updated validation limits for the new scaling
+  if (contributionValue < 0.000001 || contributionValue > 2147.483647) {
+    showApplicationMessage("Please enter a contribution amount between 0.000001 and 2147.483647");
     return;
   }
   
@@ -563,6 +580,10 @@ async function addContributionFormAction() {
         </div>
       `;
     }
+    
+    // Convert to token units for display
+    const tokenUnits = displayAmountToTokenUnits(contributionValue);
+    console.log(`Converting contribution: Display=${contributionValue} -> TokenUnits=${tokenUnits}`);
     
     // Use the combined method that handles both approval and contribution
     const result = await api.addContributionWithApproval(contributionValue, address, tokenAddress);
@@ -610,6 +631,7 @@ async function addContributionFormAction() {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
           <p>Contribution submitted successfully!</p>
+          <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
           <p class="transaction-hash">Transaction ID: ${primaryTxId}</p>
           <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
              class="transaction-link" target="_blank">View in Explorer</a>
@@ -640,6 +662,7 @@ async function addContributionFormAction() {
           transactionLinkContainer.innerHTML = `
             <div class="alert alert-success">
               <p>Contribution successful!</p>
+              <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
               <p class="transaction-hash">Transaction ID: ${txId}</p>
               <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
                  class="transaction-link" target="_blank">View in Explorer</a>
@@ -1344,49 +1367,7 @@ function countContributions(variables) {
 }
 
 /**
- * Helper function to format token amounts with proper decimal handling
- * @param {string|number} rawAmount - The raw token amount from contract
- * @param {number} [tokenDecimals=18] - The number of decimals used by the token
- * @param {number} [zkScaleFactor=1000000] - The scaling factor used in ZK computation
- * @returns {string} Formatted token amount string
- */
-function formatTokenAmount(rawAmount, tokenDecimals = 18, zkScaleFactor = 1000000, isFundingTarget = false) {
-  if (!rawAmount || rawAmount === "0") return "0";
-  
-  // Convert to number/bigint for calculation
-  const amountValue = typeof rawAmount === 'string' ? Number(rawAmount) : rawAmount;
-  
-  // For funding targets, don't apply scaling - just return the raw value
-  if (isFundingTarget) {
-    return amountValue.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 6
-    });
-  }
-  
-  // If the value is very large (indicating it's in token base units with 18 decimals)
-  if (amountValue > 1000000000000) {
-    // Convert from base units to a readable format
-    const divisor = Math.pow(10, tokenDecimals);
-    const amountInTokens = amountValue / divisor;
-    
-    return amountInTokens.toLocaleString(undefined, { 
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 6
-    });
-  } else {
-    // Otherwise, it's likely the ZK scaled value (using 6 decimals)
-    const amountFromZk = amountValue / zkScaleFactor;
-    
-    return amountFromZk.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 6 
-    });
-  }
-}
-
-/**
- * Enhanced function to update UI with contract state - improved token display
+ * Enhanced function to update UI with contract state - improved display formatting
  * @param {Object} state - The deserialized contract state
  * @param {Array} variables - The contract variables array
  */
@@ -1425,11 +1406,14 @@ function updateUIWithContractState(state, variables) {
       statusValue.innerHTML = `<span class="badge badge-${statusText.toLowerCase()}">${statusText}</span>`;
     }
     
-    // Update funding target - format with proper decimals
+    // Update funding target - convert from raw token units to display amount
     const fundingTargetValue = document.querySelector("#funding-target-value");
     if (fundingTargetValue) {
-      const formattedTarget = formatTokenAmount(state.fundingTarget);
-      fundingTargetValue.innerHTML = `${formattedTarget}`;
+      const displayTarget = tokenUnitsToDisplayAmount(state.fundingTarget || 0);
+      fundingTargetValue.innerHTML = `${displayTarget.toLocaleString(undefined, {
+        minimumFractionDigits: 6,
+        maximumFractionDigits: 6
+      })}`;
     }
     
     // Update contributors
@@ -1441,10 +1425,13 @@ function updateUIWithContractState(state, variables) {
     // Update total raised - with improved formatting
     const totalRaised = document.querySelector("#total-raised");
     if (totalRaised) {
-      if (state.status === CampaignStatus.Completed && state.isSuccessful) {
+      if (state.status === CampaignStatus.Completed && state.isSuccessful && state.totalRaised !== undefined) {
         // For completed successful campaigns, show the formatted amount
-        const formattedAmount = formatTokenAmount(state.totalRaised);
-        totalRaised.innerHTML = `${formattedAmount}`;
+        const displayAmount = tokenUnitsToDisplayAmount(state.totalRaised);
+        totalRaised.innerHTML = `${displayAmount.toLocaleString(undefined, {
+          minimumFractionDigits: 6,
+          maximumFractionDigits: 6
+        })}`;
       } else if (state.status === CampaignStatus.Completed) {
         // For completed unsuccessful campaigns
         totalRaised.innerHTML = `<span class="text-yellow-600">Not revealed (threshold not met)</span>`;
@@ -1476,6 +1463,16 @@ function updateUIWithContractState(state, variables) {
         campaignResult.innerHTML = "Not yet determined";
       }
     }
+    
+    // Log the state for debugging with conversions
+    console.log("Contract state display info:", {
+      fundingTargetRaw: state.fundingTarget,
+      fundingTargetDisplay: tokenUnitsToDisplayAmount(state.fundingTarget || 0),
+      totalRaisedRaw: state.totalRaised,
+      totalRaisedDisplay: state.totalRaised ? tokenUnitsToDisplayAmount(state.totalRaised) : undefined,
+      status: state.status,
+      isSuccessful: state.isSuccessful
+    });
   } catch (error) {
     console.error("Error updating UI with contract state:", error);
     showErrorMessage(`Error updating UI: ${error.message}`);

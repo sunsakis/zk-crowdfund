@@ -135,20 +135,32 @@
             <div class="input-group">
               <label for="contribution">Contribution Amount</label>
               <div class="d-flex gap-2">
-                <!-- Support decimal values with proper information -->
-                <input id="contribution" name="contribution" type="number" step="0.000001" min="0.000001" max="2147.48" 
-                       placeholder="Enter amount (e.g. 0.1)" />
+                <!-- Updated limits based on new scaling -->
+                <input id="contribution" name="contribution" type="number" step="0.000001" min="0.000001" max="2147.483647" 
+                       placeholder="Enter amount (e.g. 0.000001)" />
                 <button id="add-contribution-btn" type="submit" class="btn btn-primary">Contribute</button>
               </div>
-              <small class="text-muted">Enter decimal values between 0.000001 and 2147.48 tokens.</small>
+              <small class="text-muted">Enter decimal values between 0.000001 and 2147.483647 tokens.</small>
               <div class="mt-2 p-2 bg-light rounded">
                 <details>
-                  <summary class="text-primary cursor-pointer">About contribution limits</summary>
-                  <p class="mt-2 text-sm">
-                    Due to technical constraints in the ZK computation, individual contributions are limited to 
-                    approximately 2,147 tokens with 6 decimal places of precision. The minimum contribution is 0.000001 tokens.
-                    Larger contributions can be made through multiple smaller transactions.
-                  </p>
+                  <summary class="text-primary cursor-pointer">About contribution limits and scaling</summary>
+                  <div class="mt-2 text-sm">
+                    <p><strong>Scaling System:</strong></p>
+                    <ul class="list-disc pl-4 mt-1">
+                      <li><strong>Display:</strong> What you see (e.g., 0.000001)</li>
+                      <li><strong>Token Units:</strong> Internal storage (e.g., 1 unit)</li>
+                      <li><strong>Wei:</strong> Blockchain transfer (e.g., 1 × 10¹⁸ wei)</li>
+                    </ul>
+                    <p class="mt-2">
+                      <strong>Example:</strong> When you enter "0.000001", this represents 1 token unit internally 
+                      and 1,000,000,000,000,000,000 wei for blockchain transfers.
+                    </p>
+                    <p class="mt-2">
+                      <strong>Limits:</strong> Individual contributions are limited to approximately 2,147 tokens 
+                      with 6 decimal places of precision due to computational constraints.
+                      The minimum contribution is 0.000001 tokens (1 token unit).
+                    </p>
+                  </div>
                 </details>
               </div>
             </div>
