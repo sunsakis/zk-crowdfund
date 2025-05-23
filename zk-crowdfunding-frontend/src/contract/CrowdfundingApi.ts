@@ -359,7 +359,7 @@ export class CrowdfundingApi {
     }
   };
 
- /**
+/**
  * Build and send add contribution transaction with automatic approval
  * @param amount The contribution amount (floating point)
  * @param campaignAddress Campaign contract address
@@ -400,9 +400,6 @@ readonly addContributionWithApproval = async (
     
     // Combine and convert to BigInt
     const tokenAmount = BigInt(wholePart + paddedFractionalPart);
-    
-    // Convert the ZK amount for the secret contribution
-    const zkAmount = Math.round(amount * this.ZK_SCALE_FACTOR);
     
     // Check current allowance
     const allowance = await this.getTokenAllowance(
@@ -459,7 +456,7 @@ readonly addContributionWithApproval = async (
       console.log(`Approval transaction ID: ${approvalTxId}`);
       
       // Wait longer for approval to be fully confirmed on-chain 
-      await new Promise(resolve => setTimeout(resolve, 20000)); // 30 seconds
+      await new Promise(resolve => setTimeout(resolve, 20000)); // 20 seconds
       
       try {
         // Verify approval status 
@@ -485,7 +482,10 @@ readonly addContributionWithApproval = async (
     
     // Phase 1: Submit ZK input
     const secretInput = AbiBitOutput.serialize((_out) => {
-      _out.writeI32(zkAmount); // Write the ZK amount as i32
+      // Convert to actual token units
+      const tokenAmountForZk = floatToTokenUnits(amount, this.TOKEN_DECIMALS);
+      const amount128 = new BN(tokenAmountForZk.toString());
+      _out.writeUnsignedBigInteger(amount128, 16); // 16 bytes = 128 bits
     });
     
     // Create public RPC for add_contribution (shortname 0x40)
@@ -511,7 +511,7 @@ readonly addContributionWithApproval = async (
     console.log("ZK transaction sent:", {
       transactionId: zkTxId,
       shardId: zkShardId,
-      zkAmount
+      tokenAmount: tokenAmount.toString()
     });
     
     // Wait for the ZK transaction to be processed by the network
@@ -557,7 +557,6 @@ readonly addContributionWithApproval = async (
           id: tokenTxId,
           shard: tokenShardId
         },
-        zkAmount,
         tokenAmount: tokenAmount.toString()
       }
     };
@@ -580,7 +579,130 @@ readonly addContributionWithApproval = async (
   }
 };
 
-readonly generateRefundProof = async (address: string): Promise<TransactionResult> => {
+/**
+ * Execute the contribution in two coordinated transactions
+ * Fully compliant with Partisia blockchain binary format specifications
+ * 
+ * @param campaignAddress Campaign contract address
+ * @param tokenAmount Amount for token transfer (BigInt)
+ * @returns Combined transaction result
+ */
+readonly executeContribution = async (
+  campaignAddress: string,
+  amount: number,
+  tokenAmount: bigint
+): Promise<TransactionResult> => {
+  try {
+    console.log(`EXECUTE DEBUG: Amount: ${amount}, Token amount: ${tokenAmount.toString()}`);
+    
+    // PHASE 1: Submit ZK input
+    const secretInput = AbiBitOutput.serialize((_out) => {
+      // Convert to actual token units
+      const tokenAmountForZk = floatToTokenUnits(amount, this.TOKEN_DECIMALS);
+      const amount128 = new BN(tokenAmountForZk.toString());
+      _out.writeUnsignedBigInteger(amount128, 16); // 16 bytes = 128 bits
+    });
+    
+    // Public RPC for ZK input uses a simple shortname format
+    const publicRpc = Buffer.from([0x40]);
+    
+    // Build the ZK input transaction
+    const transaction = await this.zkClient.buildOnChainInputTransaction(
+      this.sender,
+      secretInput,
+      publicRpc
+    );
+    
+    // Send the ZK input transaction
+    const zkTx = await this.transactionClient!.signAndSend(
+      transaction, 
+      200000 // Increased gas for ZK operations
+    );
+    
+    // Store transaction details with proper null checks
+    const zkTxId = zkTx?.transactionPointer?.identifier || "unknown";
+    const zkShardId = zkTx?.transactionPointer?.destinationShardId || null;
+    
+    console.log("ZK transaction sent:", {
+      transactionId: zkTxId,
+      shardId: zkShardId,
+      tokenAmount: tokenAmount.toString()
+    });
+    
+    // Wait for ZK transaction to be processed
+    await new Promise(resolve => setTimeout(resolve, 8000));
+    
+    // PHASE 2: Send token contribution transaction
+    // Following Partisia's binary format specification
+    const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
+      // Format indicator in BigEndian (per Partisia docs)
+      _out.writeU8(0x09);
+      
+      // Action shortname in BigEndian
+      _out.writeBytes(Buffer.from([0x07]));
+      
+      // Serialize token amount in LittleEndian (per Partisia docs for numeric types)
+      // Create a buffer for the 16-byte u128 value
+      const buffer = Buffer.alloc(16);
+      
+      // Write in little-endian format (least significant byte first)
+      let tempValue = tokenAmount;
+      for (let i = 0; i < 16; i++) {
+        buffer[i] = Number(tempValue & BigInt(0xFF));
+        tempValue = tempValue >> BigInt(8);
+      }
+      
+      console.log("Token amount serialized bytes:", buffer.toString('hex'));
+      _out.writeBytes(buffer);
+    });
+    
+    // Send the token transfer transaction
+    const tokenTx = await this.transactionClient!.signAndSend({
+      address: campaignAddress,
+      rpc: contributeTokensRpc
+    }, 200000);
+    
+    // Store token transaction details
+    const tokenTxId = tokenTx?.transactionPointer?.identifier || "unknown";
+    const tokenShardId = tokenTx?.transactionPointer?.destinationShardId || null;
+    
+    console.log("Token transaction sent:", {
+      transactionId: tokenTxId,
+      shardId: tokenShardId,
+      tokenAmount: tokenAmount.toString()
+    });
+    
+    // Return combined transaction result
+    return {
+      transaction: zkTx,
+      status: 'pending',
+      metadata: {
+        zkTransaction: {
+          id: zkTxId,
+          shard: zkShardId
+        },
+        tokenTransaction: {
+          id: tokenTxId,
+          shard: tokenShardId
+        },
+        tokenAmount: tokenAmount.toString()
+      }
+    };
+  } catch (error) {
+    console.error("Error in executeContribution:", error);
+    
+    if (error instanceof CrowdfundingApiError) {
+      throw error;
+    }
+    
+    throw new CrowdfundingApiError(
+      `Error processing contribution: ${error.message || String(error)}`,
+      "CONTRIBUTION_EXECUTION_FAILED"
+    );
+  }
+};
+
+  readonly generateRefundProof = async (address: string): Promise<TransactionResult> => {
   if (!this.isWalletConnected()) {
     throw new CrowdfundingApiError(
       "Wallet not connected",
@@ -622,129 +744,6 @@ readonly generateRefundProof = async (address: string): Promise<TransactionResul
     );
   }
 };
-  
-  /**
-   * Execute the contribution in two coordinated transactions
-   * Fully compliant with Partisia blockchain binary format specifications
-   * 
-   * @param campaignAddress Campaign contract address
-   * @param zkAmount Amount for ZK computation (scaled integer)
-   * @param tokenAmount Amount for token transfer (BigInt)
-   * @returns Combined transaction result
-   */
-  readonly executeContribution = async (
-    campaignAddress: string,
-    zkAmount: number,
-    tokenAmount: bigint
-  ): Promise<TransactionResult> => {
-    try {
-      console.log(`EXECUTE DEBUG: ZK amount: ${zkAmount}, Token amount: ${tokenAmount.toString()}`);
-      
-      // PHASE 1: Submit ZK input
-      // ZK inputs use a different format than regular RPC calls
-      const secretInput = AbiBitOutput.serialize((_out) => {
-        _out.writeI32(zkAmount); // Write the ZK amount as i32
-      });
-      
-      // Public RPC for ZK input uses a simple shortname format
-      const publicRpc = Buffer.from([0x40]);
-      
-      // Build the ZK input transaction
-      const transaction = await this.zkClient.buildOnChainInputTransaction(
-        this.sender,
-        secretInput,
-        publicRpc
-      );
-      
-      // Send the ZK input transaction
-      const zkTx = await this.transactionClient!.signAndSend(
-        transaction, 
-        200000 // Increased gas for ZK operations
-      );
-      
-      // Store transaction details with proper null checks
-      const zkTxId = zkTx?.transactionPointer?.identifier || "unknown";
-      const zkShardId = zkTx?.transactionPointer?.destinationShardId || null;
-      
-      console.log("ZK transaction sent:", {
-        transactionId: zkTxId,
-        shardId: zkShardId,
-        zkAmount
-      });
-      
-      // Wait for ZK transaction to be processed
-      await new Promise(resolve => setTimeout(resolve, 8000));
-      
-      // PHASE 2: Send token contribution transaction
-      // Following Partisia's binary format specification
-      const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
-        // Format indicator in BigEndian (per Partisia docs)
-        _out.writeU8(0x09);
-        
-        // Action shortname in BigEndian
-        _out.writeBytes(Buffer.from([0x07]));
-        
-        // Serialize token amount in LittleEndian (per Partisia docs for numeric types)
-        // Create a buffer for the 16-byte u128 value
-        const buffer = Buffer.alloc(16);
-        
-        // Write in little-endian format (least significant byte first)
-        let tempValue = tokenAmount;
-        for (let i = 0; i < 16; i++) {
-          buffer[i] = Number(tempValue & BigInt(0xFF));
-          tempValue = tempValue >> BigInt(8);
-        }
-        
-        console.log("Token amount serialized bytes:", buffer.toString('hex'));
-        _out.writeBytes(buffer);
-      });
-      
-      // Send the token transfer transaction
-      const tokenTx = await this.transactionClient!.signAndSend({
-        address: campaignAddress,
-        rpc: contributeTokensRpc
-      }, 200000);
-      
-      // Store token transaction details
-      const tokenTxId = tokenTx?.transactionPointer?.identifier || "unknown";
-      const tokenShardId = tokenTx?.transactionPointer?.destinationShardId || null;
-      
-      console.log("Token transaction sent:", {
-        transactionId: tokenTxId,
-        shardId: tokenShardId,
-        tokenAmount: tokenAmount.toString()
-      });
-      
-      // Return combined transaction result
-      return {
-        transaction: zkTx,
-        status: 'pending',
-        metadata: {
-          zkTransaction: {
-            id: zkTxId,
-            shard: zkShardId
-          },
-          tokenTransaction: {
-            id: tokenTxId,
-            shard: tokenShardId
-          },
-          zkAmount,
-          tokenAmount: tokenAmount.toString()
-        }
-      };
-    } catch (error) {
-      console.error("Error in executeContribution:", error);
-      
-      if (error instanceof CrowdfundingApiError) {
-        throw error;
-      }
-      
-      throw new CrowdfundingApiError(
-        `Error processing contribution: ${error.message || String(error)}`,
-        "CONTRIBUTION_EXECUTION_FAILED"
-      );
-    }
-  };
 
   /**
    * Verify if the user has made a contribution to the campaign
