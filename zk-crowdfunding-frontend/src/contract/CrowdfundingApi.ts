@@ -1,11 +1,10 @@
 import {
-  BlockchainAddress,
   BlockchainTransactionClient,
   SentTransaction
 } from "@partisiablockchain/blockchain-api-transaction-client";
 import { RealZkClient } from "@partisiablockchain/zk-client";
 import { Buffer } from "buffer";
-import { AbiBitOutput, AbiByteOutput, BN } from "@partisiablockchain/abi-client";
+import { AbiBitOutput, AbiByteOutput, BlockchainAddress } from "@partisiablockchain/abi-client";
 import { ShardedClient } from "../client/ShardedClient";
 import { deserializeState } from '../contract/CrowdfundingGenerated';
 
@@ -474,47 +473,100 @@ export class CrowdfundingApi {
     }
   }
 
-  /**
-   * Approve tokens to be spent by the campaign contract
-   */
-  async approveTokens(
-    tokenAddress: string,
-    campaignAddress: string,
-    amount: bigint
-  ): Promise<SentTransaction> {
-    if (!this.transactionClient) {
-      throw new Error("Wallet not connected");
-    }
-
-    try {
-      console.log(`Approving ${amount} tokens for campaign ${campaignAddress}`);
-
-      // Build the approve RPC buffer 
-      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-        _out.writeU8(0x05); 
-        _out.writeAddress(BlockchainAddress.fromString(campaignAddress));
-        
-        // Convert BigInt to bytes and write it as a byte array
-        const buffer = Buffer.alloc(16);
-        
-        // Write the amount as little-endian bytes
-        for (let i = 0; i < 16; i++) {
-          buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
-        }
-        
-        _out.writeBytes(buffer);
-      });
-
-      // Send the transaction to approve tokens
-      return this.transactionClient.signAndSend({
-        address: tokenAddress,
-        rpc
-      }, this.TOKEN_APPROVAL_GAS);
-    } catch (error) {
-      console.error("Error approving tokens:", error);
-      throw error;
-    }
+async approveTokens(
+  tokenAddress: string,
+  campaignAddress: string,
+  amount: bigint
+): Promise<SentTransaction> {
+  if (!this.transactionClient) {
+    throw new Error("Wallet not connected");
   }
+
+  try {
+    // ✅ DEBUG: Log actual types and values
+    console.log("🔍 DEBUG approveTokens inputs:");
+    console.log("tokenAddress type:", typeof tokenAddress, "value:", tokenAddress);
+    console.log("campaignAddress type:", typeof campaignAddress, "value:", campaignAddress);
+    console.log("campaignAddress constructor:", campaignAddress?.constructor?.name);
+    
+    // ✅ SAFE ADDRESS CONVERSION
+    let campaignAddrString: string = "";
+    let tokenAddrString: string = "";
+    
+    // Handle different address types
+    if (typeof campaignAddress === 'string') {
+      campaignAddrString = campaignAddress;
+    } else if (campaignAddress && typeof campaignAddress === 'object' && 'asString' in campaignAddress) {
+      // BlockchainAddress object with asString() method
+      campaignAddrString = (campaignAddress as any).asString();
+    } else if (campaignAddress && typeof campaignAddress === 'object') {
+      // Try different methods to get string representation
+      if ('asString' in campaignAddress && typeof (campaignAddress as any).asString === 'function') {
+        campaignAddrString = (campaignAddress as any).asString();
+      } else if ('toString' in campaignAddress && typeof (campaignAddress as any).toString === 'function') {
+        campaignAddrString = (campaignAddress as any).toString();
+      } else {
+        campaignAddrString = String(campaignAddress);
+      }
+    } else {
+      // Fallback - convert to string
+      campaignAddrString = String(campaignAddress);
+    }
+    
+    // Same for token address
+    if (typeof tokenAddress === 'string') {
+      tokenAddrString = tokenAddress;
+    } else if (tokenAddress && typeof tokenAddress === 'object') {
+      if ('asString' in tokenAddress && typeof (tokenAddress as any).asString === 'function') {
+        tokenAddrString = (tokenAddress as any).asString();
+      } else if ('toString' in tokenAddress && typeof (tokenAddress as any).toString === 'function') {
+        tokenAddrString = (tokenAddress as any).toString();
+      } else {
+        tokenAddrString = String(tokenAddress);
+      }
+    }
+    
+    // Clean addresses (remove 0x prefix if present)
+    const cleanCampaignAddr = campaignAddrString.startsWith('0x') ? campaignAddrString.slice(2) : campaignAddrString;
+    const cleanTokenAddr = tokenAddrString.startsWith('0x') ? tokenAddrString.slice(2) : tokenAddrString;
+    
+    console.log("✅ Cleaned addresses:");
+    console.log("cleanTokenAddr:", cleanTokenAddr);
+    console.log("cleanCampaignAddr:", cleanCampaignAddr);
+
+    // Build the approve RPC buffer 
+    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+      _out.writeU8(0x05); 
+      
+      // ✅ This is where the error occurs - ensure we pass a clean string
+      console.log("About to call BlockchainAddress.fromString with:", cleanCampaignAddr);
+      const campaignBlockchainAddr = BlockchainAddress.fromString(cleanCampaignAddr);
+      _out.writeAddress(campaignBlockchainAddr);
+      
+      // Convert BigInt to bytes for u128
+      const buffer = Buffer.alloc(16);
+      for (let i = 0; i < 16; i++) {
+        buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+      }
+      _out.writeBytes(buffer);
+    });
+
+    // Send the transaction to approve tokens
+    return this.transactionClient.signAndSend({
+      address: cleanTokenAddr,
+      rpc
+    }, this.TOKEN_APPROVAL_GAS);
+  } catch (error) {
+    console.error("❌ Error in approveTokens:", error);
+    console.error("Error details:", {
+      message: error.message,
+      stack: error.stack,
+      tokenAddress: typeof tokenAddress,
+      campaignAddress: typeof campaignAddress
+    });
+    throw error;
+  }
+}
 
   /**
    * Enhanced contribution flow with comprehensive error checking

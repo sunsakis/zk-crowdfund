@@ -931,7 +931,11 @@ async function addContributionFormAction() {
     }
     
     // Submit the contribution (this includes both ZK input and token transfer)
-    const result = await api.addContributionWithApproval(contributionValue, address, tokenAddress);
+    const result = await api.addContributionWithApproval(
+  contributionValue, 
+  String(address),
+  String(tokenAddress)
+);
     
     // Extract transaction details
     const contributionResult = result.contributionResult;
