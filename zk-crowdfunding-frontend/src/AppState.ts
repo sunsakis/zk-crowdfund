@@ -230,16 +230,19 @@ function updateCrowdfundingApi(): void {
       
       // Create ZK client with contract address
       const zkClient = RealZkClient.create(contractAddress, new Client(currentNodeUrl));
-      
-      // Create API instance
+      const senderAddress = currentAccount.getAddress(); // This should be a string
+
+      // *** THIS IS THE CRITICAL LINE - make sure it's creating CrowdfundingApi correctly ***
       crowdfundingApi = new CrowdfundingApi(
         transactionClient, 
         zkClient, 
-        currentAccount.getAddress(),
+        senderAddress,
         CLIENT // Pass the ShardedClient instance
       );
       
       console.log("Crowdfunding API initialized successfully");
+      console.log("API instance:", crowdfundingApi);
+      console.log("API has endCampaign method:", typeof crowdfundingApi.endCampaign);
     } catch (error) {
       console.error("Error updating crowdfunding API:", error);
       crowdfundingApi = undefined;

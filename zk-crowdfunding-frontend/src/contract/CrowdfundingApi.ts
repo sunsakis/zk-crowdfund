@@ -87,14 +87,13 @@ export interface AllowanceInfo {
 export class CrowdfundingApi {
   private readonly transactionClient: BlockchainTransactionClient | undefined;
   private readonly zkClient: RealZkClient;
-  private readonly sender: BlockchainAddress;
+  private readonly sender: string;
   private readonly baseClient: ShardedClient;
   
   // Constants for gas limits with some buffer
   private readonly TOKEN_APPROVAL_GAS = 15000;
   private readonly END_CAMPAIGN_GAS = 150000;
   private readonly WITHDRAW_FUNDS_GAS = 30000;
-  private readonly VERIFY_CONTRIBUTION_GAS = 15000;
   
   // Constants for amount limits (in raw token units)
   private readonly MAX_TOKEN_UNITS = 2147483647; // Max u32 value
@@ -351,219 +350,194 @@ export class CrowdfundingApi {
     }
   };
 
-  // In your CrowdfundingApi.ts file, replace the existing addContributionWithApproval method:
-
-/**
- * Enhanced contribution flow with proper ZK transaction verification
- */
-readonly addContributionWithApproval = async (
-  displayAmount: number,
-  campaignAddress: string, 
-  tokenAddress: string
-): Promise<{
-  approvalResult?: TransactionResult,
-  contributionResult: TransactionResult
-}> => {
-  
-  console.log(`=== CONTRIBUTION FLOW DEBUG ===`);
-  console.log(`Display amount: ${displayAmount}`);
-  console.log(`Campaign address: ${campaignAddress}`);
-  console.log(`Token address: ${tokenAddress}`);
-  console.log(`Wallet address: ${this.getWalletAddress()}`);
-  
-  if (!this.isWalletConnected()) {
-    throw new CrowdfundingApiError(
-      "Wallet not connected", 
-      "WALLET_NOT_CONNECTED"
-    );
-  }
-  
-  try {
-    // Step 1: Calculate amounts
-    this.validateAmount(displayAmount);
-    const tokenUnits = displayAmountToTokenUnits(displayAmount);
-    const weiAmount = tokenUnitsToWei(tokenUnits);
+  /**
+   * Enhanced contribution flow with proper ZK transaction verification and contract-level error detection
+   */
+  readonly addContributionWithApproval = async (
+    displayAmount: number,
+    campaignAddress: string, 
+    tokenAddress: string
+  ): Promise<{
+    approvalResult?: TransactionResult,
+    contributionResult: TransactionResult
+  }> => {
     
-    console.log(`Converted amounts: ${displayAmount} -> ${tokenUnits} token units -> ${weiAmount} wei`);
+    console.log(`=== CONTRIBUTION FLOW DEBUG ===`);
+    console.log(`Display amount: ${displayAmount}`);
+    console.log(`Campaign address: ${campaignAddress}`);
+    console.log(`Token address: ${tokenAddress}`);
+    console.log(`Wallet address: ${this.getWalletAddress()}`);
     
-    // Step 2: Handle token approval if needed
-    console.log(`\n=== TOKEN APPROVAL PHASE ===`);
-    const allowance = await this.getTokenAllowance(tokenAddress, campaignAddress, weiAmount);
-    
-    let approvalResult: TransactionResult | undefined;
-    if (!allowance.sufficientAllowance) {
-      console.log(`Approving ${weiAmount} wei tokens...`);
-      approvalResult = await this.approveTokens(tokenAddress, campaignAddress, weiAmount);
-      const approvalTxId = approvalResult.transaction.transactionPointer?.identifier || "unknown";
-      
-      console.log(`Approval transaction sent: ${approvalTxId}`);
-      
-      // Wait for approval with timeout
-      const approvalConfirmed = await this.waitForTransactionConfirmation(
-        approvalTxId, undefined, 60, "Token approval"
-      );
-      
-      if (!approvalConfirmed) {
-        throw new CrowdfundingApiError("Token approval timeout", "APPROVAL_TIMEOUT");
-      }
-      
-      console.log(`✅ Token approval confirmed`);
-    } else {
-      console.log(`✅ Token allowance already sufficient`);
-    }
-    
-    // Step 3: Submit ZK input transaction
-    console.log(`\n=== ZK INPUT PHASE ===`);
-    
-    const secretInput = AbiBitOutput.serialize((_out) => {
-      _out.writeU32(tokenUnits);
-    });
-    
-    const publicRpc = Buffer.from([0x40]);
-    
-    console.log(`Building ZK transaction with ${tokenUnits} token units...`);
-    
-    const zkTransaction = await this.zkClient.buildOnChainInputTransaction(
-      this.sender,
-      secretInput,
-      publicRpc
-    );
-    
-    console.log(`Sending ZK transaction...`);
-    const zkTx = await this.transactionClient!.signAndSend(zkTransaction, 200000);
-    
-    const zkTxId = zkTx.transactionPointer?.identifier || "unknown";
-    const zkShardId = zkTx.transactionPointer?.destinationShardId || "unknown";
-    
-    console.log(`ZK transaction sent: ${zkTxId} (shard: ${zkShardId})`);
-    
-    // Step 4: Wait for ZK transaction confirmation with extended timeout
-    console.log(`\n=== WAITING FOR ZK CONFIRMATION ===`);
-    const zkConfirmed = await this.waitForTransactionConfirmation(
-      zkTxId, zkShardId, 120, "ZK contribution" // 2 minutes timeout
-    );
-    
-    if (!zkConfirmed) {
+    if (!this.isWalletConnected()) {
       throw new CrowdfundingApiError(
-        `ZK transaction timeout - transaction ${zkTxId} not confirmed`,
-        "ZK_TIMEOUT"
+        "Wallet not connected", 
+        "WALLET_NOT_CONNECTED"
       );
     }
     
-    console.log(`✅ ZK transaction confirmed`);
-    
-    // Step 5: Wait additional time for ZK state propagation
-    console.log(`\n=== WAITING FOR ZK STATE PROPAGATION ===`);
-    console.log(`Waiting 15 seconds for ZK state to propagate across all nodes...`);
-    await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second wait
-    
-    // Step 6: Submit token transfer transaction
-    console.log(`\n=== TOKEN TRANSFER PHASE ===`);
-    
-    const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09);
-      _out.writeBytes(Buffer.from([0x07]));
-      _out.writeU32(tokenUnits);
-    });
-    
-    console.log(`Sending token transfer transaction with ${tokenUnits} token units...`);
-    
-    const tokenTx = await this.transactionClient!.signAndSend({
-      address: campaignAddress,
-      rpc: contributeTokensRpc
-    }, 200000);
-    
-    const tokenTxId = tokenTx.transactionPointer?.identifier || "unknown";
-    const tokenShardId = tokenTx.transactionPointer?.destinationShardId || "unknown";
-    
-    console.log(`Token transaction sent: ${tokenTxId} (shard: ${tokenShardId})`);
-    
-    // Step 7: Wait for token transaction confirmation
-    console.log(`\n=== WAITING FOR TOKEN CONFIRMATION ===`);
-    const tokenConfirmed = await this.waitForTransactionConfirmation(
-      tokenTxId, tokenShardId, 60, "Token transfer"
-    );
-    
-    if (!tokenConfirmed) {
-      console.warn(`Token transaction timeout - but ZK input was successful`);
-    } else {
-      console.log(`✅ Token transaction confirmed`);
-    }
-    
-    console.log(`\n=== CONTRIBUTION COMPLETE ===`);
-    
-    const contributionResult: TransactionResult = {
-      transaction: zkTx,
-      status: tokenConfirmed ? 'success' : 'pending',
-      metadata: {
-        zkTransaction: { id: zkTxId, shard: zkShardId },
-        tokenTransaction: { id: tokenTxId, shard: tokenShardId },
-        tokenUnits,
-        weiAmount: weiAmount.toString(),
-        displayAmount
-      }
-    };
-    
-    return {
-      approvalResult,
-      contributionResult
-    };
-    
-  } catch (error) {
-    console.error(`\n=== CONTRIBUTION FAILED ===`);
-    console.error("Error details:", error);
-    
-    if (error instanceof CrowdfundingApiError) {
-      throw error;
-    }
-    
-    throw new CrowdfundingApiError(
-      `Contribution failed: ${error.message}`,
-      "CONTRIBUTION_FLOW_FAILED"
-    );
-  }
-};
-
-/**
- * Wait for transaction confirmation with detailed logging
- */
-private async waitForTransactionConfirmation(
-  txId: string,
-  shardId: string | undefined,
-  timeoutSeconds: number,
-  transactionType: string
-): Promise<boolean> {
-  
-  const maxAttempts = Math.floor(timeoutSeconds / 3);
-  
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const status = await this.checkTransactionStatus(txId, shardId);
+      // Step 1: Calculate amounts
+      this.validateAmount(displayAmount);
+      const tokenUnits = displayAmountToTokenUnits(displayAmount);
+      const weiAmount = tokenUnitsToWei(tokenUnits);
       
-      if (status.status === 'success') {
-        console.log(`✅ ${transactionType} confirmed after ${attempt * 3}s`);
-        return true;
-      } else if (status.status === 'failed') {
+      console.log(`Converted amounts: ${displayAmount} -> ${tokenUnits} token units -> ${weiAmount} wei`);
+      
+      // Step 2: Handle token approval if needed
+      console.log(`\n=== TOKEN APPROVAL PHASE ===`);
+      const allowance = await this.getTokenAllowance(tokenAddress, campaignAddress, weiAmount);
+      
+      let approvalResult: TransactionResult | undefined;
+      if (!allowance.sufficientAllowance) {
+        console.log(`Approving ${weiAmount} wei tokens...`);
+        approvalResult = await this.approveTokens(tokenAddress, campaignAddress, weiAmount);
+        const approvalTxId = approvalResult.transaction.transactionPointer?.identifier || "unknown";
+        
+        console.log(`Approval transaction sent: ${approvalTxId}`);
+        
+        // Wait for approval with timeout
+        const approvalConfirmed = await this.waitForTransactionConfirmation(
+          approvalTxId, undefined, 60, "Token approval"
+        );
+        
+        if (!approvalConfirmed) {
+          throw new CrowdfundingApiError("Token approval timeout", "APPROVAL_TIMEOUT");
+        }
+        
+        console.log(`✅ Token approval confirmed`);
+      } else {
+        console.log(`✅ Token allowance already sufficient`);
+      }
+      
+      // Step 3: Submit ZK input transaction
+      console.log(`\n=== ZK INPUT PHASE ===`);
+      
+      const secretInput = AbiBitOutput.serialize((_out) => {
+        _out.writeU32(tokenUnits);
+      });
+      
+      const publicRpc = Buffer.from([0x40]);
+      
+      console.log(`Building ZK transaction with ${tokenUnits} token units...`);
+      
+      const zkTransaction = await this.zkClient.buildOnChainInputTransaction(
+        this.sender,
+        secretInput,
+        publicRpc
+      );
+      
+      console.log(`Sending ZK transaction...`);
+      const zkTx = await this.transactionClient!.signAndSend(zkTransaction, 200000);
+      
+      const zkTxId = zkTx.transactionPointer?.identifier || "unknown";
+      const zkShardId = zkTx.transactionPointer?.destinationShardId || "unknown";
+      
+      console.log(`ZK transaction sent: ${zkTxId} (shard: ${zkShardId})`);
+      
+      // Step 4: Wait for ZK transaction confirmation with extended timeout
+      console.log(`\n=== WAITING FOR ZK CONFIRMATION ===`);
+      const zkConfirmed = await this.waitForTransactionConfirmation(
+        zkTxId, zkShardId, 120, "ZK contribution"
+      );
+      
+      if (!zkConfirmed) {
         throw new CrowdfundingApiError(
-          `${transactionType} failed: ${status.errorMessage}`,
-          "TRANSACTION_FAILED"
+          `ZK transaction failed - transaction ${zkTxId} not confirmed`,
+          "ZK_FAILED"
         );
       }
       
-      if (attempt % 5 === 0) {
-        console.log(`⏳ ${transactionType} still pending... (${attempt * 3}s / ${timeoutSeconds}s)`);
+      console.log(`✅ ZK transaction confirmed`);
+      
+      // Step 5: Wait additional time for ZK state propagation
+      console.log(`\n=== WAITING FOR ZK STATE PROPAGATION ===`);
+      console.log(`Waiting 30 seconds for ZK state to propagate across all nodes...`);
+      await new Promise(resolve => setTimeout(resolve, 30000)); // Increased to 30 seconds
+      
+      // Step 6: Submit token transfer transaction
+      console.log(`\n=== TOKEN TRANSFER PHASE ===`);
+      
+      const contributeTokensRpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x09);
+        _out.writeBytes(Buffer.from([0x07]));
+        _out.writeU32(tokenUnits);
+      });
+      
+      console.log(`Sending token transfer transaction with ${tokenUnits} token units...`);
+      
+      const tokenTx = await this.transactionClient!.signAndSend({
+        address: campaignAddress,
+        rpc: contributeTokensRpc
+      }, 200000);
+      
+      const tokenTxId = tokenTx.transactionPointer?.identifier || "unknown";
+      const tokenShardId = tokenTx.transactionPointer?.destinationShardId || "unknown";
+      
+      console.log(`Token transaction sent: ${tokenTxId} (shard: ${tokenShardId})`);
+      
+      // Step 7: Wait for token transaction confirmation - THIS IS CRITICAL
+      console.log(`\n=== WAITING FOR TOKEN CONFIRMATION ===`);
+      const tokenConfirmed = await this.waitForTransactionConfirmation(
+        tokenTxId, tokenShardId, 60, "Token transfer"
+      );
+      
+      // Step 8: Determine overall success based on BOTH transactions
+      let overallSuccess = false;
+      let finalStatus: 'success' | 'failed' | 'pending' = 'pending';
+      
+      if (zkConfirmed && tokenConfirmed) {
+        console.log(`✅ Both transactions confirmed - contribution successful`);
+        overallSuccess = true;
+        finalStatus = 'success';
+      } else if (zkConfirmed && !tokenConfirmed) {
+        console.log(`❌ ZK confirmed but token transfer failed - contribution failed`);
+        overallSuccess = false;
+        finalStatus = 'failed';
+      } else {
+        console.log(`❌ ZK transaction failed - contribution failed`);
+        overallSuccess = false;
+        finalStatus = 'failed';
       }
       
+      console.log(`\n=== CONTRIBUTION RESULT: ${finalStatus.toUpperCase()} ===`);
+      
+      const contributionResult: TransactionResult = {
+        transaction: zkTx, // Keep ZK transaction as primary for UI display
+        status: finalStatus,
+        metadata: {
+          zkTransaction: { id: zkTxId, shard: zkShardId, confirmed: zkConfirmed },
+          tokenTransaction: { id: tokenTxId, shard: tokenShardId, confirmed: tokenConfirmed },
+          tokenUnits,
+          weiAmount: weiAmount.toString(),
+          displayAmount,
+          overallSuccess,
+          // Add specific error context for failed token transfers
+          ...(zkConfirmed && !tokenConfirmed && {
+            failureReason: "Token transfer failed after successful ZK input",
+            failedTransaction: tokenTxId
+          })
+        }
+      };
+      
+      return {
+        approvalResult,
+        contributionResult
+      };
+      
     } catch (error) {
-      console.log(`⚠️ Error checking ${transactionType} status:`, error.message);
+      console.error(`\n=== CONTRIBUTION FAILED ===`);
+      console.error("Error details:", error);
+      
+      if (error instanceof CrowdfundingApiError) {
+        throw error;
+      }
+      
+      throw new CrowdfundingApiError(
+        `Contribution failed: ${error.message}`,
+        "CONTRIBUTION_FLOW_FAILED"
+      );
     }
-    
-    await new Promise(resolve => setTimeout(resolve, 3000));
-  }
-  
-  console.log(`❌ ${transactionType} timeout after ${timeoutSeconds}s`);
-  return false;
-}
+  };
 
   /**
    * Execute the contribution in two coordinated transactions
@@ -710,54 +684,6 @@ private async waitForTransactionConfirmation(
       );
     }
   };
-
-  /**
-   * Verify if the user has made a contribution to the campaign
-   * @param address The campaign contract address
-   * @returns Transaction result
-   */
-  readonly verifyContribution = async (address: string): Promise<TransactionResult> => {
-    if (!this.isWalletConnected()) {
-      throw new CrowdfundingApiError(
-        "Wallet not connected",
-        "WALLET_NOT_CONNECTED"
-      );
-    }
-    
-    if (!address) {
-      throw new CrowdfundingApiError(
-        "Campaign address is required",
-        "MISSING_CAMPAIGN_ADDRESS"
-      );
-    }
-    
-    // Create verify_my_contribution RPC with format indicator
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09); // Format indicator for actions
-      _out.writeBytes(Buffer.from([0x06])); // verify_my_contribution shortname
-    });
-    
-    try {
-      const transaction = await this.transactionClient!.signAndSend(
-        { address, rpc }, 
-        this.VERIFY_CONTRIBUTION_GAS
-      );
-      
-      return {
-        transaction,
-        status: 'pending',
-        metadata: {
-          type: 'verification'
-        }
-      };
-    } catch (error) {
-      console.error("Error verifying contribution:", error);
-      throw new CrowdfundingApiError(
-        `Error verifying contribution: ${error.message || error}`,
-        "VERIFICATION_FAILED"
-      );
-    }
-  };
   
   /**
    * Build and send end campaign transaction
@@ -857,9 +783,210 @@ private async waitForTransactionConfirmation(
       );
     }
   };
+
+  /**
+   * Enhanced wait method that properly reports transaction failures
+   */
+  private async waitForTransactionConfirmation(
+    txId: string,
+    shardId: string | undefined,
+    timeoutSeconds: number,
+    transactionType: string
+  ): Promise<boolean> {
+    
+    const maxAttempts = Math.floor(timeoutSeconds / 3);
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const status = await this.checkTransactionStatus(txId, shardId);
+        
+        if (status.status === 'success') {
+          console.log(`✅ ${transactionType} confirmed after ${attempt * 3}s`);
+          return true;
+        } else if (status.status === 'failed') {
+          console.log(`❌ ${transactionType} failed: ${status.errorMessage}`);
+          // Don't throw here - let the caller handle the failure
+          return false;
+        }
+        
+        if (attempt % 5 === 0) {
+          console.log(`⏳ ${transactionType} still pending... (${attempt * 3}s / ${timeoutSeconds}s)`);
+        }
+        
+      } catch (error) {
+        console.log(`⚠️ Error checking ${transactionType} status:`, error.message);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    
+    console.log(`❌ ${transactionType} timeout after ${timeoutSeconds}s`);
+    return false;
+  }
+
+  /**
+   * Check if an event contains contract-level error information
+   * This is the key method that detects contract failures
+   */
+  private async checkEventForContractError(event: any): Promise<string | null> {
+    try {
+      if (!event.identifier) {
+        return null;
+      }
+      
+      console.log("Checking event for contract errors:", event.identifier);
+      
+      // Try to fetch the event details
+      const eventShards = ["Shard0", "Shard1", "Shard2"];
+      
+      for (const shard of eventShards) {
+        try {
+          const eventUrl = `${this.API_URL}/chain/shards/${shard}/transactions/${event.identifier}`;
+          const response = await fetch(eventUrl);
+          
+          if (response.ok) {
+            const eventData = await response.json();
+            
+            // Check if this event indicates a contract failure
+            if (eventData.executionStatus?.success === false) {
+              return "Contract execution failed";
+            }
+            
+            // Check event content for error messages
+            if (eventData.content) {
+              try {
+                const decoded = atob(eventData.content);
+                
+                // Look for common error patterns
+                if (decoded.includes('Trap: Early exit') || 
+                    decoded.includes('assertion') || 
+                    decoded.includes('failed:')) {
+                  
+                  // Try to extract the actual error message
+                  const lines = decoded.split('\n');
+                  for (const line of lines) {
+                    if (line.includes('assertion') && line.includes('failed:')) {
+                      // Extract the assertion failure message
+                      const match = line.match(/assertion.*failed:\s*(.+)/);
+                      if (match) {
+                        return match[1].trim();
+                      }
+                    }
+                    if (line.includes('Trap: Early exit') && line.includes(':')) {
+                      // Extract early exit message
+                      const parts = line.split(':');
+                      if (parts.length >= 4) {
+                        return parts.slice(3).join(':').trim();
+                      }
+                    }
+                  }
+                  
+                  // If we can't parse the specific message, return a general error
+                  return "Contract assertion failed";
+                }
+              } catch (decodeError) {
+                console.log("Could not decode event content");
+              }
+            }
+            
+            break; // Found the event, stop searching other shards
+          }
+        } catch (fetchError) {
+          // Continue to next shard
+          continue;
+        }
+      }
+      
+      return null; // No error found
+    } catch (error) {
+      console.error("Error checking event for contract error:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Parse transaction result from API response with enhanced contract-level error detection
+   * @param transaction Raw transaction data from API
+   * @returns Parsed transaction status
+   */
+  private async parseTransactionResult(transaction: any): Promise<{
+    status: 'pending' | 'success' | 'failed',
+    finalizedBlock?: string,
+    errorMessage?: string
+  }> {
+    try {
+      // Check if we have executionStatus
+      if (!transaction.executionStatus) {
+        return { status: 'pending' };
+      }
+      
+      const execStatus = transaction.executionStatus;
+      
+      // Check if finalized
+      if (!execStatus.finalized) {
+        return { status: 'pending' };
+      }
+      
+      // Even if blockchain-level success is true, we need to check for contract failures
+      if (execStatus.success === true) {
+        
+        // Check if there are events that might contain error information
+        if (execStatus.events && execStatus.events.length > 0) {
+          console.log("Checking events for contract-level errors...");
+          
+          // Check each event for contract failures
+          for (const event of execStatus.events) {
+            try {
+              const contractError = await this.checkEventForContractError(event);
+              if (contractError) {
+                console.log("❌ Contract-level failure detected in event:", contractError);
+                return {
+                  status: 'failed',
+                  errorMessage: contractError
+                };
+              }
+            } catch (error) {
+              console.log("Could not check event for errors:", error);
+              // Don't fail the whole check if we can't read one event
+            }
+          }
+        }
+        
+        // If no contract errors found in events, it's truly successful
+        console.log("✅ Both blockchain and contract execution successful");
+        return { 
+          status: 'success',
+          finalizedBlock: execStatus.blockId
+        };
+        
+      } else if (execStatus.success === false) {
+        // Blockchain-level failure
+        console.log("❌ Blockchain-level failure");
+        
+        let errorMessage = 'Transaction execution failed';
+        if (execStatus.failure && execStatus.failure.errorMessage) {
+          errorMessage = execStatus.failure.errorMessage;
+        }
+        
+        return { 
+          status: 'failed',
+          errorMessage: errorMessage
+        };
+      } else {
+        // success field is null/undefined - still processing
+        return { status: 'pending' };
+      }
+    } catch (error) {
+      console.error("Error parsing transaction result:", error);
+      return { 
+        status: 'failed',
+        errorMessage: `Error parsing transaction result: ${error.message}`
+      };
+    }
+  }
   
   /**
-   * Check transaction status using direct API calls
+   * Enhanced checkTransactionStatus that properly detects contract failures
    * @param transactionId Transaction ID
    * @param shardId Optional shard ID (if already known)
    * @returns Promise resolving to transaction status
@@ -914,18 +1041,7 @@ private async waitForTransactionConfirmation(
           const transaction = await checkSingleShard(shard);
           
           if (transaction) {
-            // Check the correct properties based on the API response format
-            if (transaction.executionStatus?.success) {
-              return { 
-                status: 'success',
-                finalizedBlock: transaction.executionStatus.blockId
-              };
-            } else {
-              return { 
-                status: 'failed',
-                errorMessage: transaction.executionStatus?.failure?.errorMessage || 'Unknown error'
-              };
-            }
+            return await this.parseTransactionResult(transaction);
           }
         }
         
@@ -939,18 +1055,7 @@ private async waitForTransactionConfirmation(
           return { status: 'pending' };
         }
         
-        // Check the correct properties based on the API response format
-        if (transaction.executionStatus?.success) {
-          return { 
-            status: 'success',
-            finalizedBlock: transaction.executionStatus.blockId
-          };
-        } else {
-          return { 
-            status: 'failed',
-            errorMessage: transaction.executionStatus?.failure?.errorMessage || 'Unknown error'
-          };
-        }
+        return await this.parseTransactionResult(transaction);
       }
     } catch (error) {
       console.error("Error checking transaction status:", error);
@@ -959,9 +1064,9 @@ private async waitForTransactionConfirmation(
   };
 
   /**
-   * Helper function to safely extract contract state from API response
+   * Helper function to safely extract contract state with proper type checking
    * @param contractData Raw contract data from API response
-   * @returns Contract state data and important fields
+   * @returns Buffer containing state data or throws with detailed error
    */
   readonly extractContractState = (contractData: any): { 
     stateBuffer: Buffer, 

@@ -313,14 +313,6 @@ function setupEventListeners() {
     console.warn("Address button not found");
   }
 
-  // Verify contribution
-  const verifyContributionBtn = document.querySelector("#verify-contribution-btn");
-  if (verifyContributionBtn) {
-    verifyContributionBtn.addEventListener("click", verifyContributionAction);
-  } else {
-    console.warn("Verify contribution button not found");
-  }
-
   // Refresh state
   const updateStateBtn = document.querySelector("#update-state-btn");
   if (updateStateBtn) {
@@ -673,41 +665,82 @@ async function addContributionFormAction() {
     // Clear the input
     contributionInput.value = "";
     
-    // Schedule status checking
+    // Schedule status checking with enhanced success/failure handling
     scheduleTransactionStatusCheck(
       primaryTxId,
       api,
       (txId) => {
-        // Success callback
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-success">
-              <p>Contribution successful!</p>
-              <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
-            </div>
-          `;
+        // Success callback - but verify both transactions succeeded
+        const metadata = contributionResult.metadata;
+        
+        if (metadata?.overallSuccess === true) {
+          // Both transactions succeeded
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-success">
+                <p>✅ Contribution successful!</p>
+                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
+                <div class="mt-2">
+                  <p><strong>ZK Input:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${metadata.zkTransaction?.id || txId}" 
+                     class="transaction-link" target="_blank">${metadata.zkTransaction?.id || txId}</a> ✅</p>
+                  <p><strong>Token Transfer:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${metadata.tokenTransaction?.id || tokenTxId}" 
+                     class="transaction-link" target="_blank">${metadata.tokenTransaction?.id || tokenTxId}</a> ✅</p>
+                </div>
+                <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
+              </div>
+            `;
+            
+            // Add event listener to the refresh button
+            const refreshBtn = document.querySelector("#refresh-state-btn");
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
+          }
           
-          // Add event listener to the refresh button
-          const refreshBtn = document.querySelector("#refresh-state-btn");
-          if (refreshBtn) {
-            refreshBtn.addEventListener("click", updateContractState);
+          // Update contract state
+          updateContractState();
+        } else {
+          // ZK succeeded but token transfer failed - this is actually a failure
+          const failureReason = metadata?.failureReason || "Token transfer failed";
+          const failedTxId = metadata?.failedTransaction || "unknown";
+          
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-error">
+                <p>❌ Contribution failed: ${failureReason}</p>
+                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
+                <div class="mt-2">
+                  <p><strong>ZK Input:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${metadata?.zkTransaction?.id || txId}" 
+                     class="transaction-link" target="_blank">${metadata?.zkTransaction?.id || txId}</a> ✅</p>
+                  <p><strong>Token Transfer:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${failedTxId}" 
+                     class="transaction-link" target="_blank">${failedTxId}</a> ❌</p>
+                </div>
+                <p class="mt-2 text-sm">The ZK commitment was created but the token transfer failed. You may need to try again.</p>
+                <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
+              </div>
+            `;
+            
+            // Add retry button
+            const retryBtn = document.querySelector("#retry-contribution");
+            if (retryBtn) {
+              retryBtn.addEventListener("click", () => {
+                // Reset UI
+                if (transactionLinkContainer) {
+                  transactionLinkContainer.innerHTML = '';
+                  transactionLinkContainer.classList.add("hidden");
+                }
+              });
+            }
           }
         }
-        
-        // Update contract state
-        updateContractState();
       },
       (txId, error) => {
-        // Failure callback
+        // Failure callback - ZK transaction itself failed
         if (transactionLinkContainer) {
           transactionLinkContainer.innerHTML = `
             <div class="alert alert-error">
-              <p>Contribution failed: ${error || 'Unknown error'}</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
+              <p>❌ Contribution failed: ${error || 'ZK transaction failed'}</p>
+              <p class="transaction-hash">ZK Transaction ID: ${txId}</p>
               <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
                  class="transaction-link" target="_blank">View in Explorer</a>
               <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
@@ -733,8 +766,8 @@ async function addContributionFormAction() {
           if (transactionLinkContainer) {
             transactionLinkContainer.innerHTML = `
               <div class="alert alert-info">
-                <p>Transaction is still processing...</p>
-                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <p>🔄 Checking both ZK input and token transfer...</p>
+                <p class="transaction-hash">Primary Transaction ID: ${txId}</p>
                 <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
                    class="transaction-link" target="_blank">View in Explorer</a>
                 <div class="spinner mt-2"></div>
@@ -789,188 +822,32 @@ async function addContributionFormAction() {
   }
 }
 
-function verifyContributionAction() {
-  console.log("Verify contribution button clicked");
-  
-  if (!isConnected()) {
-    showApplicationMessage("Please connect your wallet first");
-    return;
-  }
-  
-  const address = getContractAddress();
-  if (!address) {
-    showApplicationMessage("No campaign address found");
-    return;
-  }
-  
-  const api = getCrowdfundingApi();
-  if (!api) {
-    showApplicationMessage("API not initialized. Please try reconnecting your wallet");
-    return;
-  }
-  
-  // Disable button and show loading state
-  const verifyContributionBtn = document.querySelector("#verify-contribution-btn") as HTMLButtonElement;
-  if (verifyContributionBtn) {
-    verifyContributionBtn.disabled = true;
-    verifyContributionBtn.textContent = "Verifying...";
-  }
-  
-  // Get verification status element
-  let verificationStatusEl = document.querySelector("#verification-status");
-  if (!verificationStatusEl) {
-    // Create element if it doesn't exist
-    verificationStatusEl = document.createElement("div");
-    verificationStatusEl.id = "verification-status";
-    const parentElement = document.querySelector("#verification-section");
-    if (parentElement) {
-      parentElement.appendChild(verificationStatusEl);
-    }
-  }
-  
-  console.log(`Verifying contribution for address: ${address}`);
-  
-  // First, send the transaction
-  api.verifyContribution(address)
-    .then((sentTx) => {
-      console.log("Verification transaction sent:", sentTx);
-      
-      // Extract transaction ID - check for the correct property based on TransactionResult interface
-      const txId = sentTx.transaction?.transactionPointer?.identifier || 
-                  sentTx.metadata?.txId || 
-                  "unknown";
-      
-      // Show pending status
-      if (verificationStatusEl) {
-        verificationStatusEl.innerHTML = `
-          <div class="bg-blue-50 p-4 rounded-md border border-blue-200 mt-4">
-            <p class="text-blue-700">Verification in progress...</p>
-            <p class="text-sm text-blue-600 mt-2">Transaction ID: ${txId}</p>
-            <p class="text-sm text-blue-600">This may take 15-30 seconds to complete.</p>
-          </div>
-        `;
-      }
-      
-      // Wait for transaction to be confirmed (poll for status)
-      const checkTransactionStatus = () => {
-        // Check if CLIENT and shardId are available, otherwise use fallback
-        const shardId = sentTx.transaction?.transactionPointer?.destinationShardId || "Shard0";
-        
-        // Only try if CLIENT is defined
-        if (CLIENT) {
-          CLIENT.getExecutedTransaction(shardId, txId)
-            .then((executedTx) => {
-              if (!executedTx) {
-                // Transaction not yet processed, try again after a delay
-                setTimeout(checkTransactionStatus, 5000);
-                return;
-              }
-              
-              console.log("Transaction execution details:", executedTx);
-              
-              // Now we can check executionSucceeded
-              if (executedTx.executionSucceeded) {
-                // Verification was successful
-                if (verificationStatusEl) {
-                  verificationStatusEl.innerHTML = `
-                    <div class="bg-green-50 p-4 rounded-md border border-green-200 mt-4">
-                      <div class="flex items-center">
-                        <svg class="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                        </svg>
-                        <span class="text-green-700 font-medium">Your contribution has been verified successfully!</span>
-                      </div>
-                      <p class="text-sm text-green-600 mt-2">
-                        Your contribution was included in the final tally of this campaign.
-                      </p>
-                    </div>
-                  `;
-                }
-                showApplicationMessage("Your contribution has been verified successfully");
-              } else {
-                // Transaction failed, meaning no contribution found
-                if (verificationStatusEl) {
-                  verificationStatusEl.innerHTML = `
-                    <div class="bg-yellow-50 p-4 rounded-md border border-yellow-200 mt-4">
-                      <p class="text-yellow-700 font-medium">No contribution found for this wallet address.</p>
-                      <p class="text-sm text-yellow-600 mt-2">
-                        The verification could not confirm a contribution from your current wallet.
-                        If you believe this is incorrect, please ensure you're using the same wallet
-                        that you used to make your contribution.
-                      </p>
-                    </div>
-                  `;
-                }
-                showApplicationMessage("No contribution found for your wallet address");
-              }
-            })
-            .catch((error) => {
-              console.error("Error checking transaction status:", error);
-              
-              if (verificationStatusEl) {
-                verificationStatusEl.innerHTML = `
-                  <div class="bg-red-50 p-4 rounded-md border border-red-200 mt-4">
-                    <p class="text-red-700">Error checking verification status.</p>
-                    <p class="text-sm text-red-600 mt-2">${error.message || String(error)}</p>
-                  </div>
-                `;
-              }
-            })
-            .finally(() => {
-              // Re-enable button
-              if (verifyContributionBtn) {
-                verifyContributionBtn.disabled = false;
-                verifyContributionBtn.textContent = "Verify My Contribution";
-              }
-            });
-        } else {
-          // CLIENT not available, show error
-          if (verificationStatusEl) {
-            verificationStatusEl.innerHTML = `
-              <div class="bg-red-50 p-4 rounded-md border border-red-200 mt-4">
-                <p class="text-red-700">Error: Blockchain client not available.</p>
-                <p class="text-sm text-red-600 mt-2">Please refresh the page and try again.</p>
-              </div>
-            `;
-          }
-          
-          // Re-enable button
-          if (verifyContributionBtn) {
-            verifyContributionBtn.disabled = false;
-            verifyContributionBtn.textContent = "Verify My Contribution";
-          }
-        }
-      };
-      
-      // Start checking transaction status
-      checkTransactionStatus();
-    })
-    .catch((error) => {
-      console.error("Error sending verification transaction:", error);
-      
-      if (verificationStatusEl) {
-        verificationStatusEl.innerHTML = `
-          <div class="bg-red-50 p-4 rounded-md border border-red-200 mt-4">
-            <p class="text-red-700">Error sending verification transaction.</p>
-            <p class="text-sm text-red-600 mt-2">${error.message || String(error)}</p>
-          </div>
-        `;
-      }
-      
-      // Re-enable button
-      if (verifyContributionBtn) {
-        verifyContributionBtn.disabled = false;
-        verifyContributionBtn.textContent = "Verify My Contribution";
-      }
-    });
-}
-
-/**
- * Handle End Campaign button click.
- * This initiates the ZK computation process to calculate total contributions.
- */
 async function endCampaignAction() {
   console.log("End campaign button clicked");
+  
+  // === DEBUGGING SECTION - ADD THIS ===
+  console.log("=== API DEBUG ===");
+  
+  const api = getCrowdfundingApi();
+  console.log("API instance:", api);
+  console.log("API type:", typeof api);
+  console.log("API constructor name:", api?.constructor?.name);
+  
+  if (api) {
+    console.log("API methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(api)));
+    console.log("Has endCampaign method:", typeof api.endCampaign);
+    console.log("All API properties:", Object.keys(api));
+  } else {
+    console.log("❌ API is null or undefined!");
+  }
+  
+  // Check the import
+  console.log("getCrowdfundingApi function:", getCrowdfundingApi);
+  console.log("isConnected:", isConnected());
+  console.log("getContractAddress:", getContractAddress());
+  
+  console.log("=== END DEBUG ===");
+  // === END DEBUGGING SECTION ===
   
   // Check if wallet is connected
   if (!isConnected()) {
@@ -986,7 +863,6 @@ async function endCampaignAction() {
   }
   
   // Get the Crowdfunding API
-  const api = getCrowdfundingApi();
   if (!api) {
     showApplicationMessage("API not initialized. Please try reconnecting your wallet");
     return;
@@ -1012,7 +888,7 @@ async function endCampaignAction() {
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Ending campaign and starting zero-knowledge computation...</p>
+          <p>Submitting end campaign request...</p>
           <div class="spinner mt-2"></div>
         </div>
       `;
@@ -1026,36 +902,41 @@ async function endCampaignAction() {
                 result.metadata?.txId || 
                 "unknown";
     
-    console.log("End campaign transaction sent:", txId);
+    const shardId = result.transaction?.transactionPointer?.destinationShardId || undefined;
     
-    // Update UI with transaction info
+    console.log("End campaign transaction sent:", { txId, shardId });
+    
+    // Update UI with transaction info - but don't claim success yet
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Campaign end request submitted successfully!</p>
+          <p>End campaign request submitted!</p>
           <p class="transaction-hash">Transaction ID: ${txId}</p>
           <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
              class="transaction-link" target="_blank">View in Explorer</a>
-          <p class="mt-2">Starting zero-knowledge computation...</p>
-          <p class="mt-2 text-sm">This process may take several minutes to complete.</p>
+          <p class="mt-2">Verifying transaction execution...</p>
           <div class="spinner"></div>
         </div>
       `;
     }
     
-    // Schedule status checking to track the computation
+    // Schedule status checking to track the actual execution result
     scheduleTransactionStatusCheck(
       txId,
       api,
       (txId) => {
-        // Success callback
+        // Success callback - transaction actually succeeded
         if (transactionLinkContainer) {
           transactionLinkContainer.innerHTML = `
             <div class="alert alert-success">
-              <p>Campaign ended successfully! ZK computation started.</p>
+              <p>✅ Campaign ended successfully! ZK computation started.</p>
               <p class="transaction-hash">Transaction ID: ${txId}</p>
               <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
                  class="transaction-link" target="_blank">View in Explorer</a>
+              <div class="mt-2">
+                <p class="text-sm">The zero-knowledge computation is now running to calculate the total raised amount.</p>
+                <p class="text-sm">This process may take 2-5 minutes to complete.</p>
+              </div>
               <button id="refresh-state-btn-end" class="btn btn-secondary mt-2">Refresh Contract State</button>
             </div>
           `;
@@ -1069,16 +950,31 @@ async function endCampaignAction() {
         
         // Update contract state
         updateContractState();
+        
+        // Set periodic updates to check for computation completion
+        const checkComputationProgress = setInterval(() => {
+          updateContractState();
+          // Stop checking after 10 minutes
+          setTimeout(() => clearInterval(checkComputationProgress), 600000);
+        }, 30000); // Check every 30 seconds
       },
       (txId, error) => {
-        // Failure callback
+        // Failure callback - transaction actually failed
         if (transactionLinkContainer) {
           transactionLinkContainer.innerHTML = `
             <div class="alert alert-error">
-              <p>Failed to end campaign: ${error || 'Unknown error'}</p>
+              <p>❌ Failed to end campaign: ${error || 'Transaction execution failed'}</p>
               <p class="transaction-hash">Transaction ID: ${txId}</p>
               <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
                  class="transaction-link" target="_blank">View in Explorer</a>
+              <div class="mt-2">
+                <p class="text-sm">Common reasons for failure:</p>
+                <ul class="text-sm ml-4">
+                  <li>• Only the campaign owner can end the campaign</li>
+                  <li>• Campaign may already be ended</li>
+                  <li>• Campaign may not be in Active status</li>
+                </ul>
+              </div>
               <button id="retry-end-campaign" class="btn btn-primary mt-2">Retry</button>
             </div>
           `;
@@ -1092,9 +988,18 @@ async function endCampaignAction() {
                 transactionLinkContainer.innerHTML = '';
                 transactionLinkContainer.classList.add("hidden");
               }
+              
+              // Re-enable the button for manual retry
+              if (endCampaignBtn) {
+                endCampaignBtn.disabled = false;
+                endCampaignBtn.textContent = "End Campaign";
+              }
             });
           }
         }
+        
+        // Show error message
+        showApplicationMessage(`Campaign end failed: ${error || 'Unknown error'}`);
       },
       (txId, attempt) => {
         // Pending callback - show progress after a few attempts
@@ -1102,34 +1007,40 @@ async function endCampaignAction() {
           if (transactionLinkContainer) {
             transactionLinkContainer.innerHTML = `
               <div class="alert alert-info">
-                <p>ZK computation in progress...</p>
+                <p>🔄 Verifying campaign end transaction...</p>
                 <p class="transaction-hash">Transaction ID: ${txId}</p>
                 <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
                    class="transaction-link" target="_blank">View in Explorer</a>
-                <p class="text-sm mt-2">The computation may take 2-5 minutes to complete.</p>
+                <p class="text-sm mt-2">Checking if the transaction executed successfully...</p>
                 <div class="spinner mt-2"></div>
-                <button id="refresh-state-during-compute" class="btn btn-secondary mt-2">Check Status</button>
+                <button id="refresh-state-during-verification" class="btn btn-secondary mt-2">Check Status</button>
               </div>
             `;
             
-            // Add refresh button during computation
-            const refreshBtn = document.querySelector("#refresh-state-during-compute");
+            // Add manual refresh button during verification
+            const refreshBtn = document.querySelector("#refresh-state-during-verification");
             if (refreshBtn) {
-              refreshBtn.addEventListener("click", updateContractState);
+              refreshBtn.addEventListener("click", () => {
+                // Force a status check
+                api.checkTransactionStatus(txId, shardId).then(status => {
+                  console.log("Manual status check result:", status);
+                });
+                updateContractState();
+              });
             }
           }
         }
       }
     );
     
-    // Set a fallback timer to update the state after a longer period
-    // This helps in case the computation takes a long time
+    // Set fallback timers to update the state 
     setTimeout(() => {
+      console.log("Fallback state update after 2 minutes");
       updateContractState();
     }, 120000); // 2 minutes
     
-    // Set another refresh for 5 minutes
     setTimeout(() => {
+      console.log("Fallback state update after 5 minutes");
       updateContractState();
     }, 300000); // 5 minutes
     
@@ -1141,7 +1052,15 @@ async function endCampaignAction() {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-error">
           <p>Error ending campaign: ${error.message || String(error)}</p>
-          <p>Please try again or check the console for more details.</p>
+          <div class="mt-2">
+            <p class="text-sm">This error occurred before the transaction was submitted.</p>
+            <p class="text-sm">Please check:</p>
+            <ul class="text-sm ml-4">
+              <li>• Wallet connection is active</li>
+              <li>• You are the campaign owner</li>
+              <li>• Network connectivity</li>
+            </ul>
+          </div>
           <button id="retry-end-campaign" class="btn btn-primary mt-2">Retry</button>
         </div>
       `;
