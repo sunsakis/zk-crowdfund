@@ -1,6 +1,8 @@
 import { getCrowdfundingApi, isConnected, setContractAddress, getContractAddress, CLIENT } from "./AppState";
 import {
   connectPrivateKeyWalletClick,
+  connectMpcWalletClick,
+  connectMetaMaskWalletClick,
   disconnectWalletClick,
   updateInteractionVisibility,
 } from "./WalletIntegration";
@@ -265,11 +267,30 @@ function setupEventListeners() {
   const pkConnect = document.querySelector("#private-key-connect-btn");
   if (pkConnect) {
     pkConnect.addEventListener("click", () => {
-      // The function will read values from input fields directly
       connectPrivateKeyWalletClick();
     });
   } else {
     console.warn("Private key connect button not found");
+  }
+
+  // Connect using MPC wallet
+  const mpcConnect = document.querySelector("#mpc-wallet-connect-btn");
+  if (mpcConnect) {
+    mpcConnect.addEventListener("click", () => {
+      connectMpcWalletClick();
+    });
+  } else {
+    console.warn("MPC wallet connect button not found");
+  }
+
+  // Connect using MetaMask
+  const metamaskConnect = document.querySelector("#metamask-connect-btn");
+  if (metamaskConnect) {
+    metamaskConnect.addEventListener("click", () => {
+      connectMetaMaskWalletClick();
+    });
+  } else {
+    console.warn("MetaMask connect button not found");
   }
 
   // Disconnect wallet
@@ -1325,7 +1346,7 @@ async function withdrawFundsAction() {
 export function updateWalletUI(address?: string) {
   console.log("Updating wallet UI:", address ? "Connected" : "Disconnected");
   
-  const walletConnectSection = document.querySelector("#private-key-connect");
+  const walletConnectSection = document.querySelector("#wallet-connect-options");
   const walletDisconnectSection = document.querySelector("#wallet-disconnect");
   
   if (address) {
@@ -1567,9 +1588,12 @@ function showApplicationMessage(message: string) {
   const messageArea = document.querySelector("#application-messages");
   if (messageArea) {
     messageArea.textContent = message;
+    messageArea.classList.remove("hidden");
+    messageArea.className = "alert alert-info";
     // Auto-clear after 5 seconds
     setTimeout(() => {
       messageArea.textContent = "";
+      messageArea.classList.add("hidden");
     }, 5000);
   }
 }

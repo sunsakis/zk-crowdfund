@@ -124,6 +124,12 @@ function notifyStateChange(): void {
 export const setAccount = (account: SenderAuthentication | undefined, type?: 'privateKey' | 'mpc' | 'metamask'): void => {
   currentAccount = account;
   walletType = type;
+  
+  console.log("Account set:", {
+    address: account?.getAddress(),
+    walletType: type
+  });
+  
   updateCrowdfundingApi();
   notifyStateChange();
 };
@@ -132,6 +138,7 @@ export const setAccount = (account: SenderAuthentication | undefined, type?: 'pr
  * Reset the current account (logout)
  */
 export const resetAccount = (): void => {
+  console.log("Resetting account");
   currentAccount = undefined;
   crowdfundingApi = undefined;
   walletType = undefined;
@@ -163,10 +170,19 @@ export const getAccountAddress = (): string | undefined => {
 };
 
 /**
+ * Get the current account authentication object
+ * @returns The SenderAuthentication object or undefined if not connected
+ */
+export const getCurrentAccount = (): SenderAuthentication | undefined => {
+  return currentAccount;
+};
+
+/**
  * Set the contract address
  * @param address The contract address
  */
 export const setContractAddress = (address: string): void => {
+  console.log("Setting contract address:", address);
   contractAddress = address;
   updateCrowdfundingApi();
   notifyStateChange();
@@ -189,12 +205,22 @@ export const getCrowdfundingApi = (): CrowdfundingApi | undefined => {
 };
 
 /**
+ * Get the current node URL
+ * @returns The current blockchain node URL
+ */
+export const getCurrentNodeUrl = (): string => {
+  return currentNodeUrl;
+};
+
+/**
  * Update the crowdfunding API based on current state
  */
 function updateCrowdfundingApi(): void {
   if (currentAccount && contractAddress) {
     try {
       console.log(`Creating transaction client with node URL: ${currentNodeUrl}`);
+      console.log(`Wallet type: ${walletType}`);
+      console.log(`Contract address: ${contractAddress}`);
       
       // Create transaction client with current node URL
       const transactionClient = BlockchainTransactionClient.create(
@@ -209,7 +235,8 @@ function updateCrowdfundingApi(): void {
       crowdfundingApi = new CrowdfundingApi(
         transactionClient, 
         zkClient, 
-        currentAccount.getAddress()
+        currentAccount.getAddress(),
+        CLIENT // Pass the ShardedClient instance
       );
       
       console.log("Crowdfunding API initialized successfully");
@@ -218,8 +245,64 @@ function updateCrowdfundingApi(): void {
       crowdfundingApi = undefined;
     }
   } else {
+    console.log("Cannot create API - missing account or contract address", {
+      hasAccount: !!currentAccount,
+      hasContract: !!contractAddress
+    });
     crowdfundingApi = undefined;
   }
   
   notifyStateChange();
 }
+
+/**
+ * Retry connection with different node if current one fails
+ * @returns Promise resolving to success status
+ */
+export const retryConnection = async (): Promise<boolean> => {
+  const isCurrentNodeWorking = await checkNodeConnectivity();
+  
+  if (!isCurrentNodeWorking) {
+    console.log("Current node not working, switching to fallback");
+    switchToFallbackNode();
+    
+    // Check if fallback node works
+    const isFallbackWorking = await checkNodeConnectivity();
+    return isFallbackWorking;
+  }
+  
+  return true;
+};
+
+/**
+ * Get connection status information
+ * @returns Object with connection details
+ */
+export const getConnectionStatus = () => {
+  return {
+    isConnected: isConnected(),
+    walletType: getWalletType(),
+    address: getAccountAddress(),
+    nodeUrl: getCurrentNodeUrl(),
+    hasContract: !!contractAddress,
+    hasApi: !!crowdfundingApi
+  };
+};
+
+/**
+ * Validate wallet connection and API availability
+ * @returns Object with validation results
+ */
+export const validateConnection = () => {
+  const status = getConnectionStatus();
+  
+  return {
+    ...status,
+    canInteract: status.isConnected && status.hasContract && status.hasApi,
+    missingComponents: [
+      !status.isConnected && 'wallet connection',
+      !status.hasContract && 'contract address',
+      !status.hasApi && 'API initialization'
+    ].filter(Boolean)
+  };
+};

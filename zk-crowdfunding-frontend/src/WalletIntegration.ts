@@ -10,6 +10,8 @@ import { CryptoUtils } from "@partisiablockchain/zk-client";
 import { SenderAuthentication } from "@partisiablockchain/blockchain-api-transaction-client";
 import { deserializeState, CampaignStatus } from "./contract/CrowdfundingGenerated";
 import { connectPrivateKey } from "./shared/PrivateKeySignatureProvider";
+import { connectMpcWallet } from "./shared/MpcWalletSignatureProvider";
+import { connectMetaMask } from "./shared/MetaMaskSignatureProvider";
 
 /**
  * Set wallet connection status only (don't use for general messages)
@@ -92,7 +94,7 @@ export const connectPrivateKeyWalletClick = (privateKeyValue?: string) => {
   try {
     const keyPair = CryptoUtils.privateKeyToKeypair(privateKeyInput);
     const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
-    handleWalletConnect(connectPrivateKey(sender, keyPair));
+    handleWalletConnect(connectPrivateKey(sender, keyPair), 'privateKey');
   } catch (error) {
     console.error("Error connecting with private key:", error);
     setWalletConnectionStatus(`Error connecting wallet: ${error.message || error}`);
@@ -100,20 +102,51 @@ export const connectPrivateKeyWalletClick = (privateKeyValue?: string) => {
 };
 
 /**
+ * Connect to the blockchain using MPC wallet browser extension.
+ */
+export const connectMpcWalletClick = () => {
+  console.log("Attempting to connect MPC wallet");
+  setWalletConnectionStatus("Connecting to MPC wallet...");
+  
+  try {
+    handleWalletConnect(connectMpcWallet(), 'mpc');
+  } catch (error) {
+    console.error("Error connecting MPC wallet:", error);
+    setWalletConnectionStatus(`Error connecting MPC wallet: ${error.message || error}`);
+  }
+};
+
+/**
+ * Connect to the blockchain using MetaMask snap.
+ */
+export const connectMetaMaskWalletClick = () => {
+  console.log("Attempting to connect MetaMask");
+  setWalletConnectionStatus("Connecting to MetaMask...");
+  
+  try {
+    handleWalletConnect(connectMetaMask(), 'metamask');
+  } catch (error) {
+    console.error("Error connecting MetaMask:", error);
+    setWalletConnectionStatus(`Error connecting MetaMask: ${error.message || error}`);
+  }
+};
+
+/**
  * Common code for handling a generic wallet connection.
  */
-const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
+const handleWalletConnect = (connect: Promise<SenderAuthentication>, walletType: 'privateKey' | 'mpc' | 'metamask') => {
   resetAccount();
   setWalletConnectionStatus("Connecting...");
   connect
     .then((userAccount) => {
-      setAccount(userAccount);
+      setAccount(userAccount, walletType);
 
       // Fix UI - set the connection status and keep it
       const address = userAccount.getAddress();
       setWalletConnectionStatus(`Connected: ${address}`);
-      toggleVisibility("#private-key-connect");
-      toggleVisibility("#wallet-disconnect");
+      
+      // Update UI based on wallet type
+      updateWalletConnectionUI(true, walletType);
       updateInteractionVisibility();
       
       // Update state if contract address is set
@@ -122,6 +155,7 @@ const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
       }
     })
     .catch((error) => {
+      console.error("Wallet connection error:", error);
       if (error && typeof error === 'object' && 'message' in error) {
         setWalletConnectionStatus(error.message as string);
       } else {
@@ -131,13 +165,41 @@ const handleWalletConnect = (connect: Promise<SenderAuthentication>) => {
 };
 
 /**
+ * Update wallet connection UI elements
+ */
+const updateWalletConnectionUI = (connected: boolean, walletType?: 'privateKey' | 'mpc' | 'metamask') => {
+  const walletConnectOptions = document.querySelector("#wallet-connect-options");
+  const walletDisconnect = document.querySelector("#wallet-disconnect");
+  
+  if (connected) {
+    // Hide all connection options and show disconnect
+    if (walletConnectOptions) walletConnectOptions.classList.add("hidden");
+    if (walletDisconnect) walletDisconnect.classList.remove("hidden");
+    
+    // Update wallet type indicator if needed
+    const walletTypeIndicator = document.querySelector("#wallet-type");
+    if (walletTypeIndicator && walletType) {
+      const typeLabels = {
+        'privateKey': 'Private Key',
+        'mpc': 'MPC Wallet',
+        'metamask': 'MetaMask'
+      };
+      walletTypeIndicator.textContent = typeLabels[walletType];
+    }
+  } else {
+    // Show connection options and hide disconnect
+    if (walletConnectOptions) walletConnectOptions.classList.remove("hidden");
+    if (walletDisconnect) walletDisconnect.classList.add("hidden");
+  }
+};
+
+/**
  * Reset state to disconnect current user.
  */
 export const disconnectWalletClick = () => {
   resetAccount();
   setWalletConnectionStatus("Currently not logged in.");
-  toggleVisibility("#private-key-connect");
-  toggleVisibility("#wallet-disconnect");
+  updateWalletConnectionUI(false);
   updateInteractionVisibility();
 };
 
