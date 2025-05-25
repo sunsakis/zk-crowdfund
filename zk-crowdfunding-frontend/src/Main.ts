@@ -526,302 +526,6 @@ export const updateContractState = () => {
     });
 };
 
-async function addContributionFormAction() {
-  console.log("Add contribution button clicked");
-  
-  // Test if a user has connected
-  if (!isConnected()) {
-    showApplicationMessage("Please connect your wallet first");
-    return;
-  }
-  
-  const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
-  if (!contributionInput) {
-    showApplicationMessage("Error: Contribution input field not found");
-    return;
-  }
-
-  const contributionValue = parseFloat(contributionInput.value);
-  if (isNaN(contributionValue) || contributionValue <= 0) {
-    showApplicationMessage("Please enter a valid contribution amount greater than 0");
-    return;
-  }
-  
-  // Updated validation limits for the new scaling
-  if (contributionValue < 0.000001 || contributionValue > 2147.483647) {
-    showApplicationMessage("Please enter a contribution amount between 0.000001 and 2147.483647");
-    return;
-  }
-  
-  // Get API and address
-  const api = getCrowdfundingApi();
-  const address = getContractAddress();
-  
-  if (!api || !address) {
-    showApplicationMessage("API or address not initialized");
-    return;
-  }
-  
-  // Disable the button during processing
-  const addContributionBtn = document.querySelector("#add-contribution-btn") as HTMLButtonElement;
-  if (addContributionBtn) {
-    addContributionBtn.disabled = true;
-    addContributionBtn.textContent = "Processing...";
-  }
-  
-  // Show transaction info container
-  const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
-  if (transactionLinkContainer) {
-    transactionLinkContainer.classList.remove("hidden");
-    transactionLinkContainer.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
-  }
-  
-  try {
-    // Get contract data with proper error handling
-    const contractData = await CLIENT.getContractData(address);
-    
-    // Safely extract token address from contract state
-    const { tokenAddress } = safelyExtractContractState(contractData);
-    
-    // Show processing status
-    showApplicationMessage("Processing contribution...");
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Processing contribution of ${contributionValue} tokens...</p>
-          <div class="spinner mt-2"></div>
-        </div>
-      `;
-    }
-    
-    // Convert to token units for display
-    const tokenUnits = displayAmountToTokenUnits(contributionValue);
-    console.log(`Converting contribution: Display=${contributionValue} -> TokenUnits=${tokenUnits}`);
-    
-    // Use the combined method that handles both approval and contribution
-    const result = await api.addContributionWithApproval(contributionValue, address, tokenAddress);
-    
-    // Extract transaction IDs safely
-    let zkTxId = "unknown";
-    let tokenTxId = "unknown";
-    
-    // Handle approval feedback if applicable
-    if (result.approvalResult) {
-      const approvalTxId = result.approvalResult.transaction?.transactionPointer?.identifier || "unknown";
-      console.log("Approval transaction:", approvalTxId);
-    }
-    
-    // Handle the contribution transaction details safely
-    const contributionResult = result.contributionResult;
-    if (contributionResult.metadata) {
-      // Extract transaction IDs with proper type checks
-      if (contributionResult.metadata.zkTransaction) {
-        if (typeof contributionResult.metadata.zkTransaction === 'string') {
-          zkTxId = contributionResult.metadata.zkTransaction;
-        } else if (contributionResult.metadata.zkTransaction.id) {
-          zkTxId = contributionResult.metadata.zkTransaction.id;
-        }
-      }
-      
-      if (contributionResult.metadata.tokenTransaction) {
-        if (typeof contributionResult.metadata.tokenTransaction === 'string') {
-          tokenTxId = contributionResult.metadata.tokenTransaction;
-        } else if (contributionResult.metadata.tokenTransaction.id) {
-          tokenTxId = contributionResult.metadata.tokenTransaction.id;
-        }
-      }
-    }
-    
-    // Use ZK transaction ID for status checking, with proper fallbacks
-    const primaryTxId = zkTxId !== "unknown" ? zkTxId : 
-                        (tokenTxId !== "unknown" ? tokenTxId : 
-                        (contributionResult.transaction?.transactionPointer?.identifier || "unknown"));
-    
-    console.log("Contribution transactions:", { zkTxId, tokenTxId, primaryTxId });
-    
-    // Update UI with transaction info
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-info">
-          <p>Contribution submitted successfully!</p>
-          <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-          <p class="transaction-hash">Transaction ID: ${primaryTxId}</p>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
-             class="transaction-link" target="_blank">View in Explorer</a>
-          <p class="mt-2">Transaction is processing...</p>
-          <div class="spinner"></div>
-        </div>
-      `;
-      
-      // Add a refresh button
-      const refreshButton = document.createElement('button');
-      refreshButton.className = 'btn btn-secondary mt-2';
-      refreshButton.textContent = 'Refresh Contract State';
-      refreshButton.addEventListener('click', updateContractState);
-      
-      transactionLinkContainer.appendChild(refreshButton);
-    }
-    
-    // Clear the input
-    contributionInput.value = "";
-    
-    // Schedule status checking with enhanced success/failure handling
-    scheduleTransactionStatusCheck(
-      primaryTxId,
-      api,
-      (txId) => {
-        // Success callback - but verify both transactions succeeded
-        const metadata = contributionResult.metadata;
-        
-        if (metadata?.overallSuccess === true) {
-          // Both transactions succeeded
-          if (transactionLinkContainer) {
-            transactionLinkContainer.innerHTML = `
-              <div class="alert alert-success">
-                <p>✅ Contribution successful!</p>
-                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-                <div class="mt-2">
-                  <p><strong>ZK Input:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${metadata.zkTransaction?.id || txId}" 
-                     class="transaction-link" target="_blank">${metadata.zkTransaction?.id || txId}</a> ✅</p>
-                  <p><strong>Token Transfer:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${metadata.tokenTransaction?.id || tokenTxId}" 
-                     class="transaction-link" target="_blank">${metadata.tokenTransaction?.id || tokenTxId}</a> ✅</p>
-                </div>
-                <button id="refresh-state-btn" class="btn btn-secondary mt-2">Refresh Contract State</button>
-              </div>
-            `;
-            
-            // Add event listener to the refresh button
-            const refreshBtn = document.querySelector("#refresh-state-btn");
-            if (refreshBtn) {
-              refreshBtn.addEventListener("click", updateContractState);
-            }
-          }
-          
-          // Update contract state
-          updateContractState();
-        } else {
-          // ZK succeeded but token transfer failed - this is actually a failure
-          const failureReason = metadata?.failureReason || "Token transfer failed";
-          const failedTxId = metadata?.failedTransaction || "unknown";
-          
-          if (transactionLinkContainer) {
-            transactionLinkContainer.innerHTML = `
-              <div class="alert alert-error">
-                <p>❌ Contribution failed: ${failureReason}</p>
-                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-                <div class="mt-2">
-                  <p><strong>ZK Input:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${metadata?.zkTransaction?.id || txId}" 
-                     class="transaction-link" target="_blank">${metadata?.zkTransaction?.id || txId}</a> ✅</p>
-                  <p><strong>Token Transfer:</strong> <a href="https://browser.testnet.partisiablockchain.com/transactions/${failedTxId}" 
-                     class="transaction-link" target="_blank">${failedTxId}</a> ❌</p>
-                </div>
-                <p class="mt-2 text-sm">The ZK commitment was created but the token transfer failed. You may need to try again.</p>
-                <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
-              </div>
-            `;
-            
-            // Add retry button
-            const retryBtn = document.querySelector("#retry-contribution");
-            if (retryBtn) {
-              retryBtn.addEventListener("click", () => {
-                // Reset UI
-                if (transactionLinkContainer) {
-                  transactionLinkContainer.innerHTML = '';
-                  transactionLinkContainer.classList.add("hidden");
-                }
-              });
-            }
-          }
-        }
-      },
-      (txId, error) => {
-        // Failure callback - ZK transaction itself failed
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-error">
-              <p>❌ Contribution failed: ${error || 'ZK transaction failed'}</p>
-              <p class="transaction-hash">ZK Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
-            </div>
-          `;
-          
-          // Add retry button
-          const retryBtn = document.querySelector("#retry-contribution");
-          if (retryBtn) {
-            retryBtn.addEventListener("click", () => {
-              // Reset UI
-              if (transactionLinkContainer) {
-                transactionLinkContainer.innerHTML = '';
-                transactionLinkContainer.classList.add("hidden");
-              }
-            });
-          }
-        }
-      },
-      (txId, attempt) => {
-        // Pending callback - show progress after a few attempts
-        if (attempt === 5) {
-          if (transactionLinkContainer) {
-            transactionLinkContainer.innerHTML = `
-              <div class="alert alert-info">
-                <p>🔄 Checking both ZK input and token transfer...</p>
-                <p class="transaction-hash">Primary Transaction ID: ${txId}</p>
-                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                   class="transaction-link" target="_blank">View in Explorer</a>
-                <div class="spinner mt-2"></div>
-              </div>
-            `;
-          }
-        }
-      }
-    );
-    
-    // Set a fallback timer to update the state
-    setTimeout(() => {
-      updateContractState();
-    }, 30000);
-    
-  } catch (error) {
-    console.error("Error in contribution process:", error);
-    
-    showApplicationMessage(`Error: ${error.message || String(error)}`);
-    if (transactionLinkContainer) {
-      transactionLinkContainer.innerHTML = `
-        <div class="alert alert-error">
-          <p>Error: ${error.message || String(error)}</p>
-          <p>Please try again or check the console for more details.</p>
-          <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
-        </div>
-      `;
-      
-      // Add retry button
-      const retryBtn = document.querySelector("#retry-contribution");
-      if (retryBtn) {
-        retryBtn.addEventListener("click", () => {
-          // Reset UI
-          if (transactionLinkContainer) {
-            transactionLinkContainer.innerHTML = '';
-          }
-          
-          // Re-enable the button for manual retry
-          if (addContributionBtn) {
-            addContributionBtn.disabled = false;
-            addContributionBtn.textContent = "Contribute";
-          }
-        });
-      }
-    }
-  } finally {
-    // Re-enable the button
-    if (addContributionBtn) {
-      addContributionBtn.disabled = false;
-      addContributionBtn.textContent = "Contribute";
-    }
-  }
-}
-
 async function endCampaignAction() {
   console.log("End campaign button clicked");
   
@@ -1091,27 +795,271 @@ async function endCampaignAction() {
   }
 }
 
+// Enhanced action handlers with production-grade error checking
+// Add these enhanced functions to your Main.ts file
+
 /**
- * Handle Withdraw Funds button click.
- * This allows the campaign owner to withdraw funds if the campaign was successful.
+ * Enhanced contribution form action with contract-level error detection
  */
-async function withdrawFundsAction() {
-  console.log("Withdraw funds button clicked");
+async function addContributionFormAction() {
+  console.log("=== ENHANCED ADD CONTRIBUTION ACTION ===");
   
-  // Check if wallet is connected
   if (!isConnected()) {
     showApplicationMessage("Please connect your wallet first");
     return;
   }
   
-  // Get the campaign address
+  const contributionInput = document.querySelector("#contribution") as HTMLInputElement;
+  if (!contributionInput) {
+    showApplicationMessage("Error: Contribution input field not found");
+    return;
+  }
+
+  const contributionValue = parseFloat(contributionInput.value);
+  if (isNaN(contributionValue) || contributionValue <= 0) {
+    showApplicationMessage("Please enter a valid contribution amount greater than 0");
+    return;
+  }
+  
+  // Enhanced validation limits
+  if (contributionValue < 0.000001 || contributionValue > 2147.483647) {
+    showApplicationMessage("Please enter a contribution amount between 0.000001 and 2147.483647");
+    return;
+  }
+  
+  const api = getCrowdfundingApi();
+  const address = getContractAddress();
+  
+  if (!api || !address) {
+    showApplicationMessage("API or address not initialized");
+    return;
+  }
+  
+  // Disable button and show loading state
+  const addContributionBtn = document.querySelector("#add-contribution-btn") as HTMLButtonElement;
+  if (addContributionBtn) {
+    addContributionBtn.disabled = true;
+    addContributionBtn.textContent = "Processing...";
+  }
+  
+  // Show transaction info container
+  const transactionLinkContainer = document.querySelector("#add-contribution-transaction-link");
+  if (transactionLinkContainer) {
+    transactionLinkContainer.classList.remove("hidden");
+    transactionLinkContainer.innerHTML = '<div class="loading-indicator"><div class="spinner"></div></div>';
+  }
+  
+  try {
+    // Get contract data with enhanced error handling
+    const contractData = await CLIENT.getContractData(address);
+    const { tokenAddress } = safelyExtractContractState(contractData);
+    
+    // Show initial processing status
+    showApplicationMessage("Processing contribution...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>🔄 Processing contribution of ${contributionValue} tokens...</p>
+          <div class="spinner mt-2"></div>
+        </div>
+      `;
+    }
+    
+    // Convert to token units for display
+    const tokenUnits = displayAmountToTokenUnits(contributionValue);
+    console.log(`Converting contribution: Display=${contributionValue} -> TokenUnits=${tokenUnits}`);
+    
+    // Use enhanced contribution method with contract error detection
+    const result = await api.addContributionWithApproval(contributionValue, address, tokenAddress);
+    
+    // Extract transaction details safely
+    const contributionResult = result.contributionResult;
+    const zkTxId = contributionResult.metadata?.zkTransaction?.id || "unknown";
+    const tokenTxId = contributionResult.metadata?.tokenTransaction?.id || "unknown";
+    const primaryTxId = zkTxId !== "unknown" ? zkTxId : tokenTxId;
+    
+    console.log("Contribution transactions:", { zkTxId, tokenTxId, primaryTxId });
+    
+    // Update UI with transaction info and status
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>📝 Contribution submitted successfully!</p>
+          <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
+          <p class="transaction-hash">Primary Transaction: ${primaryTxId}</p>
+          <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
+             class="transaction-link" target="_blank">View in Explorer</a>
+          <p class="mt-2">⏳ Verifying contract execution...</p>
+          <div class="spinner"></div>
+        </div>
+      `;
+    }
+    
+    // Clear the input
+    contributionInput.value = "";
+    
+    // Enhanced status checking with contract error detection
+    scheduleEnhancedTransactionStatusCheck(
+      primaryTxId,
+      api,
+      contributionResult,
+      "contribution",
+      (success, contractError, blockchainError) => {
+        if (success && contributionResult.metadata?.overallSuccess) {
+          // Both ZK and token transactions succeeded
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-success">
+                <p>✅ Contribution successful!</p>
+                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
+                <div class="mt-2 bg-light p-2 rounded">
+                  <p class="text-sm"><strong>ZK Input:</strong> 
+                    <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTxId}" 
+                       class="transaction-link" target="_blank">${zkTxId}</a> ✅</p>
+                  <p class="text-sm"><strong>Token Transfer:</strong> 
+                    <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTxId}" 
+                       class="transaction-link" target="_blank">${tokenTxId}</a> ✅</p>
+                </div>
+                <button id="refresh-state-btn-contrib" class="btn btn-secondary mt-2">Refresh Contract State</button>
+              </div>
+            `;
+            
+            const refreshBtn = document.querySelector("#refresh-state-btn-contrib");
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
+          }
+          updateContractState();
+        } else {
+          // Handle specific failure scenarios with detailed error reporting
+          const errorReason = contractError || blockchainError || "Unknown error";
+          const isContractError = !!contractError;
+          
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-error">
+                <p>❌ Contribution failed: ${errorReason}</p>
+                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
+                <div class="mt-2 bg-light p-2 rounded">
+                  <p class="text-sm"><strong>Error Type:</strong> ${isContractError ? 'Contract Assertion Failure' : 'Blockchain Error'}</p>
+                  ${isContractError ? `
+                    <div class="mt-2 p-2 bg-yellow-50 border-yellow-200 rounded">
+                      <p class="text-sm"><strong>Contract Error Details:</strong></p>
+                      <p class="text-sm text-yellow-800">${contractError}</p>
+                      <p class="text-sm mt-1"><strong>Common Causes:</strong></p>
+                      <ul class="text-sm text-yellow-700 ml-4">
+                        <li>• Campaign may not be in Active status</li>
+                        <li>• ZK commitment may not have been created first</li>
+                        <li>• Token transfer may have failed due to insufficient balance or allowance</li>
+                        <li>• Campaign may have been ended by the owner</li>
+                      </ul>
+                    </div>
+                  ` : ''}
+                  <div class="mt-2">
+                    <p class="text-sm">Transaction Details:</p>
+                    <p class="text-sm">• ZK Input: <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTxId}" 
+                       class="transaction-link" target="_blank">${zkTxId}</a></p>
+                    <p class="text-sm">• Token Transfer: <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTxId}" 
+                       class="transaction-link" target="_blank">${tokenTxId}</a></p>
+                  </div>
+                </div>
+                <div class="mt-3">
+                  <button id="retry-contribution" class="btn btn-primary">Retry Contribution</button>
+                  <button id="refresh-state-check" class="btn btn-secondary ml-2">Check Campaign Status</button>
+                </div>
+              </div>
+            `;
+            
+            // Add retry and refresh buttons
+            const retryBtn = document.querySelector("#retry-contribution");
+            const refreshBtn = document.querySelector("#refresh-state-check");
+            
+            if (retryBtn) {
+              retryBtn.addEventListener("click", () => {
+                if (transactionLinkContainer) {
+                  transactionLinkContainer.innerHTML = '';
+                  transactionLinkContainer.classList.add("hidden");
+                }
+              });
+            }
+            
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
+          }
+        }
+      }
+    );
+    
+  } catch (error) {
+    console.error("Error in contribution process:", error);
+    
+    // Enhanced error message with specific error type detection
+    let errorMessage = error.message || String(error);
+    let isContractError = false;
+    
+    if (error.code === 'CONTRACT_EXECUTION_FAILED' || error.contractError) {
+      isContractError = true;
+      errorMessage = error.contractError || error.message;
+    }
+    
+    showApplicationMessage(`Contribution failed: ${errorMessage}`);
+    
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-error">
+          <p>❌ Contribution failed: ${errorMessage}</p>
+          ${isContractError ? `
+            <div class="mt-2 p-2 bg-red-50 border-red-200 rounded">
+              <p class="text-sm"><strong>This is a contract-level error.</strong></p>
+              <p class="text-sm text-red-700">The transaction was submitted but the smart contract rejected it.</p>
+            </div>
+          ` : `
+            <div class="mt-2 p-2 bg-yellow-50 border-yellow-200 rounded">
+              <p class="text-sm"><strong>This error occurred before submission.</strong></p>
+              <p class="text-sm text-yellow-700">Please check your wallet connection and try again.</p>
+            </div>
+          `}
+          <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
+        </div>
+      `;
+      
+      const retryBtn = document.querySelector("#retry-contribution");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", () => {
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = '';
+            transactionLinkContainer.classList.add("hidden");
+          }
+        });
+      }
+    }
+  } finally {
+    // Re-enable the button
+    if (addContributionBtn) {
+      addContributionBtn.disabled = false;
+      addContributionBtn.textContent = "Contribute";
+    }
+  }
+}
+
+/**
+ * Enhanced withdraw funds action with contract assertion checking
+ */
+async function withdrawFundsAction() {
+  console.log("=== ENHANCED WITHDRAW FUNDS ACTION ===");
+  
+  if (!isConnected()) {
+    showApplicationMessage("Please connect your wallet first");
+    return;
+  }
+  
   const address = getContractAddress();
   if (!address) {
     showApplicationMessage("No campaign address found");
     return;
   }
   
-  // Get the Crowdfunding API
   const api = getCrowdfundingApi();
   if (!api) {
     showApplicationMessage("API not initialized. Please try reconnecting your wallet");
@@ -1133,123 +1081,219 @@ async function withdrawFundsAction() {
   }
   
   try {
-    // Show processing status
-    showApplicationMessage("Withdrawing funds...");
+    // Pre-validate campaign state
+    showApplicationMessage("Validating campaign state...");
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Processing withdrawal request...</p>
+          <p>🔍 Validating campaign eligibility for withdrawal...</p>
           <div class="spinner mt-2"></div>
         </div>
       `;
     }
     
-    // Withdraw the funds
+    // Get current campaign state for validation
+    let campaignData;
+    try {
+      campaignData = await api.getCampaignData(address);
+      console.log("Campaign validation data:", campaignData);
+    } catch (error) {
+      console.warn("Could not pre-validate campaign data:", error);
+    }
+    
+    // Show processing status
+    showApplicationMessage("Processing withdrawal request...");
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <p>💰 Submitting withdrawal request...</p>
+          <div class="spinner mt-2"></div>
+        </div>
+      `;
+    }
+    
+    // Submit withdrawal transaction
     const result = await api.withdrawFunds(address);
     
-    // Get transaction ID for tracking
-    const txId = result.transaction?.transactionPointer?.identifier || 
-                result.metadata?.txId || 
-                "unknown";
+    const txId = result.transaction?.transactionPointer?.identifier || "unknown";
+    const shardId = result.transaction?.transactionPointer?.destinationShardId;
     
-    console.log("Withdraw funds transaction sent:", txId);
+    console.log("Withdraw funds transaction sent:", { txId, shardId });
     
     // Update UI with transaction info
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>Withdrawal request submitted successfully!</p>
+          <p>📝 Withdrawal request submitted!</p>
           <p class="transaction-hash">Transaction ID: ${txId}</p>
           <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
              class="transaction-link" target="_blank">View in Explorer</a>
-          <p class="mt-2">Processing transaction...</p>
+          <p class="mt-2">⏳ Verifying contract execution...</p>
           <div class="spinner"></div>
         </div>
       `;
     }
     
-    // Schedule status checking
-    scheduleTransactionStatusCheck(
+    // Enhanced status checking with contract error detection
+    scheduleEnhancedTransactionStatusCheck(
       txId,
       api,
-      (txId) => {
-        // Success callback
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-success">
-              <p>Funds withdrawn successfully!</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="refresh-state-btn-withdraw" class="btn btn-secondary mt-2">Refresh Contract State</button>
-            </div>
-          `;
-          
-          // Add event listener to the refresh button
-          const refreshBtn = document.querySelector("#refresh-state-btn-withdraw");
-          if (refreshBtn) {
-            refreshBtn.addEventListener("click", updateContractState);
+      result,
+      "withdrawal",
+      (success, contractError, blockchainError) => {
+        if (success) {
+          // Withdrawal successful
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-success">
+                <p>✅ Funds withdrawn successfully!</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                   class="transaction-link" target="_blank">View in Explorer</a>
+                <div class="mt-2 bg-green-50 p-2 rounded">
+                  <p class="text-sm text-green-700">💰 The campaign funds have been transferred to your wallet.</p>
+                  <p class="text-sm text-green-700">You can now check your token balance.</p>
+                </div>
+                <button id="refresh-state-btn-withdraw" class="btn btn-secondary mt-2">Refresh Contract State</button>
+              </div>
+            `;
+            
+            const refreshBtn = document.querySelector("#refresh-state-btn-withdraw");
+            if (refreshBtn) {
+              refreshBtn.addEventListener("click", updateContractState);
+            }
           }
-        }
-        
-        // Update contract state
-        updateContractState();
-      },
-      (txId, error) => {
-        // Failure callback
-        if (transactionLinkContainer) {
-          transactionLinkContainer.innerHTML = `
-            <div class="alert alert-error">
-              <p>Failed to withdraw funds: ${error || 'Unknown error'}</p>
-              <p class="transaction-hash">Transaction ID: ${txId}</p>
-              <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
-                 class="transaction-link" target="_blank">View in Explorer</a>
-              <button id="retry-withdraw" class="btn btn-primary mt-2">Retry</button>
-            </div>
-          `;
+          updateContractState();
+        } else {
+          // Handle withdrawal failure with detailed error analysis
+          const errorReason = contractError || blockchainError || "Unknown error";
+          const isContractError = !!contractError;
           
-          // Add retry button
-          const retryBtn = document.querySelector("#retry-withdraw");
-          if (retryBtn) {
-            retryBtn.addEventListener("click", () => {
-              // Reset UI
-              if (transactionLinkContainer) {
-                transactionLinkContainer.innerHTML = '';
-                transactionLinkContainer.classList.add("hidden");
-              }
-            });
+          if (transactionLinkContainer) {
+            transactionLinkContainer.innerHTML = `
+              <div class="alert alert-error">
+                <p>❌ Withdrawal failed: ${errorReason}</p>
+                <p class="transaction-hash">Transaction ID: ${txId}</p>
+                <a href="https://browser.testnet.partisiablockchain.com/transactions/${txId}" 
+                   class="transaction-link" target="_blank">View in Explorer</a>
+                <div class="mt-2 bg-light p-2 rounded">
+                  <p class="text-sm"><strong>Error Type:</strong> ${isContractError ? 'Contract Assertion Failure' : 'Blockchain Error'}</p>
+                  ${isContractError ? `
+                    <div class="mt-2 p-2 bg-red-50 border-red-200 rounded">
+                      <p class="text-sm"><strong>Contract Error Details:</strong></p>
+                      <p class="text-sm text-red-800">${contractError}</p>
+                      <p class="text-sm mt-1"><strong>Common Causes:</strong></p>
+                      <ul class="text-sm text-red-700 ml-4">
+                        <li>• Only the campaign owner can withdraw funds</li>
+                        <li>• Campaign must be completed before withdrawal</li>
+                        <li>• Campaign must have reached its funding target</li>
+                        <li>• Funds may have already been withdrawn</li>
+                        <li>• ZK computation may not have completed yet</li>
+                      </ul>
+                    </div>
+                  ` : `
+                    <div class="mt-2 p-2 bg-yellow-50 border-yellow-200 rounded">
+                      <p class="text-sm text-yellow-700">This appears to be a blockchain-level error.</p>
+                      <p class="text-sm text-yellow-700">Please check your wallet connection and gas fees.</p>
+                    </div>
+                  `}
+                </div>
+                <div class="mt-3">
+                  <button id="retry-withdraw" class="btn btn-primary">Retry Withdrawal</button>
+                  <button id="check-campaign-status" class="btn btn-secondary ml-2">Check Campaign Status</button>
+                </div>
+              </div>
+            `;
+            
+            // Add retry and check status buttons
+            const retryBtn = document.querySelector("#retry-withdraw");
+            const checkBtn = document.querySelector("#check-campaign-status");
+            
+            if (retryBtn) {
+              retryBtn.addEventListener("click", () => {
+                if (transactionLinkContainer) {
+                  transactionLinkContainer.innerHTML = '';
+                  transactionLinkContainer.classList.add("hidden");
+                }
+              });
+            }
+            
+            if (checkBtn) {
+              checkBtn.addEventListener("click", updateContractState);
+            }
           }
         }
       }
     );
+    
   } catch (error) {
     console.error("Error withdrawing funds:", error);
     
-    showApplicationMessage(`Error: ${error.message || String(error)}`);
+    // Enhanced error handling with contract error detection
+    let errorMessage = error.message || String(error);
+    let isContractError = false;
+    let specificGuidance = "";
+    
+    if (error.code) {
+      switch (error.code) {
+        case 'CAMPAIGN_NOT_COMPLETED':
+          isContractError = true;
+          specificGuidance = "The campaign must be completed before funds can be withdrawn. If the campaign is still active, you may need to end it first.";
+          break;
+        case 'CAMPAIGN_UNSUCCESSFUL':
+          isContractError = true;
+          specificGuidance = "Funds can only be withdrawn if the campaign reached its funding target. Since the target was not met, funds cannot be withdrawn.";
+          break;
+        case 'WALLET_NOT_CONNECTED':
+          specificGuidance = "Please reconnect your wallet and try again.";
+          break;
+        default:
+          if (error.contractError) {
+            isContractError = true;
+            errorMessage = error.contractError;
+          }
+      }
+    }
+    
+    showApplicationMessage(`Withdrawal failed: ${errorMessage}`);
+    
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-error">
-          <p>Error withdrawing funds: ${error.message || String(error)}</p>
-          <p>Please try again or check the console for more details.</p>
-          <button id="retry-withdraw" class="btn btn-primary mt-2">Retry</button>
+          <p>❌ Withdrawal failed: ${errorMessage}</p>
+          ${isContractError ? `
+            <div class="mt-2 p-2 bg-red-50 border-red-200 rounded">
+              <p class="text-sm"><strong>Contract Validation Failed</strong></p>
+              <p class="text-sm text-red-700">${specificGuidance || 'The smart contract rejected this withdrawal request.'}</p>
+            </div>
+          ` : `
+            <div class="mt-2 p-2 bg-yellow-50 border-yellow-200 rounded">
+              <p class="text-sm"><strong>Pre-submission Error</strong></p>
+              <p class="text-sm text-yellow-700">${specificGuidance || 'This error occurred before the transaction was submitted.'}</p>
+            </div>
+          `}
+          <div class="mt-3">
+            <button id="retry-withdraw" class="btn btn-primary">Retry</button>
+            <button id="check-state" class="btn btn-secondary ml-2">Check Campaign State</button>
+          </div>
         </div>
       `;
       
-      // Add retry button
+      // Add retry and check buttons
       const retryBtn = document.querySelector("#retry-withdraw");
+      const checkBtn = document.querySelector("#check-state");
+      
       if (retryBtn) {
         retryBtn.addEventListener("click", () => {
-          // Reset UI
           if (transactionLinkContainer) {
             transactionLinkContainer.innerHTML = '';
-          }
-          
-          // Re-enable the button for manual retry
-          if (withdrawFundsBtn) {
-            withdrawFundsBtn.disabled = false;
-            withdrawFundsBtn.textContent = "Withdraw Funds";
+            transactionLinkContainer.classList.add("hidden");
           }
         });
+      }
+      
+      if (checkBtn) {
+        checkBtn.addEventListener("click", updateContractState);
       }
     }
   } finally {
@@ -1259,6 +1303,72 @@ async function withdrawFundsAction() {
       withdrawFundsBtn.textContent = "Withdraw Funds";
     }
   }
+}
+
+/**
+ * Enhanced transaction status checking with contract error detection
+ */
+function scheduleEnhancedTransactionStatusCheck(
+  txId: string,
+  api: any,
+  transactionResult: any,
+  transactionType: string,
+  onComplete: (success: boolean, contractError?: string, blockchainError?: string) => void,
+  attempts: number = 0,
+  maxAttempts: number = 20
+) {
+  if (!txId || attempts >= maxAttempts) {
+    console.log(`Enhanced status check ended for ${txId}: Max attempts reached`);
+    onComplete(false, undefined, "Transaction verification timeout");
+    return;
+  }
+
+  setTimeout(async () => {
+    try {
+      if (!api) {
+        console.warn("API not available for enhanced transaction check");
+        scheduleEnhancedTransactionStatusCheck(
+          txId, api, transactionResult, transactionType, onComplete, attempts + 1, maxAttempts
+        );
+        return;
+      }
+
+      // Use enhanced status checking
+      const result = await api.checkTransactionStatus(txId);
+      
+      if (result.status === 'success') {
+        console.log(`✅ Enhanced check: ${transactionType} transaction ${txId} completed successfully`);
+        onComplete(true);
+        updateContractState();
+      } else if (result.status === 'failed') {
+        console.error(`❌ Enhanced check: ${transactionType} transaction ${txId} failed`);
+        console.error("Contract error:", result.contractError);
+        console.error("Blockchain error:", result.errorMessage);
+        
+        onComplete(false, result.contractError, result.errorMessage);
+      } else {
+        // Still pending
+        if (attempts % 5 === 0) {
+          console.log(`⏳ Enhanced check: ${transactionType} transaction ${txId} still pending (attempt ${attempts + 1}/${maxAttempts})`);
+        }
+        
+        scheduleEnhancedTransactionStatusCheck(
+          txId, api, transactionResult, transactionType, onComplete, attempts + 1, maxAttempts
+        );
+      }
+    } catch (error) {
+      console.error(`Error in enhanced status check for ${txId}:`, error);
+      
+      if (attempts >= maxAttempts - 1) {
+        console.warn(`Max retry attempts reached for enhanced check of ${txId}`);
+        onComplete(false, undefined, "Status check failed after maximum retries");
+      } else {
+        scheduleEnhancedTransactionStatusCheck(
+          txId, api, transactionResult, transactionType, onComplete, attempts + 1, maxAttempts
+        );
+      }
+    }
+  }, 3000); // Check every 3 seconds
 }
 
 // Update UI elements based on wallet connection state

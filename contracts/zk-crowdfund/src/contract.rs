@@ -418,19 +418,3 @@ fn withdrawal_complete(
         }],
     )
 }
-
-/// Verify contribution without revealing amounts
-#[action(shortname = 0x06, zk = true)]
-fn verify_my_contribution(
-    context: ContractContext,
-    state: ContractState,
-    zk_state: ZkState<SecretVarType>,
-) -> (ContractState, Vec<EventGroup>) {
-    assert_eq!(state.status, CampaignStatus::Completed {}, "Verification only available after completion");
-    
-    let has_contribution = zk_state.secret_variables.iter()
-        .any(|(_, var)| matches!(&var.metadata, SecretVarType::Contribution { owner, .. } if *owner == context.sender));
-    
-    assert!(has_contribution, "No contribution found for this address");
-    (state, vec![])
-}
