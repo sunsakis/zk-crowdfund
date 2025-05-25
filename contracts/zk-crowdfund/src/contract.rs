@@ -19,7 +19,7 @@ use read_write_rpc_derive::ReadWriteRPC;
 use read_write_state_derive::ReadWriteState;
 use create_type_spec_derive::CreateTypeSpec;
 
-/// Secret variable metadata types
+/// Secret variable metadata types - FIXED to separate commitments from actual tokens
 #[derive(ReadWriteState, ReadWriteRPC, Debug, Clone, CreateTypeSpec)]
 #[repr(u8)]
 enum SecretVarType {
@@ -31,6 +31,13 @@ enum SecretVarType {
         timestamp: i64,
     },
     #[discriminant(1)]
+    TokenBalance {
+        /// Owner of the actual token balance
+        owner: Address,
+        /// Timestamp when tokens were actually transferred
+        timestamp: i64,
+    },
+    #[discriminant(2)]
     SumResult {},
 }
 
@@ -136,9 +143,6 @@ fn initialize(
     assert!(!description.is_empty(), "Description cannot be empty");
     assert!(funding_target > 0, "Funding target must be greater than 0");
 
-    // We'll create the encrypted balance tracker during the first contribution
-    // to avoid compilation issues with manual ZK variable creation
-    
     let state = ContractState {
         owner: ctx.sender,
         title,
@@ -156,7 +160,7 @@ fn initialize(
     (state, vec![], vec![])
 }
 
-/// Add a contribution as a secret input
+/// Add a contribution as a secret input - this is just a commitment, no tokens yet
 #[zk_on_secret_input(shortname = 0x40)]
 fn add_contribution(
     context: ContractContext,
@@ -181,7 +185,7 @@ fn add_contribution(
     (state, vec![], input_def)
 }
 
-/// Process token transfer for contribution
+/// Process token transfer for contribution - calls token balance creation after success
 #[action(shortname = 0x07, zk = true)]
 fn contribute_tokens(
     context: ContractContext,
@@ -222,27 +226,50 @@ fn contribute_tokens(
     (state, vec![event_group.build()])
 }
 
-/// Track tokens in encrypted ZK variable only
+/// FIXED: Create token balance ZK variable only after successful token transfer
 #[callback(shortname = 0x31, zk = true)]
 fn contribute_callback(
-    _ctx: ContractContext,
+    ctx: ContractContext,
     callback_ctx: CallbackContext,
     state: ContractState,
     _zk_state: ZkState<SecretVarType>,
-    _amount: u32,
+    amount: u32,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     if !callback_ctx.success {
         panic!("Token transfer failed");
     }
 
-    // The actual token amount tracking happens ONLY in ZK variables during end_campaign
-    // We don't store any amounts in the contract state here
-    // This preserves perfect privacy - no amounts are ever visible in contract state
+    // Now create a token balance ZK input since the transfer succeeded
+    // We'll use a different shortname to create the TokenBalance variable
+    let mut event_group = EventGroup::builder();
+    event_group.call(ctx.contract_address, Shortname::from_u32(0x41)) // add_token_balance shortname
+        .argument(amount)
+        .done();
     
-    (state, vec![], vec![])
+    (state, vec![event_group.build()], vec![])
 }
 
-/// End campaign and compute results - this reveals total only if threshold met
+/// Add a token balance entry as secret input - called after successful token transfer
+#[zk_on_secret_input(shortname = 0x41)]
+fn add_token_balance(
+    context: ContractContext,
+    state: ContractState,
+    _zk_state: ZkState<SecretVarType>,
+) -> (
+    ContractState,
+    Vec<EventGroup>,
+    ZkInputDef<SecretVarType, Sbu32>,
+) {
+    let metadata = SecretVarType::TokenBalance { 
+        owner: context.sender,
+        timestamp: context.block_production_time,
+    };
+    
+    let input_def = ZkInputDef::with_metadata(None, metadata);
+    (state, vec![], input_def)
+}
+
+/// FIXED: End campaign and compute results - now sums only actual token balances
 #[action(shortname = 0x01, zk = true)]
 fn end_campaign(
     context: ContractContext,
@@ -253,23 +280,29 @@ fn end_campaign(
     assert_eq!(state.status, CampaignStatus::Active {}, "Campaign can only be ended from Active state");
     assert_eq!(zk_state.calculation_state, CalculationStatus::Waiting, "Computation must start from Waiting state");
 
+    // Count contributors (those who made commitments)
     let contributions = zk_state.secret_variables.iter()
         .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution { .. }))
+        .count();
+    
+    // Count actual token transfers (this is what we'll actually sum)
+    let token_transfers = zk_state.secret_variables.iter()
+        .filter(|(_, var)| matches!(var.metadata, SecretVarType::TokenBalance { .. }))
         .count();
     
     let num_contributors = contributions as u32;
     state.status = CampaignStatus::Computing {};
     state.num_contributors = Some(num_contributors);
     
-    if num_contributors == 0 {
+    if token_transfers == 0 {
+        // No actual tokens transferred, campaign failed
         state.status = CampaignStatus::Completed {};
         state.is_successful = false;
         state.total_raised = None; // No total to reveal
         return (state, vec![], vec![]);
     }
     
-    // Start ZK computation to sum all contributions
-    // This will create encrypted variables with the sum
+    // Start ZK computation to sum ACTUAL token balances (not commitments)
     let function_shortname = ShortnameZkComputation::from_u32(ZK_COMPUTATION_SHORTNAME);
     let on_complete_hook = Some(ShortnameZkComputeComplete::from_u32(SUM_COMPUTE_COMPLETE_SHORTNAME));
     let output_metadata = vec![SecretVarType::SumResult {}];
@@ -386,6 +419,7 @@ fn withdraw_funds(
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     assert_eq!(context.sender, state.owner, "Only the owner can withdraw funds");
     assert_eq!(state.status, CampaignStatus::Completed {}, "Campaign must be completed");
+    assert!(state.is_successful, "Campaign must be successful to withdraw funds");
     assert!(!state.funds_withdrawn, "Funds have already been withdrawn");
     
     // Use the encrypted balance tracker to get the actual amount
@@ -399,22 +433,4 @@ fn withdraw_funds(
     (state, vec![], vec![ZkStateChange::OpenVariables {
         variables: vec![balance_tracker_id],
     }])
-}
-
-/// Handle withdrawal completion
-#[zk_on_compute_complete(shortname = 0x43)]
-fn withdrawal_complete(
-    _context: ContractContext,
-    state: ContractState,
-    _zk_state: ZkState<SecretVarType>,
-    output_variables: Vec<SecretVarId>,
-) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
-    // Open the withdrawal amount temporarily for transfer
-    (
-        state,
-        vec![],
-        vec![ZkStateChange::OpenVariables {
-            variables: output_variables,
-        }],
-    )
 }
