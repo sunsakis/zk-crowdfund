@@ -109,7 +109,7 @@ export class CrowdfundingApi {
   private readonly TOKEN_CONTRIBUTION_GAS = 200000;
   private readonly TOKEN_APPROVAL_GAS = 15000;
   private readonly END_CAMPAIGN_GAS = 150000;
-  private readonly WITHDRAW_FUNDS_GAS = 100000; // Increased for ZK operations
+  private readonly WITHDRAW_FUNDS_GAS = 100000;
   
   // Constants for amount limits (in raw token units)
   private readonly MAX_TOKEN_UNITS = 2147483647; // Max u32 value
@@ -184,6 +184,26 @@ export class CrowdfundingApi {
     
     if (eventData.failure?.errorMessage) {
       return eventData.failure.errorMessage;
+    }
+    
+    // Check stack trace for patterns
+    if (eventData.executionStatus?.failure?.stackTrace) {
+      const trace = eventData.executionStatus.failure.stackTrace;
+      
+      if (trace.includes("not allowed to transfer")) {
+        return "Token allowance insufficient - contract cannot transfer tokens on your behalf";
+      }
+      
+      if (trace.includes("insufficient balance")) {
+        return "Insufficient token balance in your wallet";
+      }
+      
+      if (trace.includes("assertion") && trace.includes("failed")) {
+        const assertMatch = trace.match(/assertion.*failed:\s*(.+)/i);
+        if (assertMatch) {
+          return assertMatch[1].trim();
+        }
+      }
     }
     
     return null;
@@ -274,6 +294,17 @@ export class CrowdfundingApi {
         let errorMessage = 'Transaction execution failed';
         if (execStatus.failure?.errorMessage) {
           errorMessage = execStatus.failure.errorMessage;
+        } else if (execStatus.failure?.stackTrace) {
+          const trace = execStatus.failure.stackTrace;
+          if (trace.includes("not allowed to transfer")) {
+            errorMessage = "Insufficient token allowance - please approve the contract to spend your tokens";
+          } else if (trace.includes("insufficient balance")) {
+            errorMessage = "Insufficient token balance";
+          } else if (trace.includes("Campaign can only be ended from Active state")) {
+            errorMessage = "Campaign has already been ended";
+          } else if (trace.includes("Only owner can")) {
+            errorMessage = "Only the campaign owner can perform this action";
+          }
         }
         
         return { 
@@ -423,6 +454,67 @@ export class CrowdfundingApi {
       );
     }
   };
+
+  /**
+   * Check token allowance for the campaign contract
+   */
+  async getTokenAllowance(
+    tokenAddress: string,
+    ownerAddress: string,
+    spenderAddress: string
+  ): Promise<bigint> {
+    try {
+      // For demo purposes, return 0 to ensure approval is always needed
+      // In production, you'd query the token contract state
+      console.log("Checking allowance (simulated):", ownerAddress, spenderAddress);
+      return BigInt(0);
+    } catch (error) {
+      console.error("Error getting token allowance:", error);
+      return BigInt(0);
+    }
+  }
+
+  /**
+   * Approve tokens to be spent by the campaign contract
+   */
+  async approveTokens(
+    tokenAddress: string,
+    campaignAddress: string,
+    amount: bigint
+  ): Promise<SentTransaction> {
+    if (!this.transactionClient) {
+      throw new Error("Wallet not connected");
+    }
+
+    try {
+      console.log(`Approving ${amount} tokens for campaign ${campaignAddress}`);
+
+      // Build the approve RPC buffer 
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x05); 
+        _out.writeAddress(BlockchainAddress.fromString(campaignAddress));
+        
+        // Convert BigInt to bytes and write it as a byte array
+        const buffer = Buffer.alloc(16);
+        
+        // Write the amount as little-endian bytes
+        for (let i = 0; i < 16; i++) {
+          buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        
+        _out.writeBytes(buffer);
+      });
+
+      // Send the transaction to approve tokens
+      return this.transactionClient.signAndSend({
+        address: tokenAddress,
+        rpc
+      }, this.TOKEN_APPROVAL_GAS);
+    } catch (error) {
+      console.error("Error approving tokens:", error);
+      throw error;
+    }
+  }
 
   /**
    * Enhanced contribution flow with comprehensive error checking
@@ -842,5 +934,137 @@ export class CrowdfundingApi {
    */
   readonly isWalletConnected = (): boolean => {
     return this.transactionClient !== undefined;
+  };
+
+  /**
+   * Legacy method for compatibility - wraps the enhanced contribution flow
+   */
+  readonly addContribution = async (
+    contractAddress: string,
+    amount: number
+  ): Promise<SentTransaction> => {
+    console.log("Using legacy addContribution method - consider upgrading to addContributionWithApproval");
+    
+    if (!this.transactionClient) {
+      throw new CrowdfundingApiError(
+        "Wallet not connected",
+        "WALLET_NOT_CONNECTED"
+      );
+    }
+    
+    try {
+      // Get token address from contract
+      const contractData = await this.baseClient.getContractData(contractAddress);
+      const { tokenAddress } = this.extractContractState(contractData);
+      
+      // Use the enhanced flow
+      const result = await this.addContributionWithApproval(amount, contractAddress, tokenAddress);
+      
+      // Return the ZK transaction for backwards compatibility
+      return result.contributionResult.transaction;
+    } catch (error) {
+      console.error("Error in legacy addContribution:", error);
+      if (error instanceof CrowdfundingApiError) {
+        throw error;
+      }
+      throw new CrowdfundingApiError(
+        `Legacy contribution failed: ${error.message}`,
+        "LEGACY_CONTRIBUTION_FAILED"
+      );
+    }
+  };
+
+  /**
+   * Utility method to format amounts for display
+   */
+  readonly formatDisplayAmount = (tokenUnits: number): string => {
+    const displayAmount = tokenUnitsToDisplayAmount(tokenUnits);
+    return displayAmount.toLocaleString(undefined, {
+      minimumFractionDigits: 6,
+      maximumFractionDigits: 6
+    });
+  };
+
+  /**
+   * Utility method to get transaction explorer URL
+   */
+  readonly getTransactionUrl = (transactionId: string): string => {
+    return `https://browser.testnet.partisiablockchain.com/transactions/${transactionId}`;
+  };
+
+  /**
+   * Utility method to get contract explorer URL
+   */
+  readonly getContractUrl = (contractAddress: string): string => {
+    return `https://browser.testnet.partisiablockchain.com/contracts/${contractAddress}`;
+  };
+
+  /**
+   * Get current blockchain node URL
+   */
+  readonly getNodeUrl = (): string => {
+    return this.API_URL;
+  };
+
+  /**
+   * Health check for the API connection
+   */
+  readonly healthCheck = async (): Promise<{
+    walletConnected: boolean;
+    nodeAccessible: boolean;
+    zkClientReady: boolean;
+  }> => {
+    const result = {
+      walletConnected: this.isWalletConnected(),
+      nodeAccessible: false,
+      zkClientReady: false
+    };
+
+    try {
+      // Test node connectivity
+      const response = await fetch(`${this.API_URL}/blockchain/blocks/latest`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(5000)
+      });
+      result.nodeAccessible = response.ok;
+    } catch (error) {
+      console.warn("Node health check failed:", error);
+    }
+
+    try {
+      // Test ZK client readiness
+      result.zkClientReady = !!this.zkClient;
+    } catch (error) {
+      console.warn("ZK client health check failed:", error);
+    }
+
+    return result;
+  };
+
+  /**
+   * Get detailed status information for debugging
+   */
+  readonly getStatusInfo = () => {
+    return {
+      sender: this.sender,
+      hasTransactionClient: !!this.transactionClient,
+      hasZkClient: !!this.zkClient,
+      hasBaseClient: !!this.baseClient,
+      apiUrl: this.API_URL,
+      gasLimits: {
+        zkInput: this.ZK_INPUT_GAS,
+        tokenContribution: this.TOKEN_CONTRIBUTION_GAS,
+        tokenApproval: this.TOKEN_APPROVAL_GAS,
+        endCampaign: this.END_CAMPAIGN_GAS,
+        withdrawFunds: this.WITHDRAW_FUNDS_GAS
+      },
+      amountLimits: {
+        minTokenUnits: this.MIN_TOKEN_UNITS,
+        maxTokenUnits: this.MAX_TOKEN_UNITS,
+        minDisplayAmount: tokenUnitsToDisplayAmount(this.MIN_TOKEN_UNITS),
+        maxDisplayAmount: tokenUnitsToDisplayAmount(this.MAX_TOKEN_UNITS)
+      }
+    };
   };
 }

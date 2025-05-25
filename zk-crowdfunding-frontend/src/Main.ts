@@ -21,14 +21,6 @@ function tokenUnitsToDisplayAmount(tokenUnits: number): number {
   return tokenUnits / 1_000_000;
 }
 
-/**
- * Convert display amount to raw token units  
- * Display: 0.000001 -> Raw units: 1
- */
-function displayAmountToTokenUnits(displayAmount: number): number {
-  return Math.round(displayAmount * 1_000_000);
-}
-
 // DOM Elements cache
 interface DOMElements {
   // Status elements
@@ -795,14 +787,9 @@ async function endCampaignAction() {
   }
 }
 
-// Enhanced action handlers with production-grade error checking
-// Add these enhanced functions to your Main.ts file
-
-/**
- * Enhanced contribution form action with contract-level error detection
- */
+// Enhanced contribution function with proper error detection
 async function addContributionFormAction() {
-  console.log("=== ENHANCED ADD CONTRIBUTION ACTION ===");
+  console.log("=== ENHANCED CONTRIBUTION WITH PROPER ERROR DETECTION ===");
   
   if (!isConnected()) {
     showApplicationMessage("Please connect your wallet first");
@@ -818,12 +805,6 @@ async function addContributionFormAction() {
   const contributionValue = parseFloat(contributionInput.value);
   if (isNaN(contributionValue) || contributionValue <= 0) {
     showApplicationMessage("Please enter a valid contribution amount greater than 0");
-    return;
-  }
-  
-  // Enhanced validation limits
-  if (contributionValue < 0.000001 || contributionValue > 2147.483647) {
-    showApplicationMessage("Please enter a contribution amount between 0.000001 and 2147.483647");
     return;
   }
   
@@ -850,75 +831,177 @@ async function addContributionFormAction() {
   }
   
   try {
-    // Get contract data with enhanced error handling
+    // Get contract data for token approval
     const contractData = await CLIENT.getContractData(address);
     const { tokenAddress } = safelyExtractContractState(contractData);
     
-    // Show initial processing status
-    showApplicationMessage("Processing contribution...");
+    // Show processing status with detailed steps
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>🔄 Processing contribution of ${contributionValue} tokens...</p>
-          <div class="spinner mt-2"></div>
+          <h4>🔄 Processing Contribution</h4>
+          <div class="contribution-steps">
+            <div class="step active">
+              <span class="step-number">1</span>
+              <span class="step-text">Checking token allowance...</span>
+              <div class="spinner"></div>
+            </div>
+            <div class="step pending">
+              <span class="step-number">2</span>
+              <span class="step-text">Submit ZK commitment</span>
+            </div>
+            <div class="step pending">
+              <span class="step-number">3</span>
+              <span class="step-text">Transfer tokens</span>
+            </div>
+          </div>
         </div>
       `;
     }
     
-    // Convert to token units for display
+    // Step 1: Check and handle token approval
     const tokenUnits = displayAmountToTokenUnits(contributionValue);
-    console.log(`Converting contribution: Display=${contributionValue} -> TokenUnits=${tokenUnits}`);
+    const weiAmount = tokenUnitsToWei(tokenUnits);
     
-    // Use enhanced contribution method with contract error detection
+    // Check current allowance
+    const currentAllowance = await api.getTokenAllowance(tokenAddress, api.getWalletAddress(), address);
+    
+    if (currentAllowance < weiAmount) {
+      // Update UI to show approval step
+      if (transactionLinkContainer) {
+        transactionLinkContainer.innerHTML = `
+          <div class="alert alert-info">
+            <h4>🔐 Token Approval Required</h4>
+            <p>You need to approve the contract to spend your tokens.</p>
+            <div class="contribution-steps">
+              <div class="step active">
+                <span class="step-number">1</span>
+                <span class="step-text">Approving token spend...</span>
+                <div class="spinner"></div>
+              </div>
+              <div class="step pending">
+                <span class="step-number">2</span>
+                <span class="step-text">Submit ZK commitment</span>
+              </div>
+              <div class="step pending">
+                <span class="step-number">3</span>
+                <span class="step-text">Transfer tokens</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      
+      // Request approval
+      const approvalTx = await api.approveTokens(tokenAddress, address, weiAmount);
+      const approvalTxId = approvalTx.transactionPointer?.identifier || "unknown";
+      
+      // Wait for approval confirmation
+      const approvalResult = await api.waitForTransactionConfirmation(
+        approvalTxId, undefined, 120, "Token approval"
+      );
+      
+      if (!approvalResult.success) {
+        throw new Error(`Token approval failed: ${approvalResult.blockchainError || 'Unknown error'}`);
+      }
+    }
+    
+    // Step 2: Submit ZK commitment
+    if (transactionLinkContainer) {
+      transactionLinkContainer.innerHTML = `
+        <div class="alert alert-info">
+          <h4>🔄 Processing Contribution</h4>
+          <div class="contribution-steps">
+            <div class="step completed">
+              <span class="step-number">✓</span>
+              <span class="step-text">Token approval confirmed</span>
+            </div>
+            <div class="step active">
+              <span class="step-number">2</span>
+              <span class="step-text">Submitting ZK commitment...</span>
+              <div class="spinner"></div>
+            </div>
+            <div class="step pending">
+              <span class="step-number">3</span>
+              <span class="step-text">Transfer tokens</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+    
+    // Submit the contribution (this includes both ZK input and token transfer)
     const result = await api.addContributionWithApproval(contributionValue, address, tokenAddress);
     
-    // Extract transaction details safely
+    // Extract transaction details
     const contributionResult = result.contributionResult;
     const zkTxId = contributionResult.metadata?.zkTransaction?.id || "unknown";
     const tokenTxId = contributionResult.metadata?.tokenTransaction?.id || "unknown";
-    const primaryTxId = zkTxId !== "unknown" ? zkTxId : tokenTxId;
     
-    console.log("Contribution transactions:", { zkTxId, tokenTxId, primaryTxId });
-    
-    // Update UI with transaction info and status
+    // Step 3: Monitor both transactions
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-info">
-          <p>📝 Contribution submitted successfully!</p>
-          <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-          <p class="transaction-hash">Primary Transaction: ${primaryTxId}</p>
-          <a href="https://browser.testnet.partisiablockchain.com/transactions/${primaryTxId}" 
-             class="transaction-link" target="_blank">View in Explorer</a>
-          <p class="mt-2">⏳ Verifying contract execution...</p>
-          <div class="spinner"></div>
+          <h4>🔄 Monitoring Transactions</h4>
+          <div class="contribution-steps">
+            <div class="step completed">
+              <span class="step-number">✓</span>
+              <span class="step-text">Token approval confirmed</span>
+            </div>
+            <div class="step ${contributionResult.metadata?.zkTransaction?.confirmed ? 'completed' : 'active'}">
+              <span class="step-number">${contributionResult.metadata?.zkTransaction?.confirmed ? '✓' : '2'}</span>
+              <span class="step-text">ZK commitment: ${zkTxId.substring(0, 8)}...</span>
+              ${!contributionResult.metadata?.zkTransaction?.confirmed ? '<div class="spinner"></div>' : ''}
+            </div>
+            <div class="step ${contributionResult.metadata?.tokenTransaction?.confirmed ? 'completed' : 'active'}">
+              <span class="step-number">${contributionResult.metadata?.tokenTransaction?.confirmed ? '✓' : '3'}</span>
+              <span class="step-text">Token transfer: ${tokenTxId.substring(0, 8)}...</span>
+              ${!contributionResult.metadata?.tokenTransaction?.confirmed ? '<div class="spinner"></div>' : ''}
+            </div>
+          </div>
+          <div class="mt-2">
+            <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTxId}" 
+               class="transaction-link" target="_blank">View ZK Transaction</a> | 
+            <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTxId}" 
+               class="transaction-link" target="_blank">View Token Transaction</a>
+          </div>
         </div>
       `;
     }
     
-    // Clear the input
-    contributionInput.value = "";
-    
-    // Enhanced status checking with contract error detection
+    // Enhanced status checking with detailed error analysis
     scheduleEnhancedTransactionStatusCheck(
-      primaryTxId,
+      tokenTxId, // Focus on token transaction as the critical one
       api,
       contributionResult,
       "contribution",
       (success, contractError, blockchainError) => {
-        if (success && contributionResult.metadata?.overallSuccess) {
-          // Both ZK and token transactions succeeded
+        const zkConfirmed = contributionResult.metadata?.zkTransaction?.confirmed;
+        const tokenConfirmed = contributionResult.metadata?.tokenTransaction?.confirmed;
+        
+        if (success && zkConfirmed && tokenConfirmed) {
+          // Both transactions successful
           if (transactionLinkContainer) {
             transactionLinkContainer.innerHTML = `
               <div class="alert alert-success">
-                <p>✅ Contribution successful!</p>
-                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-                <div class="mt-2 bg-light p-2 rounded">
-                  <p class="text-sm"><strong>ZK Input:</strong> 
+                <h4>✅ Contribution Successful!</h4>
+                <p><strong>Amount:</strong> ${contributionValue} tokens (${tokenUnits} token units)</p>
+                <div class="transaction-details">
+                  <div class="transaction-row">
+                    <span class="label">ZK Commitment:</span>
                     <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTxId}" 
-                       class="transaction-link" target="_blank">${zkTxId}</a> ✅</p>
-                  <p class="text-sm"><strong>Token Transfer:</strong> 
+                       class="transaction-link" target="_blank">${zkTxId}</a>
+                    <span class="status success">✅</span>
+                  </div>
+                  <div class="transaction-row">
+                    <span class="label">Token Transfer:</span>
                     <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTxId}" 
-                       class="transaction-link" target="_blank">${tokenTxId}</a> ✅</p>
+                       class="transaction-link" target="_blank">${tokenTxId}</a>
+                    <span class="status success">✅</span>
+                  </div>
+                </div>
+                <div class="privacy-note">
+                  <p>🔒 Your contribution amount is now encrypted and will only be revealed if the campaign reaches its funding target.</p>
                 </div>
                 <button id="refresh-state-btn-contrib" class="btn btn-secondary mt-2">Refresh Contract State</button>
               </div>
@@ -929,50 +1012,82 @@ async function addContributionFormAction() {
               refreshBtn.addEventListener("click", updateContractState);
             }
           }
+          
+          // Clear the input and update contract state
+          contributionInput.value = "";
           updateContractState();
+          
         } else {
-          // Handle specific failure scenarios with detailed error reporting
-          const errorReason = contractError || blockchainError || "Unknown error";
-          const isContractError = !!contractError;
+          // Handle specific failure scenarios
+          let errorAnalysis = "";
+          let troubleshooting = "";
+          
+          if (zkConfirmed && !tokenConfirmed) {
+            errorAnalysis = "ZK commitment succeeded, but token transfer failed";
+            troubleshooting = `
+              <div class="troubleshooting">
+                <h5>🔍 Why did this happen?</h5>
+                <ul>
+                  <li><strong>Insufficient token balance:</strong> Check your wallet balance</li>
+                  <li><strong>Allowance expired:</strong> Token approval may have been insufficient</li>
+                  <li><strong>Campaign ended:</strong> Campaign may have been ended between steps</li>
+                  <li><strong>Gas limit exceeded:</strong> Transaction may have run out of gas</li>
+                </ul>
+                <h5>💡 What to do next?</h5>
+                <ul>
+                  <li>Check your token balance in your wallet</li>
+                  <li>Try contributing a smaller amount</li>
+                  <li>Refresh the page and check campaign status</li>
+                </ul>
+              </div>
+            `;
+          } else if (!zkConfirmed) {
+            errorAnalysis = "ZK commitment failed";
+            troubleshooting = `
+              <div class="troubleshooting">
+                <h5>🔍 Why did this happen?</h5>
+                <ul>
+                  <li><strong>Campaign not active:</strong> Campaign may have ended</li>
+                  <li><strong>Network congestion:</strong> Transaction may have timed out</li>
+                  <li><strong>Invalid amount:</strong> Contribution amount may be invalid</li>
+                </ul>
+              </div>
+            `;
+          }
           
           if (transactionLinkContainer) {
             transactionLinkContainer.innerHTML = `
               <div class="alert alert-error">
-                <p>❌ Contribution failed: ${errorReason}</p>
-                <p><strong>Amount:</strong> ${contributionValue} (${tokenUnits} token units)</p>
-                <div class="mt-2 bg-light p-2 rounded">
-                  <p class="text-sm"><strong>Error Type:</strong> ${isContractError ? 'Contract Assertion Failure' : 'Blockchain Error'}</p>
-                  ${isContractError ? `
-                    <div class="mt-2 p-2 bg-yellow-50 border-yellow-200 rounded">
-                      <p class="text-sm"><strong>Contract Error Details:</strong></p>
-                      <p class="text-sm text-yellow-800">${contractError}</p>
-                      <p class="text-sm mt-1"><strong>Common Causes:</strong></p>
-                      <ul class="text-sm text-yellow-700 ml-4">
-                        <li>• Campaign may not be in Active status</li>
-                        <li>• ZK commitment may not have been created first</li>
-                        <li>• Token transfer may have failed due to insufficient balance or allowance</li>
-                        <li>• Campaign may have been ended by the owner</li>
-                      </ul>
-                    </div>
-                  ` : ''}
-                  <div class="mt-2">
-                    <p class="text-sm">Transaction Details:</p>
-                    <p class="text-sm">• ZK Input: <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTxId}" 
-                       class="transaction-link" target="_blank">${zkTxId}</a></p>
-                    <p class="text-sm">• Token Transfer: <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTxId}" 
-                       class="transaction-link" target="_blank">${tokenTxId}</a></p>
+                <h4>❌ Contribution Failed</h4>
+                <p><strong>Error:</strong> ${errorAnalysis}</p>
+                <p><strong>Details:</strong> ${contractError || blockchainError || 'Unknown error'}</p>
+                <div class="transaction-details">
+                  <div class="transaction-row">
+                    <span class="label">ZK Commitment:</span>
+                    <a href="https://browser.testnet.partisiablockchain.com/transactions/${zkTxId}" 
+                       class="transaction-link" target="_blank">${zkTxId}</a>
+                    <span class="status ${zkConfirmed ? 'success' : 'error'}">${zkConfirmed ? '✅' : '❌'}</span>
+                  </div>
+                  <div class="transaction-row">
+                    <span class="label">Token Transfer:</span>
+                    <a href="https://browser.testnet.partisiablockchain.com/transactions/${tokenTxId}" 
+                       class="transaction-link" target="_blank">${tokenTxId}</a>
+                    <span class="status ${tokenConfirmed ? 'success' : 'error'}">${tokenConfirmed ? '✅' : '❌'}</span>
                   </div>
                 </div>
-                <div class="mt-3">
-                  <button id="retry-contribution" class="btn btn-primary">Retry Contribution</button>
-                  <button id="refresh-state-check" class="btn btn-secondary ml-2">Check Campaign Status</button>
+                ${troubleshooting}
+                <div class="action-buttons">
+                  <button id="retry-contribution" class="btn btn-primary">Try Again</button>
+                  <button id="check-balance" class="btn btn-secondary">Check Token Balance</button>
+                  <button id="refresh-campaign" class="btn btn-secondary">Refresh Campaign</button>
                 </div>
               </div>
             `;
             
-            // Add retry and refresh buttons
+            // Add action button handlers
             const retryBtn = document.querySelector("#retry-contribution");
-            const refreshBtn = document.querySelector("#refresh-state-check");
+            const checkBalanceBtn = document.querySelector("#check-balance");
+            const refreshBtn = document.querySelector("#refresh-campaign");
             
             if (retryBtn) {
               retryBtn.addEventListener("click", () => {
@@ -980,6 +1095,13 @@ async function addContributionFormAction() {
                   transactionLinkContainer.innerHTML = '';
                   transactionLinkContainer.classList.add("hidden");
                 }
+              });
+            }
+            
+            if (checkBalanceBtn) {
+              checkBalanceBtn.addEventListener("click", () => {
+                // Open wallet or show balance check instructions
+                showApplicationMessage("Please check your token balance in your wallet");
               });
             }
             
@@ -992,39 +1114,29 @@ async function addContributionFormAction() {
     );
     
   } catch (error) {
-    console.error("Error in contribution process:", error);
+    console.error("Error in enhanced contribution process:", error);
     
-    // Enhanced error message with specific error type detection
-    let errorMessage = error.message || String(error);
-    let isContractError = false;
-    
-    if (error.code === 'CONTRACT_EXECUTION_FAILED' || error.contractError) {
-      isContractError = true;
-      errorMessage = error.contractError || error.message;
-    }
-    
-    showApplicationMessage(`Contribution failed: ${errorMessage}`);
+    showApplicationMessage(`Contribution failed: ${error.message}`);
     
     if (transactionLinkContainer) {
       transactionLinkContainer.innerHTML = `
         <div class="alert alert-error">
-          <p>❌ Contribution failed: ${errorMessage}</p>
-          ${isContractError ? `
-            <div class="mt-2 p-2 bg-red-50 border-red-200 rounded">
-              <p class="text-sm"><strong>This is a contract-level error.</strong></p>
-              <p class="text-sm text-red-700">The transaction was submitted but the smart contract rejected it.</p>
-            </div>
-          ` : `
-            <div class="mt-2 p-2 bg-yellow-50 border-yellow-200 rounded">
-              <p class="text-sm"><strong>This error occurred before submission.</strong></p>
-              <p class="text-sm text-yellow-700">Please check your wallet connection and try again.</p>
-            </div>
-          `}
-          <button id="retry-contribution" class="btn btn-primary mt-2">Retry</button>
+          <h4>❌ Contribution Setup Failed</h4>
+          <p><strong>Error:</strong> ${error.message}</p>
+          <div class="troubleshooting">
+            <h5>🔍 Common Issues:</h5>
+            <ul>
+              <li><strong>Wallet connection:</strong> Make sure your wallet is connected</li>
+              <li><strong>Network issues:</strong> Check your internet connection</li>
+              <li><strong>Campaign status:</strong> Campaign may have ended</li>
+              <li><strong>Token balance:</strong> Ensure you have sufficient tokens</li>
+            </ul>
+          </div>
+          <button id="retry-setup" class="btn btn-primary">Try Again</button>
         </div>
       `;
       
-      const retryBtn = document.querySelector("#retry-contribution");
+      const retryBtn = document.querySelector("#retry-setup");
       if (retryBtn) {
         retryBtn.addEventListener("click", () => {
           if (transactionLinkContainer) {
@@ -1041,6 +1153,16 @@ async function addContributionFormAction() {
       addContributionBtn.textContent = "Contribute";
     }
   }
+}
+
+// Helper function to display amounts to token units
+function displayAmountToTokenUnits(displayAmount: number): number {
+  return Math.round(displayAmount * 1_000_000);
+}
+
+// Helper function to convert token units to wei
+function tokenUnitsToWei(tokenUnits: number): bigint {
+  return BigInt(tokenUnits) * BigInt("1000000000000000000");
 }
 
 /**
@@ -1417,15 +1539,10 @@ function countContributions(variables) {
 }
 
 /**
- * Enhanced function to update UI with contract state - improved display formatting
- * @param {Object} state - The deserialized contract state
- * @param {Array} variables - The contract variables array
+ * FIXED: Update UI elements with contract state - now respects privacy design
  */
-function updateUIWithContractState(state, variables) {
-  try {
-    // Count the number of contributions
-    const contributionCount = countContributions(variables);
-    
+function updateUIWithContractState(state) {
+  try {    
     // Update owner
     const ownerValue = document.querySelector("#owner-value");
     if (ownerValue && state.owner) {
@@ -1466,28 +1583,36 @@ function updateUIWithContractState(state, variables) {
       })}`;
     }
     
-    // Update contributors
+    // ✅ FIXED: Contributors count - trust the contract's public state
     const numContributors = document.querySelector("#num-contributors");
     if (numContributors) {
-      numContributors.innerHTML = `${state.numContributors ?? contributionCount}`;
+      if (state.numContributors !== null && state.numContributors !== undefined) {
+        // Contract has revealed the count (campaign ended successfully)
+        numContributors.innerHTML = `${state.numContributors}`;
+      } else {
+        // Contract is keeping count private (privacy protection)
+        numContributors.innerHTML = `<span class="text-blue-600">Private</span>`;
+      }
     }
     
-    // Update total raised - with improved formatting
+    // ✅ FIXED: Total raised - respect threshold-based revelation
     const totalRaised = document.querySelector("#total-raised");
     if (totalRaised) {
-      if (state.status === CampaignStatus.Completed && state.isSuccessful && state.totalRaised !== undefined) {
-        // For completed successful campaigns, show the formatted amount
-        const displayAmount = tokenUnitsToDisplayAmount(state.totalRaised);
-        totalRaised.innerHTML = `${displayAmount.toLocaleString(undefined, {
-          minimumFractionDigits: 6,
-          maximumFractionDigits: 6
-        })}`;
-      } else if (state.status === CampaignStatus.Completed) {
-        // For completed unsuccessful campaigns
-        totalRaised.innerHTML = `<span class="text-yellow-600">Not revealed (threshold not met)</span>`;
+      if (state.status === CampaignStatus.Completed) {
+        if (state.isSuccessful && state.totalRaised !== undefined && state.totalRaised !== null) {
+          // Campaign successful - reveal total
+          const displayAmount = tokenUnitsToDisplayAmount(state.totalRaised);
+          totalRaised.innerHTML = `${displayAmount.toLocaleString(undefined, {
+            minimumFractionDigits: 6,
+            maximumFractionDigits: 6
+          })}`;
+        } else {
+          // Campaign failed or unsuccessful - keep total hidden
+          totalRaised.innerHTML = `<span class="text-yellow-600">Hidden (threshold not met)</span>`;
+        }
       } else {
-        // For campaigns in progress
-        totalRaised.innerHTML = `<span class="text-blue-600">Redacted</span>`;
+        // Campaign still active or computing
+        totalRaised.innerHTML = `<span class="text-blue-600">Encrypted</span>`;
       }
     }
     
@@ -1514,15 +1639,16 @@ function updateUIWithContractState(state, variables) {
       }
     }
     
-    // Log the state for debugging with conversions
-    console.log("Contract state display info:", {
-      fundingTargetRaw: state.fundingTarget,
-      fundingTargetDisplay: tokenUnitsToDisplayAmount(state.fundingTarget || 0),
-      totalRaisedRaw: state.totalRaised,
-      totalRaisedDisplay: state.totalRaised ? tokenUnitsToDisplayAmount(state.totalRaised) : undefined,
-      status: state.status,
-      isSuccessful: state.isSuccessful
-    });
+    // ✅ DEBUGGING: Log the corrected state interpretation
+    console.log("=== CORRECTED CONTRACT STATE INTERPRETATION ===");
+    console.log("Contract says num_contributors:", state.numContributors);
+    console.log("Contract says total_raised:", state.totalRaised);
+    console.log("Contract says is_successful:", state.isSuccessful);
+    console.log("Frontend interpretation:");
+    console.log("- Contributors displayed:", state.numContributors ?? "Private");
+    console.log("- Total displayed:", state.totalRaised ? tokenUnitsToDisplayAmount(state.totalRaised) : "Hidden/Encrypted");
+    console.log("- Privacy maintained:", state.numContributors === null || state.numContributors === undefined);
+    
   } catch (error) {
     console.error("Error updating UI with contract state:", error);
     showErrorMessage(`Error updating UI: ${error.message}`);

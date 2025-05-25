@@ -1448,3 +1448,319 @@ body {
     display: none;
   }
 }
+
+/* Contribution Steps Styling */
+.contribution-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.step.pending {
+  background-color: #f8f9fa;
+  color: #6c757d;
+}
+
+.step.active {
+  background-color: rgba(94, 58, 238, 0.1);
+  color: var(--primary-color);
+  border-left: 3px solid var(--primary-color);
+}
+
+.step.completed {
+  background-color: rgba(40, 167, 69, 0.1);
+  color: var(--secondary-color);
+  border-left: 3px solid var(--secondary-color);
+}
+
+.step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+.step.pending .step-number {
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+.step.active .step-number {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.step.completed .step-number {
+  background-color: var(--secondary-color);
+  color: white;
+}
+
+.step-text {
+  font-weight: 500;
+  flex-grow: 1;
+}
+
+.step .spinner {
+  width: 1rem;
+  height: 1rem;
+  margin-left: auto;
+}
+
+/* Transaction Details */
+.transaction-details {
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.transaction-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.transaction-row:last-child {
+  border-bottom: none;
+}
+
+.transaction-row .label {
+  font-weight: 500;
+  min-width: 120px;
+  color: var(--muted-text);
+}
+
+.transaction-row .transaction-link {
+  flex-grow: 1;
+  font-family: monospace;
+  font-size: 0.875rem;
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.transaction-row .status {
+  font-size: 1.25rem;
+  min-width: 2rem;
+  text-align: center;
+}
+
+.status.success {
+  color: var(--secondary-color);
+}
+
+.status.error {
+  color: var(--danger-color);
+}
+
+/* Privacy Note */
+.privacy-note {
+  background: linear-gradient(135deg, 
+    rgba(94, 58, 238, 0.05) 0%, 
+    rgba(94, 58, 238, 0.02) 100%);
+  border-left: 3px solid var(--primary-color);
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  margin: 1rem 0;
+}
+
+.privacy-note p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--primary-dark);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Troubleshooting Section */
+.troubleshooting {
+  background-color: rgba(255, 193, 7, 0.05);
+  border: 1px solid rgba(255, 193, 7, 0.2);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.troubleshooting h5 {
+  margin: 0 0 0.5rem 0;
+  color: #856404;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.troubleshooting ul {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.troubleshooting li {
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+  color: #856404;
+}
+
+.troubleshooting strong {
+  color: #533f03;
+}
+
+/* Action Buttons */
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.action-buttons .btn {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .transaction-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  
+  .transaction-row .label {
+    min-width: auto;
+    font-size: 0.875rem;
+  }
+  
+  .transaction-row .status {
+    align-self: flex-end;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+  }
+  
+  .action-buttons .btn {
+    width: 100%;
+  }
+}
+
+/* Loading Animation for Steps */
+@keyframes stepPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.8;
+  }
+}
+
+.step.active {
+  animation: stepPulse 2s infinite;
+}
+
+/* Success Animation */
+@keyframes successSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.alert-success {
+  animation: successSlide 0.5s ease-out;
+}
+
+/* Error Styling */
+.alert-error .transaction-details {
+  background-color: rgba(220, 53, 69, 0.05);
+  border: 1px solid rgba(220, 53, 69, 0.2);
+}
+
+/* Enhanced Alert Styling */
+.alert h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.alert p {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* Spinner in Context */
+.step .spinner,
+.alert .spinner {
+  border-width: 2px;
+  animation-duration: 1s;
+}
+
+/* Progress Indicator */
+.contribution-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  font-size: 0.875rem;
+  color: var(--muted-text);
+}
+
+.progress-bar {
+  flex-grow: 1;
+  height: 4px;
+  background-color: #e9ecef;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--primary-color);
+  transition: width 0.3s ease;
+}
+
+/* Improved Button States */
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  position: relative;
+}
+
+.btn.processing::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  margin-top: -0.5rem;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
