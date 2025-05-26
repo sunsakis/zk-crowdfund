@@ -1,27 +1,11 @@
 {
   "version": 2,
   "name": "zk-crowdfunding-platform",
-  "builds": [
-    {
-      "src": "zk-crowdfunding-frontend/package.json",
-      "use": "@vercel/node"
-    }
-  ],
   "buildCommand": "cd zk-crowdfunding-frontend && npm ci && npm run build",
   "outputDirectory": "zk-crowdfunding-frontend/dist",
   "installCommand": "cd zk-crowdfunding-frontend && npm ci",
   "devCommand": "cd zk-crowdfunding-frontend && npm start",
   "framework": null,
-  "routes": [
-    {
-      "src": "/public/(.*)",
-      "dest": "/zk-crowdfunding-frontend/public/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/zk-crowdfunding-frontend/dist/$1"
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -63,13 +47,5 @@
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
-  ],
-  "functions": {
-    "zk-crowdfunding-frontend/src/**/*.ts": {
-      "runtime": "nodejs18.x"
-    }
-  },
-  "env": {
-    "NODE_ENV": "production"
-  }
+  ]
 }
