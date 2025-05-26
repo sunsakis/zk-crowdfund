@@ -534,28 +534,23 @@ async approveTokens(
     console.log("cleanTokenAddr:", cleanTokenAddr);
     console.log("cleanCampaignAddr:", cleanCampaignAddr);
 
-    // Build the approve RPC buffer 
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x05); 
-      
-      // ✅ This is where the error occurs - ensure we pass a clean string
-      console.log("About to call BlockchainAddress.fromString with:", cleanCampaignAddr);
-      const campaignBlockchainAddr = BlockchainAddress.fromString(cleanCampaignAddr);
-      _out.writeAddress(campaignBlockchainAddr);
-      
-      // Convert BigInt to bytes for u128
-      const buffer = Buffer.alloc(16);
-      for (let i = 0; i < 16; i++) {
-        buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
-      }
-      _out.writeBytes(buffer);
-    });
-
-    // Send the transaction to approve tokens
-    return this.transactionClient.signAndSend({
-      address: cleanTokenAddr,
-      rpc
-    }, this.TOKEN_APPROVAL_GAS);
+const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+    _out.writeU8(0x05); // ✅ Correct: approve shortname
+    _out.writeAddress(campaignBlockchainAddr); // spender: crowdfunding contract
+    
+    // Convert BigInt to bytes for u128 (16 bytes)
+    const buffer = Buffer.alloc(16);
+    for (let i = 0; i < 16; i++) {
+      buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+    }
+    _out.writeBytes(buffer);
+  });
+  
+  // Send to token contract
+  return this.transactionClient.signAndSend({
+    address: cleanTokenAddr,
+    rpc
+  }, this.TOKEN_APPROVAL_GAS);
   } catch (error) {
     console.error("❌ Error in approveTokens:", error);
     console.error("Error details:", {

@@ -185,7 +185,7 @@ fn add_contribution(
     (state, vec![], input_def)
 }
 
-/// Process token transfer for contribution - calls token balance creation after success
+/// Process token transfer for contribution
 #[action(shortname = 0x07, zk = true)]
 fn contribute_tokens(
     context: ContractContext,
@@ -213,10 +213,12 @@ fn contribute_tokens(
     let wei_amount = token_units_to_wei(amount);
     
     let mut event_group = EventGroup::builder();
-    event_group.call(state.token_address, Shortname::from_u32(TOKEN_TRANSFER_FROM_SHORTNAME as u32))
-        .argument(context.sender)
-        .argument(context.contract_address)
-        .argument(wei_amount)
+    
+    // ✅ FIXED: Correct argument order for transfer_from
+    event_group.call(state.token_address, Shortname::from_u32(0x03)) // transfer_from shortname
+        .argument(context.sender)           // from: the user (token owner)
+        .argument(context.contract_address) // to: the crowdfunding contract
+        .argument(wei_amount)               // amount: tokens to transfer
         .done();
     
     event_group.with_callback(ShortnameCallback::from_u32(CONTRIBUTION_CALLBACK_SHORTNAME))
