@@ -1366,10 +1366,6 @@ async function withdrawFundsAction() {
           isContractError = true;
           specificGuidance = "The campaign must be completed before funds can be withdrawn. If the campaign is still active, you may need to end it first.";
           break;
-        case 'CAMPAIGN_UNSUCCESSFUL':
-          isContractError = true;
-          specificGuidance = "Funds can only be withdrawn if the campaign reached its funding target. Since the target was not met, funds cannot be withdrawn.";
-          break;
         case 'WALLET_NOT_CONNECTED':
           specificGuidance = "Please reconnect your wallet and try again.";
           break;

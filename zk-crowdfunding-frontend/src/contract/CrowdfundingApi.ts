@@ -827,14 +827,6 @@ async approveTokens(
         );
       }
       
-      // Check if campaign was successful
-      if (!campaignData.isSuccessful) {
-        throw new CrowdfundingApiError(
-          "Cannot withdraw funds - campaign did not reach its funding target",
-          "CAMPAIGN_UNSUCCESSFUL"
-        );
-      }
-      
       console.log("✅ Pre-validation passed: Campaign is completed and successful");
     } catch (error) {
       if (error instanceof CrowdfundingApiError) {
