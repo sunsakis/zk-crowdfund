@@ -5,15 +5,17 @@ const Dotenv = require('dotenv-webpack');
 
 module.exports = (env) => {
   const port = env.PORT || 8081;
+  const isProduction = env.NODE_ENV === 'production' || process.env.NODE_ENV === 'production';
 
   return {
-    mode: "development",
-    devtool: "eval-source-map",
+    mode: isProduction ? "production" : "development",
+    devtool: isProduction ? "source-map" : "eval-source-map",
     entry: './src/Main.ts',
     output: {
       path: path.resolve(__dirname, 'dist'),
-      filename: '[name].[contenthash].js',
-      publicPath: '/'
+      filename: isProduction ? '[name].[contenthash].js' : '[name].js',
+      publicPath: '/',
+      clean: true // Clean dist folder on each build
     },
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
@@ -37,7 +39,7 @@ module.exports = (env) => {
           use: {
             loader: 'ts-loader',
             options: {
-              transpileOnly: true, // Faster builds but no type checking
+              transpileOnly: !isProduction, // Type checking only in production
             }
           }
         },
@@ -54,14 +56,15 @@ module.exports = (env) => {
     plugins: [
       new HtmlWebpackPlugin({
         template: './src/index.html',
-        filename: 'index.html'
+        filename: 'index.html',
+        minify: isProduction
       }),
       new webpack.ProvidePlugin({
         Buffer: ['buffer', 'Buffer'],
         process: 'process/browser'
       }),
       new Dotenv({
-        systemvars: true // Load all system environment variables as well
+        systemvars: true
       })
     ],
     devServer: {
@@ -70,14 +73,25 @@ module.exports = (env) => {
         publicPath: '/',
       },
       port: port,
-      hot: true,
+      hot: !isProduction,
       historyApiFallback: true,
-      // Important - set the correct MIME types
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
         "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization"
       }
+    },
+    optimization: {
+      splitChunks: isProduction ? {
+        chunks: 'all',
+        cacheGroups: {
+          vendor: {
+            test: /[\\/]node_modules[\\/]/,
+            name: 'vendors',
+            chunks: 'all',
+          },
+        },
+      } : false
     }
   };
 };

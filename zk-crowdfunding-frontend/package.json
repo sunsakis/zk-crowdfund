@@ -9,7 +9,8 @@
     "lint": "eslint --ext .ts,.tsx src/",
     "lint:fix": "eslint --ext .ts,.tsx src/ --fix",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preview": "webpack serve --mode production --env PORT=8080"
   },
   "keywords": [
     "blockchain",
