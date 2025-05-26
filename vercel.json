@@ -1,0 +1,75 @@
+{
+  "version": 2,
+  "name": "zk-crowdfunding-platform",
+  "builds": [
+    {
+      "src": "zk-crowdfunding-frontend/package.json",
+      "use": "@vercel/node"
+    }
+  ],
+  "buildCommand": "cd zk-crowdfunding-frontend && npm ci && npm run build",
+  "outputDirectory": "zk-crowdfunding-frontend/dist",
+  "installCommand": "cd zk-crowdfunding-frontend && npm ci",
+  "devCommand": "cd zk-crowdfunding-frontend && npm start",
+  "framework": null,
+  "routes": [
+    {
+      "src": "/public/(.*)",
+      "dest": "/zk-crowdfunding-frontend/public/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/zk-crowdfunding-frontend/dist/$1"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/public/config.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/config.js",
+      "destination": "/public/config.js"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "zk-crowdfunding-frontend/src/**/*.ts": {
+      "runtime": "nodejs18.x"
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
