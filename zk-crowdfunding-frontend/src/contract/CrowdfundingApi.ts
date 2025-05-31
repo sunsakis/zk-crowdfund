@@ -82,8 +82,9 @@ const CONTRACT_ERROR_PATTERNS = {
   WITHDRAW_ERRORS: [
     'Only the owner can withdraw funds',
     'Campaign must be completed',
+    'Campaign must have been successful to withdraw funds',
     'Funds have already been withdrawn',
-    'Balance tracker should exist after campaign completion'
+    'Balance tracker should exist after successful campaign completion'
   ],
   
   GENERAL_ERRORS: [
@@ -473,80 +474,80 @@ export class CrowdfundingApi {
     }
   }
 
-async approveTokens(
-  tokenAddress: string,
-  campaignAddress: string,
-  amount: bigint
-): Promise<SentTransaction> {
-  if (!this.transactionClient) {
-    throw new Error("Wallet not connected");
-  }
-
-  try {
-    console.log("🔍 DEBUG approveTokens inputs:");
-    console.log("tokenAddress:", tokenAddress);
-    console.log("campaignAddress:", campaignAddress);
-    console.log("amount:", amount.toString());
-    
-    let campaignAddrString: string;
-    let tokenAddrString: string;
-    
-    // Handle campaign address conversion
-    if (typeof campaignAddress === 'string') {
-      campaignAddrString = campaignAddress.startsWith('0x') ? 
-        campaignAddress.slice(2) : campaignAddress;
-    } else {
-      throw new Error("Campaign address must be a string");
+  async approveTokens(
+    tokenAddress: string,
+    campaignAddress: string,
+    amount: bigint
+  ): Promise<SentTransaction> {
+    if (!this.transactionClient) {
+      throw new Error("Wallet not connected");
     }
-    
-    // Handle token address conversion  
-    if (typeof tokenAddress === 'string') {
-      tokenAddrString = tokenAddress.startsWith('0x') ? 
-        tokenAddress.slice(2) : tokenAddress;
-    } else {
-      throw new Error("Token address must be a string");
-    }
-    
-    console.log("✅ Cleaned addresses:");
-    console.log("cleanTokenAddr:", tokenAddrString);
-    console.log("cleanCampaignAddr:", campaignAddrString);
 
-    const campaignBlockchainAddr = BlockchainAddress.fromString(campaignAddrString);
-    const tokenBlockchainAddr = BlockchainAddress.fromString(tokenAddrString);
-
-    // Build the approve RPC buffer 
-    const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x05); // approve shortname
+    try {
+      console.log("🔍 DEBUG approveTokens inputs:");
+      console.log("tokenAddress:", tokenAddress);
+      console.log("campaignAddress:", campaignAddress);
+      console.log("amount:", amount.toString());
       
-      _out.writeAddress(campaignBlockchainAddr);
+      let campaignAddrString: string;
+      let tokenAddrString: string;
       
-      // Convert BigInt to bytes for u128 (16 bytes)
-      const buffer = Buffer.alloc(16);
-      for (let i = 0; i < 16; i++) {
-        buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+      // Handle campaign address conversion
+      if (typeof campaignAddress === 'string') {
+        campaignAddrString = campaignAddress.startsWith('0x') ? 
+          campaignAddress.slice(2) : campaignAddress;
+      } else {
+        throw new Error("Campaign address must be a string");
       }
-      _out.writeBytes(buffer);
-    });
+      
+      // Handle token address conversion  
+      if (typeof tokenAddress === 'string') {
+        tokenAddrString = tokenAddress.startsWith('0x') ? 
+          tokenAddress.slice(2) : tokenAddress;
+      } else {
+        throw new Error("Token address must be a string");
+      }
+      
+      console.log("✅ Cleaned addresses:");
+      console.log("cleanTokenAddr:", tokenAddrString);
+      console.log("cleanCampaignAddr:", campaignAddrString);
 
-    console.log("Sending approval transaction...");
+      const campaignBlockchainAddr = BlockchainAddress.fromString(campaignAddrString);
+      const tokenBlockchainAddr = BlockchainAddress.fromString(tokenAddrString);
 
-    // Send the transaction to approve tokens using the cleaned token address
-    return this.transactionClient.signAndSend({
-      address: tokenAddrString,  // Use the string address for the transaction
-      rpc
-    }, this.TOKEN_APPROVAL_GAS);
-    
-  } catch (error) {
-    console.error("❌ Error in approveTokens:", error);
-    console.error("Error details:", {
-      message: error.message,
-      stack: error.stack,
-      tokenAddress: typeof tokenAddress,
-      campaignAddress: typeof campaignAddress
-    });
-    throw error;
+      // Build the approve RPC buffer 
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x05); // approve shortname
+        
+        _out.writeAddress(campaignBlockchainAddr);
+        
+        // Convert BigInt to bytes for u128 (16 bytes)
+        const buffer = Buffer.alloc(16);
+        for (let i = 0; i < 16; i++) {
+          buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        _out.writeBytes(buffer);
+      });
+
+      console.log("Sending approval transaction...");
+
+      // Send the transaction to approve tokens using the cleaned token address
+      return this.transactionClient.signAndSend({
+        address: tokenAddrString,  // Use the string address for the transaction
+        rpc
+      }, this.TOKEN_APPROVAL_GAS);
+      
+    } catch (error) {
+      console.error("❌ Error in approveTokens:", error);
+      console.error("Error details:", {
+        message: error.message,
+        stack: error.stack,
+        tokenAddress: typeof tokenAddress,
+        campaignAddress: typeof campaignAddress
+      });
+      throw error;
+    }
   }
-}
 
   /**
    * Enhanced contribution flow with comprehensive error checking
@@ -730,9 +731,15 @@ async approveTokens(
   };
 
   /**
-   * Enhanced end campaign with the same level of error checking
+   * Enhanced end campaign - UPDATED: No more setup_funding_target needed!
+   * Uses public funding_target from contract state automatically
    */
   readonly endCampaign = async (address: string): Promise<TransactionResult> => {
+    console.log(`=== SIMPLIFIED END CAMPAIGN ===`);
+    console.log(`Campaign address: ${address}`);
+    console.log(`✅ Uses public funding_target from contract state automatically`);
+    console.log(`✅ No setup_funding_target step required anymore`);
+    
     if (!this.transactionClient) {
       throw new CrowdfundingApiError(
         "Wallet not connected",
@@ -747,21 +754,44 @@ async approveTokens(
       );
     }
 
+    // Build RPC for end_campaign (shortname 0x01)
     const rpc = AbiByteOutput.serializeBigEndian((_out) => {
-      _out.writeU8(0x09);
-      _out.writeBytes(Buffer.from([0x01]));
+      _out.writeU8(0x09); // Format indicator
+      _out.writeBytes(Buffer.from([0x01])); // end_campaign shortname
     });
 
     try {
+      console.log("Sending end campaign transaction...");
+      console.log("🔒 The ZK computation will automatically:");
+      console.log("  1. Read funding_target from public contract state");
+      console.log("  2. Sum all private contributions");
+      console.log("  3. Compare total vs target privately");
+      console.log("  4. Reveal total ONLY if threshold is met");
+      console.log("  5. Keep individual contributions completely private");
+      
       const transaction = await this.transactionClient.signAndSend(
         { address, rpc }, 
         this.END_CAMPAIGN_GAS
       );
       
+      const txId = transaction.transactionPointer?.identifier || "unknown";
+      const shardId = transaction.transactionPointer?.destinationShardId;
+      
+      console.log(`End campaign transaction sent: ${txId} (shard: ${shardId})`);
+      console.log("✅ Privacy-preserving threshold-based revelation in progress...");
+      
       return {
         transaction,
         status: 'pending',
-        metadata: { type: 'endCampaign' }
+        metadata: { 
+          type: 'endCampaign',
+          txId,
+          shardId,
+          usesPublicTarget: true,
+          privacyPreserving: true,
+          thresholdBasedRevelation: true,
+          simplified: true
+        }
       };
     } catch (error) {
       console.error("Error ending campaign:", error);
@@ -804,6 +834,14 @@ async approveTokens(
         throw new CrowdfundingApiError(
           "Campaign must be completed before withdrawing funds",
           "CAMPAIGN_NOT_COMPLETED"
+        );
+      }
+      
+      // Check if campaign was successful
+      if (!campaignData.isSuccessful) {
+        throw new CrowdfundingApiError(
+          "Campaign must have been successful to withdraw funds",
+          "CAMPAIGN_NOT_SUCCESSFUL"
         );
       }
       
@@ -1088,6 +1126,13 @@ async approveTokens(
         maxTokenUnits: this.MAX_TOKEN_UNITS,
         minDisplayAmount: tokenUnitsToDisplayAmount(this.MIN_TOKEN_UNITS),
         maxDisplayAmount: tokenUnitsToDisplayAmount(this.MAX_TOKEN_UNITS)
+      },
+      features: {
+        thresholdBasedRevelation: true,
+        privacyPreserving: true,
+        usesPublicTarget: true,
+        noSetupRequired: true,
+        productionReady: true
       }
     };
   };

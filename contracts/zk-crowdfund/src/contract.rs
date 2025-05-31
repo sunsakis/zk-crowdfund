@@ -41,10 +41,6 @@ enum SecretVarType {
     ConditionalTotal {
         _placeholder: u8,
     },
-    #[discriminant(4)]
-    FundingTarget {
-        target: u32,
-    },
 }
 
 /// Campaign status
@@ -59,7 +55,7 @@ enum CampaignStatus {
     Completed {},
 }
 
-/// Contract state
+/// Contract state - removed target_zk_id since we use public funding_target
 #[state]
 struct ContractState {
     owner: Address,
@@ -73,7 +69,6 @@ struct ContractState {
     is_successful: bool,
     funds_withdrawn: bool,
     balance_tracker_id: Option<SecretVarId>,
-    target_zk_id: Option<SecretVarId>,
 }
 
 /// Constants
@@ -113,41 +108,8 @@ fn initialize(
         is_successful: false,
         funds_withdrawn: false,
         balance_tracker_id: None,
-        target_zk_id: None,
     };
 
-    (state, vec![], vec![])
-}
-
-/// Owner creates funding target ZK variable (one-time setup after deployment)
-#[action(shortname = 0x71, zk = true)]
-fn setup_funding_target(
-    context: ContractContext,
-    state: ContractState,
-    _zk_state: ZkState<SecretVarType>,
-) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
-    assert_eq!(context.sender, state.owner, "Only owner can setup funding target");
-    assert!(state.target_zk_id.is_none(), "Funding target already setup");
-    
-    let target_metadata = SecretVarType::FundingTarget { target: state.funding_target };
-    let target_input = ZkInputDef::with_metadata(None, target_metadata);
-    let create_target_change = ZkStateChange::ContractInput { data: target_input };
-    
-    (state, vec![], vec![create_target_change])
-}
-
-/// Track when funding target ZK variable is created
-#[zk_on_variable_inputted(shortname = 0x13)]
-fn on_target_created(
-    _context: ContractContext,
-    mut state: ContractState,
-    _zk_state: ZkState<SecretVarType>,
-    variable: SecretVarId,
-) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
-    // Store the funding target ZK variable ID
-    if state.target_zk_id.is_none() {
-        state.target_zk_id = Some(variable);
-    }
     (state, vec![], vec![])
 }
 
@@ -232,7 +194,7 @@ fn contribute_callback(
     (state, vec![], vec![])
 }
 
-/// End campaign - FIXED to read actual funding target
+/// End campaign - UPDATED to pass funding_target as public input to ZK computation
 #[action(shortname = 0x01, zk = true)]
 fn end_campaign(
     context: ContractContext,
@@ -242,12 +204,6 @@ fn end_campaign(
     assert_eq!(context.sender, state.owner, "Only owner can end the campaign");
     assert_eq!(state.status, CampaignStatus::Active {}, "Campaign can only be ended from Active state");
     assert_eq!(zk_state.calculation_state, CalculationStatus::Waiting, "Computation must start from Waiting state");
-    
-    // Ensure funding target ZK variable exists
-    assert!(
-        state.target_zk_id.is_some(),
-        "Funding target must be setup first (call setup_funding_target)"
-    );
 
     let contributions = zk_state.secret_variables.iter()
         .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution { .. }))
@@ -258,6 +214,7 @@ fn end_campaign(
     state.num_contributors = Some(num_contributors);
     
     if contributions == 0 {
+        // No contributions, campaign automatically fails
         state.status = CampaignStatus::Completed {};
         state.is_successful = false;
         state.total_raised = None;
@@ -267,15 +224,20 @@ fn end_campaign(
     let function_shortname = ShortnameZkComputation::from_u32(ZK_THRESHOLD_CHECK_SHORTNAME);
     let on_complete_hook = Some(ShortnameZkComputeComplete::from_u32(THRESHOLD_CHECK_COMPLETE_SHORTNAME));
     
-    // Create output variables - ZK will read funding target from existing secret variables
+    // Create output variables metadata
     let output_metadata = vec![
         SecretVarType::ThresholdCheckResult { _placeholder: 0 },
         SecretVarType::ConditionalTotal { _placeholder: 0 },
     ];
     
-    let computation_change = ZkStateChange::start_computation(
+    // UPDATED: Pass funding_target as public input to ZK computation
+    // Use u32 directly since it implements ReadWriteState
+    let input_arguments = vec![state.funding_target];
+    
+    let computation_change = ZkStateChange::start_computation_with_inputs(
         function_shortname,
         output_metadata,
+        input_arguments,
         on_complete_hook,
     );
     
@@ -292,11 +254,12 @@ fn threshold_check_complete(
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     
     if output_variables.len() >= 2 {
-        // output_variables[0] = ThresholdCheckResult
-        // output_variables[1] = ConditionalTotal
+        // output_variables[0] = ThresholdCheckResult (1 if met, 0 if not)
+        // output_variables[1] = ConditionalTotal (total if met, 0 if not)
         
         state.balance_tracker_id = Some(output_variables[1]);
         
+        // Always reveal the threshold result (whether target was met)
         (
             state,
             vec![],
@@ -312,7 +275,6 @@ fn threshold_check_complete(
     }
 }
 
-/// Handle revelations
 #[zk_on_variables_opened]
 fn handle_opened_variables(
     _context: ContractContext,
@@ -327,6 +289,7 @@ fn handle_opened_variables(
     let opened_variable = zk_state.get_variable(opened_variables[0]).unwrap();
     
     if matches!(state.status, CampaignStatus::Computing {}) {
+        // First revelation: threshold check result
         if let Some(threshold_data) = &opened_variable.data {
             if threshold_data.len() >= 4 {
                 let threshold_bytes: [u8; 4] = threshold_data[0..4].try_into().unwrap_or([0u8; 4]);
@@ -335,8 +298,10 @@ fn handle_opened_variables(
                 state.status = CampaignStatus::Completed {};
                 
                 if threshold_met == 1 {
+                    // Threshold was met - campaign successful
                     state.is_successful = true;
                     
+                    // Reveal the total amount since threshold was met
                     if let Some(balance_tracker_id) = state.balance_tracker_id {
                         return (
                             state,
@@ -347,8 +312,9 @@ fn handle_opened_variables(
                         );
                     }
                 } else {
+                    // Threshold not met - campaign failed
                     state.is_successful = false;
-                    state.total_raised = None;
+                    state.total_raised = None; // Keep total hidden
                 }
             }
         }
@@ -357,38 +323,32 @@ fn handle_opened_variables(
     }
     
     if matches!(state.status, CampaignStatus::Completed {}) && state.is_successful {
+        // Handle both total revelation AND withdrawal in the same block
         if let Some(total_data) = &opened_variable.data {
             if total_data.len() >= 4 {
                 let total_bytes: [u8; 4] = total_data[0..4].try_into().unwrap_or([0u8; 4]);
                 let total_amount = u32::from_le_bytes(total_bytes);
-                state.total_raised = Some(total_amount);
-            }
-        }
-        
-        return (state, vec![], vec![]);
-    }
-    
-    // FIXED: Withdrawal transfer with correct token contract call
-    if state.funds_withdrawn {
-        if let Some(withdrawal_data) = &opened_variable.data {
-            if withdrawal_data.len() >= 4 {
-                let amount_bytes: [u8; 4] = withdrawal_data[0..4].try_into().unwrap_or([0u8; 4]);
-                let tokens_to_withdraw = u32::from_le_bytes(amount_bytes);
                 
-                if tokens_to_withdraw > 0 {
-                    let withdraw_amount_wei = token_units_to_wei(tokens_to_withdraw);
+                // Always set the total_raised when this variable is opened
+                state.total_raised = Some(total_amount);
+                
+                // Check if this is a withdrawal request
+                if state.funds_withdrawn && total_amount > 0 {
+                    let withdraw_amount_wei = token_units_to_wei(total_amount);
                     
                     let mut event_group = EventGroup::builder();
-                    // FIXED: Use correct transfer shortname (0x01, not TOKEN_TRANSFER_SHORTNAME)
+                    // Use correct transfer shortname
                     event_group.call(state.token_address, Shortname::from_u32(0x01))
-                        .argument(state.owner)      // to: owner
-                        .argument(withdraw_amount_wei) // amount: wei
+                        .argument(state.owner)           // to: owner
+                        .argument(withdraw_amount_wei)   // amount: wei
                         .done();
                     
                     return (state, vec![event_group.build()], vec![]);
                 }
             }
         }
+        
+        return (state, vec![], vec![]);
     }
     
     (state, vec![], vec![])
@@ -405,7 +365,7 @@ fn withdraw_funds(
     assert!(!state.funds_withdrawn, "Funds have already been withdrawn");
     
     let balance_tracker_id = state.balance_tracker_id
-        .expect("Balance tracker should exist after campaign completion");
+        .expect("Balance tracker should exist after successful campaign completion");
     
     state.funds_withdrawn = true;
     
