@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "name": "zk-crowdfunding-platform",
+  "buildCommand": "cd zk-crowdfunding-frontend && npm ci && npm run build",
+  "outputDirectory": "zk-crowdfunding-frontend/dist",
+  "installCommand": "cd zk-crowdfunding-frontend && npm ci",
+  "devCommand": "cd zk-crowdfunding-frontend && npm start",
+  "framework": null,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    },
+    {
+      "source": "/public/config.js",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/javascript"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/config.js",
+      "destination": "/public/config.js"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
