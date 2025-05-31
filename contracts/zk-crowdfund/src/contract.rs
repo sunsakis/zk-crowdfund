@@ -362,6 +362,7 @@ fn withdraw_funds(
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     assert_eq!(context.sender, state.owner, "Only the owner can withdraw funds");
     assert_eq!(state.status, CampaignStatus::Completed {}, "Campaign must be completed");
+    assert!(state.is_successful, "Campaign must have been successful to withdraw funds");
     assert!(!state.funds_withdrawn, "Funds have already been withdrawn");
     
     let balance_tracker_id = state.balance_tracker_id
