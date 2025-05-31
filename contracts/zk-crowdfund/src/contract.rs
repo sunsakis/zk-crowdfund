@@ -19,7 +19,7 @@ use read_write_rpc_derive::ReadWriteRPC;
 use read_write_state_derive::ReadWriteState;
 use create_type_spec_derive::CreateTypeSpec;
 
-/// Secret variable metadata types - FIXED to separate commitments from actual tokens
+/// Secret variable metadata types - ALL struct variants for PBC compatibility
 #[derive(ReadWriteState, ReadWriteRPC, Debug, Clone, CreateTypeSpec)]
 #[repr(u8)]
 enum SecretVarType {
@@ -38,7 +38,20 @@ enum SecretVarType {
         timestamp: i64,
     },
     #[discriminant(2)]
-    SumResult {},
+    ThresholdCheckResult {
+        /// Placeholder field for struct variant requirement
+        _placeholder: u8,
+    },
+    #[discriminant(3)]
+    ConditionalTotal {
+        /// Placeholder field for struct variant requirement
+        _placeholder: u8,
+    },
+    #[discriminant(4)]
+    FundingTarget {
+        /// The funding target for this campaign
+        target: u32,
+    },
 }
 
 /// Status of the crowdfunding campaign
@@ -102,7 +115,7 @@ struct ContractState {
     funding_target: u32,
     /// Current status of the crowdfunding campaign
     status: CampaignStatus,
-    /// Total raised - ONLY revealed if threshold met
+    /// Total raised - ONLY revealed if threshold met via MPC
     total_raised: Option<u32>,
     /// Number of contributors
     num_contributors: Option<u32>,
@@ -116,11 +129,10 @@ struct ContractState {
 }
 
 /// Shortname constants
-const TOKEN_TRANSFER_FROM_SHORTNAME: u8 = 0x03;
 const TOKEN_TRANSFER_SHORTNAME: u8 = 0x01;
 const CONTRIBUTION_CALLBACK_SHORTNAME: u32 = 0x31;
-const SUM_COMPUTE_COMPLETE_SHORTNAME: u32 = 0x42;
-const ZK_COMPUTATION_SHORTNAME: u32 = 0x61;
+const THRESHOLD_CHECK_COMPLETE_SHORTNAME: u32 = 0x42;
+const ZK_THRESHOLD_CHECK_SHORTNAME: u32 = 0x61;
 
 /// Conversion factor
 const WEI_PER_TOKEN_UNIT: u128 = 1_000_000_000_000; // 1e12
@@ -231,11 +243,11 @@ fn contribute_tokens(
 /// FIXED: Simple callback - just confirm success, don't call problematic 0x41
 #[callback(shortname = 0x31, zk = true)]
 fn contribute_callback(
-    ctx: ContractContext,
+    _ctx: ContractContext,
     callback_ctx: CallbackContext,
     state: ContractState,
     _zk_state: ZkState<SecretVarType>,
-    amount: u32,
+    _amount: u32,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     if !callback_ctx.success {
         panic!("Token transfer failed");
@@ -269,7 +281,7 @@ fn add_token_balance(
     (state, vec![], input_def)
 }
 
-/// UPDATED: End campaign - now sums Contribution variables (since TokenBalance creation failed)
+/// PRODUCTION: End campaign - triggers MPC threshold check with embedded funding target
 #[action(shortname = 0x01, zk = true)]
 fn end_campaign(
     context: ContractContext,
@@ -285,8 +297,6 @@ fn end_campaign(
         .filter(|(_, var)| matches!(var.metadata, SecretVarType::Contribution { .. }))
         .count();
     
-    // ✅ FIXED: Since we're not creating TokenBalance variables automatically,
-    // we'll sum the Contribution variables instead (they represent successful transfers)
     let num_contributors = contributions as u32;
     state.status = CampaignStatus::Computing {};
     state.num_contributors = Some(num_contributors);
@@ -299,74 +309,106 @@ fn end_campaign(
         return (state, vec![], vec![]);
     }
     
-    // Start ZK computation to sum all Contribution variables
-    let function_shortname = ShortnameZkComputation::from_u32(ZK_COMPUTATION_SHORTNAME);
-    let on_complete_hook = Some(ShortnameZkComputeComplete::from_u32(SUM_COMPUTE_COMPLETE_SHORTNAME));
-    let output_metadata = vec![SecretVarType::SumResult {}];
+    // ✅ PRODUCTION: Start ZK computation with funding target embedded in metadata
+    // The ZK computation will extract the funding target from the metadata
+    let function_shortname = ShortnameZkComputation::from_u32(ZK_THRESHOLD_CHECK_SHORTNAME);
+    let on_complete_hook = Some(ShortnameZkComputeComplete::from_u32(THRESHOLD_CHECK_COMPLETE_SHORTNAME));
     
-    let zk_change = ZkStateChange::start_computation(
+    // Create output variables with funding target embedded in the first one's metadata:
+    // 1. FundingTargetCarrier: carries the funding target value in metadata
+    // 2. ThresholdCheckResult: 1 if threshold met, 0 if not (always revealed)
+    // 3. ConditionalTotal: actual total, but only revealed if threshold met
+    let output_metadata = vec![
+        SecretVarType::FundingTarget { target: state.funding_target },
+        SecretVarType::ThresholdCheckResult { _placeholder: 0 },
+        SecretVarType::ConditionalTotal { _placeholder: 0 },
+    ];
+    
+    let computation_change = ZkStateChange::start_computation(
         function_shortname,
         output_metadata,
         on_complete_hook,
     );
     
-    (state, vec![], vec![zk_change])
+    
+    (state, vec![], vec![computation_change])
 }
 
-/// ZK computation completed - now decide whether to reveal the total
+/// ZK computation completed - store results and decide what to reveal
 #[zk_on_compute_complete(shortname = 0x42)]
-fn sum_compute_complete(
+fn threshold_check_complete(
     _context: ContractContext,
     mut state: ContractState,
     _zk_state: ZkState<SecretVarType>,
     output_variables: Vec<SecretVarId>,
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
-    // Store the balance tracker ID for withdrawal purposes
-    // This points to encrypted data - the amount is never visible in contract state
-    if !output_variables.is_empty() {
-        state.balance_tracker_id = Some(output_variables[0]);
+    
+    if output_variables.len() >= 2 {
+        // ✅ FIXED: Correct mapping for 2 output variables
+        // output_variables[0] = ThresholdCheckResult (threshold_met)
+        // output_variables[1] = ConditionalTotal (conditional_total)
+        
+        // Store the conditional total for potential withdrawal
+        state.balance_tracker_id = Some(output_variables[1]);
+        
+        // Always reveal the threshold check result (just 1 or 0)
+        (
+            state,
+            vec![],
+            vec![ZkStateChange::OpenVariables {
+                variables: vec![output_variables[0]], // Reveal threshold_met
+            }],
+        )
+    } else {
+        // Fallback if computation failed
+        state.status = CampaignStatus::Completed {};
+        state.is_successful = false;
+        state.total_raised = None;
+        (state, vec![], vec![])
     }
-
-    // Open/declassify the sum result to check if threshold was met
-    (
-        state,
-        vec![],
-        vec![ZkStateChange::OpenVariables {
-            variables: output_variables.clone(),
-        }],
-    )
 }
 
-/// Handle both threshold-based revelation and withdrawal processing
+/// Handle threshold-based revelation - only reveal total if threshold met
 #[zk_on_variables_opened]
 fn handle_opened_variables(
     _context: ContractContext,
     mut state: ContractState,
     zk_state: ZkState<SecretVarType>,
     opened_variables: Vec<SecretVarId>,
-) -> (ContractState, Vec<EventGroup>) {
+) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     if opened_variables.is_empty() {
-        return (state, vec![]);
+        return (state, vec![], vec![]);
     }
     
     let opened_variable = zk_state.get_variable(opened_variables[0]).unwrap();
     
-    // Case 1: Handle sum revelation (when status is Computing)
+    // Case 1: Handle threshold check result (when status is Computing)
     if matches!(state.status, CampaignStatus::Computing {}) {
-        if let Some(sum_data) = &opened_variable.data {
-            if sum_data.len() >= 4 {
-                let sum_bytes: [u8; 4] = sum_data[0..4].try_into().unwrap_or([0u8; 4]);
-                let sum_value = u32::from_le_bytes(sum_bytes);
+        if let Some(threshold_data) = &opened_variable.data {
+            if threshold_data.len() >= 4 {
+                let threshold_bytes: [u8; 4] = threshold_data[0..4].try_into().unwrap_or([0u8; 4]);
+                let threshold_met = u32::from_le_bytes(threshold_bytes);
                 
                 state.status = CampaignStatus::Completed {};
                 
-                // THRESHOLD-BASED REVELATION: Only reveal total if threshold met
-                if sum_value >= state.funding_target {
+                if threshold_met == 1 {
+                    // ✅ THRESHOLD MET: Reveal the actual total
                     state.is_successful = true;
-                    state.total_raised = Some(sum_value); // ✅ Reveal total
+                    
+                    // Now reveal the conditional total since threshold was met
+                    if let Some(balance_tracker_id) = state.balance_tracker_id {
+                        return (
+                            state,
+                            vec![],
+                            vec![ZkStateChange::OpenVariables {
+                                variables: vec![balance_tracker_id],
+                            }],
+                        );
+                    }
                 } else {
+                    // ✅ THRESHOLD NOT MET: Keep total completely hidden
                     state.is_successful = false;
-                    state.total_raised = None; // ✅ Keep total completely hidden
+                    state.total_raised = None; // Total remains hidden forever
                 }
             } else {
                 state.status = CampaignStatus::Completed {};
@@ -379,10 +421,25 @@ fn handle_opened_variables(
             state.total_raised = None;
         }
         
-        return (state, vec![]);
+        return (state, vec![], vec![]);
     }
     
-    // Case 2: Handle withdrawal transfer (when funds_withdrawn is true)
+    // Case 2: Handle conditional total revelation (only happens if threshold was met)
+    if matches!(state.status, CampaignStatus::Completed {}) && state.is_successful {
+        if let Some(total_data) = &opened_variable.data {
+            if total_data.len() >= 4 {
+                let total_bytes: [u8; 4] = total_data[0..4].try_into().unwrap_or([0u8; 4]);
+                let total_amount = u32::from_le_bytes(total_bytes);
+                
+                // ✅ NOW REVEAL: Total is only revealed after MPC confirmed threshold was met
+                state.total_raised = Some(total_amount);
+            }
+        }
+        
+        return (state, vec![], vec![]);
+    }
+    
+    // Case 3: Handle withdrawal transfer (when funds_withdrawn is true)
     if state.funds_withdrawn {
         if let Some(withdrawal_data) = &opened_variable.data {
             if withdrawal_data.len() >= 4 {
@@ -398,13 +455,13 @@ fn handle_opened_variables(
                         .argument(withdraw_amount_wei)
                         .done();
                     
-                    return (state, vec![event_group.build()]);
+                    return (state, vec![event_group.build()], vec![]);
                 }
             }
         }
     }
     
-    (state, vec![])
+    (state, vec![], vec![])
 }
 
 /// Withdraw funds using the encrypted balance tracker
@@ -416,6 +473,7 @@ fn withdraw_funds(
 ) -> (ContractState, Vec<EventGroup>, Vec<ZkStateChange>) {
     assert_eq!(context.sender, state.owner, "Only the owner can withdraw funds");
     assert_eq!(state.status, CampaignStatus::Completed {}, "Campaign must be completed");
+    assert!(state.is_successful, "Can only withdraw funds from successful campaigns");
     assert!(!state.funds_withdrawn, "Funds have already been withdrawn");
     
     // Use the encrypted balance tracker to get the actual amount
@@ -423,7 +481,7 @@ fn withdraw_funds(
         .expect("Balance tracker should exist after campaign completion");
     
     // Since we know the campaign was successful, we can directly open the balance tracker
-    // instead of running another computation
+    // to get the exact amount for withdrawal
     state.funds_withdrawn = true;
     
     (state, vec![], vec![ZkStateChange::OpenVariables {
