@@ -18,6 +18,13 @@ function Home() {
   const [searchId, setSearchId] = useState<string | null>(null);
   const [campaignIdError, setCampaignIdError] = useState<string | null>(null);
 
+  const EXAMPLE_CONTRACT = "038e9300750a82ec9c4006f8ee634f08d0bc36c8ba";
+
+  const useExampleContract = () => {
+    setCampaignId(EXAMPLE_CONTRACT);
+    setCampaignIdError(null);
+  };
+
   const {
     data: campaign,
     isLoading,
@@ -67,31 +74,40 @@ function Home() {
                 </span>{" "}
                 of your campaign to view and manage its details.
               </p>
-              <div className="flex gap-2">
-                <Input
-                  className={cn(
-                    "flex-1 bg-white border-2 border-gray-200 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-purple-400",
-                    campaignIdError && "border-red-500"
-                  )}
-                  value={campaignId}
-                  onChange={(e) => {
-                    setCampaignId(e.target.value);
-                    setCampaignIdError(null);
-                  }}
-                  placeholder="e.g. 103234...abcd"
-                />
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <Input
+                    className={cn(
+                      "flex-1 bg-white border-2 border-gray-200 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-purple-400",
+                      campaignIdError && "border-red-500"
+                    )}
+                    value={campaignId}
+                    onChange={(e) => {
+                      setCampaignId(e.target.value);
+                      setCampaignIdError(null);
+                    }}
+                    placeholder="e.g. 103234...abcd"
+                  />
+                  <Button
+                    variant="outline"
+                    className="bg-violet-50 hover:bg-violet-200 shadow-none"
+                    onClick={handleSearch}
+                    disabled={isLoading || !campaignId}
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <SearchIcon className="w-4 h-4" />
+                    )}
+                    {isLoading ? "Loading..." : "Find Campaign"}
+                  </Button>
+                </div>
                 <Button
-                  variant="outline"
-                  className="bg-violet-50 hover:bg-violet-200 shadow-none"
-                  onClick={handleSearch}
-                  disabled={isLoading || !campaignId}
+                  variant="ghost"
+                  className="text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 w-fit"
+                  onClick={useExampleContract}
                 >
-                  {isLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <SearchIcon className="w-4 h-4" />
-                  )}
-                  {isLoading ? "Loading..." : "Find Campaign"}
+                  Use example contract
                 </Button>
               </div>
               {campaignIdError && (
