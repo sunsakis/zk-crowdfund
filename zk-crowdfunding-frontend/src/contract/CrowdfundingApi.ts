@@ -82,7 +82,6 @@ const CONTRACT_ERROR_PATTERNS = {
   WITHDRAW_ERRORS: [
     'Only the owner can withdraw funds',
     'Campaign must be completed',
-    'Campaign must have been successful to withdraw funds',
     'Funds have already been withdrawn',
     'Balance tracker should exist after successful campaign completion'
   ],
@@ -834,14 +833,6 @@ export class CrowdfundingApi {
         throw new CrowdfundingApiError(
           "Campaign must be completed before withdrawing funds",
           "CAMPAIGN_NOT_COMPLETED"
-        );
-      }
-      
-      // Check if campaign was successful
-      if (!campaignData.isSuccessful) {
-        throw new CrowdfundingApiError(
-          "Campaign must have been successful to withdraw funds",
-          "CAMPAIGN_NOT_SUCCESSFUL"
         );
       }
       
