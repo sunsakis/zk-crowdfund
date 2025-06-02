@@ -1,52 +1,81 @@
-# ZK Crowdfunding Platform
+# Givtisia - Private Crowdfunding Campaign Manager
 
-A contract state privacy-preserving crowdfunding platform built on Partisia Blockchain that keeps individual contributions private until a predefined amount threshold is met while enabling transparent fund management. This implementation leverages zero-knowledge proofs for privacy and secure multi-party computation (MPC) for threshold-based revelation.
+A modern web application for managing private crowdfunding campaigns on Partisia Blockchain. Givtisia provides a user-friendly interface for contributing to campaigns while maintaining privacy through zero-knowledge proofs.
 
 ## 🔒 Privacy Features
 
-
-- **Full Contract State Privacy**: No campaign details are leaked by the contract state until the threshold is met
-- **Threshold-Based Reveal**: Total raised amount only revealed only if the campaign reaches its funding target
-- **Zero-Knowledge Proofs**: Individual contribution amounts are hidden in encrypted variables
+- **Private Contributions**: Choose between public or private contributions using zero-knowledge proofs
+- **Threshold-Based Reveal**: Campaign details remain private until funding target is met
+- **Secure Multi-Party Computation**: Leverages Partisia's MPC capabilities for threshold-based revelation
 
 ## 🏗️ Architecture
 
-- **Smart Contract**: Written in Rust using Partisia's contract SDK with ZK computation support
-- **Frontend**: TypeScript web application with Parti and Metamask wallet integrations
+- **Frontend**: React + TypeScript application with modern UI components
 - **Blockchain**: Partisia Blockchain testnet with MPC-20 token support
-- **Privacy Layer**: Zero-knowledge proofs for contribution privacy and multi-party computation for threshold revelation
+- **Privacy Layer**: Zero-knowledge proofs for private contributions
+- **Wallet Integration**: Parti wallet and Metamask support
 
 ## 📋 Prerequisites
 
-Before you begin, ensure you have the following:
+Before you begin, ensure you have:
 
 - **Node.js** (v16 or higher)
-- **npm**
-- **Rust** (latest stable version)
-- **Git**
-- **Bridged Sepolia Testnet ETH** (for demo purposes) - [ERC-20 to MPC-20 bridge](https://browser.partisiablockchain.com/bridge)
+- **npm** or **bun**
+- **Parti Wallet** or **Metamask** with testnet tokens
+- **Bridged Sepolia Testnet ETH** - [ERC-20 to MPC-20 bridge](https://browser.partisiablockchain.com/bridge)
 
-### Rust Setup
+## 🚀 Getting Started
+
+1. Clone the repository:
 
 ```bash
+git clone https://github.com/your-org/zk-crowdfund.git
+cd zk-crowdfund/givtisia
+```
 
-# Navigate to contract directory
-cd zk-crowdfund
+2. Install dependencies:
 
-# Build the contract
-cargo partisia-contract build --release
-
-# Create a new account
-cargo partisia-contract account create
-
-# Deploy the contract (inputs: gas allocation, your account name, compiled contract location, campaign name, campaign description, MPC-20 token address, funding target in wei)
-cargo partisia-contract transaction deploy --gas 10000000 --privatekey YOUR_ACCOUNT_NAME.pk target/wasm32-unknown-unknown/release/zk_crowdfunding.pbc "YOUR CAMPAIGN NAME" "your campaign description" "0117f2ccfcb0c56ce5b2ad440e879711a5ac8b64a6" 10
-
-# Navigate to frontend directory
-cd zk-crowdfunding-frontend
-
-# Install dependencies
+```bash
 npm install
+# or
+bun install
+```
 
-# Launch the frontend
-npm start
+3. Start the development server:
+
+```bash
+npm run dev
+# or
+bun run dev
+```
+
+4. Open [http://localhost:5173](http://localhost:5173) in your browser
+
+## 💡 Usage
+
+1. Connect your wallet (Parti or Metamask)
+2. Enter a campaign address (42-character string starting with `03`)
+3. View campaign details and contribute:
+   - Public contribution: Visible on-chain
+   - Private contribution: Hidden using zero-knowledge proofs
+4. Track campaign progress and status
+5. View transaction history on the Partisia Blockchain explorer
+
+## 🔍 Finding Campaigns
+
+Campaign addresses can be found:
+
+- From the campaign creator
+- On the Partisia Blockchain explorer
+- Through campaign sharing links
+
+## 🛠️ Development
+
+- Built with React + TypeScript
+- Uses Tailwind CSS for styling
+- Implements Partisia Blockchain SDK for contract interactions
+- Supports both public and private transactions
+
+## 📝 License
+
+MIT License - see LICENSE file for details
