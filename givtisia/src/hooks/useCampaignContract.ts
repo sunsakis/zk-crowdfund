@@ -10,7 +10,13 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useCampaignTransaction } from "./useCampaignTransaction";
-import { AbiBitOutput } from "@partisiablockchain/abi-client";
+import {
+  AbiBitOutput,
+  AbiByteOutput,
+  BlockchainAddress,
+  BN,
+} from "@partisiablockchain/abi-client";
+import { BlockchainTransactionClient } from "@partisiablockchain/blockchain-api-transaction-client";
 
 export type Crowdfunding = ContractState & {
   lastUpdated: number;
@@ -70,6 +76,119 @@ export function useCrowdfundingContract() {
   const { account } = useAuth();
   const { sendCampaignTransaction } = useCampaignTransaction();
   const queryClient = useQueryClient();
+
+  const approveTokens = async (
+    tokenAddress: string,
+    spenderAddress: string,
+    amount: number
+  ) => {
+    if (!account) throw new Error("Wallet not connected");
+
+    const txClient = BlockchainTransactionClient.create(TESTNET_URL, account);
+    const approveRpc = AbiByteOutput.serializeBigEndian((out) => {
+      out.writeU8(0x03); // approve shortname
+      out.writeAddress(BlockchainAddress.fromString(spenderAddress));
+      out.writeUnsignedBigInteger(new BN(amount.toString()), 16);
+    });
+
+    const txn = await txClient.signAndSend(
+      { address: tokenAddress, rpc: approveRpc },
+      100_000
+    );
+
+    if (!txn.transactionPointer) {
+      throw new Error("No transaction pointer returned");
+    }
+
+    return {
+      identifier: txn.transactionPointer.identifier,
+      destinationShardId: txn.transactionPointer.destinationShardId.toString(),
+    };
+  };
+
+  const getTokenAllowance = async (
+    tokenAddress: string,
+    ownerAddress: string,
+    spenderAddress: string
+  ) => {
+    const response = await fetch(
+      `${TESTNET_URL}/shards/Shard0/blockchain/contracts/${tokenAddress}`
+    ).then((res) => res.json());
+
+    if (!response?.serializedContract?.allowed) {
+      throw new Error("Failed to get token allowances");
+    }
+
+    const allowance = getAllowance(response, ownerAddress, spenderAddress);
+
+    return allowance ? BigInt(allowance) : BigInt(0);
+  };
+
+  const contributeWithApproval = async (params: {
+    crowdfundingAddress: string;
+    amount: number;
+    tokenAddress: string;
+  }) => {
+    const { crowdfundingAddress, amount, tokenAddress } = params;
+    if (!account) throw new Error("Wallet not connected");
+
+    // Check current allowance
+    const currentAllowance = await getTokenAllowance(
+      tokenAddress,
+      account.getAddress(),
+      crowdfundingAddress
+    );
+
+    const weiAmount = BigInt(amount);
+    if (currentAllowance < weiAmount) {
+      // Need approval
+      await approveTokens(tokenAddress, crowdfundingAddress, Number(weiAmount));
+    }
+
+    // Now do the contribution
+    const rpc = contributeTokens(amount);
+    return sendCampaignTransaction(crowdfundingAddress, "contribute_tokens", {
+      type: "regular",
+      address: crowdfundingAddress,
+      rpc,
+      gasCost: 100_000,
+    });
+  };
+
+  const contributeSecretWithApproval = async (params: {
+    crowdfundingAddress: string;
+    amount: number;
+    tokenAddress: string;
+  }) => {
+    const { crowdfundingAddress, amount, tokenAddress } = params;
+    if (!account) throw new Error("Wallet not connected");
+
+    // Check current allowance
+    const currentAllowance = await getTokenAllowance(
+      tokenAddress,
+      account.getAddress(),
+      crowdfundingAddress
+    );
+
+    const weiAmount = BigInt(amount);
+    if (currentAllowance < weiAmount) {
+      // Need approval
+      await approveTokens(tokenAddress, crowdfundingAddress, Number(weiAmount));
+    }
+
+    // Now do the secret contribution
+    const secretInputData = AbiBitOutput.serialize((_out) => {
+      _out.writeU32(amount);
+    });
+
+    return sendCampaignTransaction(crowdfundingAddress, "contribute_tokens", {
+      type: "secret",
+      address: crowdfundingAddress,
+      secretInput: secretInputData,
+      publicRpc: Buffer.from("40", "hex"),
+      gasCost: 100_000,
+    });
+  };
 
   const contributeMutation = useMutation({
     mutationFn: async ({
@@ -167,6 +286,8 @@ export function useCrowdfundingContract() {
         contributeMutation.mutateAsync({ crowdfundingAddress, amount }),
       contributeSecret: (crowdfundingAddress: string, amount: number) =>
         contributeSecretMutation.mutateAsync({ crowdfundingAddress, amount }),
+      contributeWithApproval,
+      contributeSecretWithApproval,
       endCampaign: (crowdfundingAddress: string) =>
         endCampaignMutation.mutateAsync(crowdfundingAddress),
       withdrawFunds: (crowdfundingAddress: string) =>
@@ -191,14 +312,17 @@ export function useContribute() {
     mutationFn: async ({
       crowdfundingAddress,
       amount,
+      tokenAddress,
     }: {
       crowdfundingAddress: string;
       amount: number;
+      tokenAddress: string;
     }) => {
-      const txn = await crowdfundingContract.contribute(
+      const txn = await crowdfundingContract.contributeWithApproval({
         crowdfundingAddress,
-        amount
-      );
+        amount,
+        tokenAddress,
+      });
       return txn;
     },
     onSuccess: (_, variables) => {
@@ -223,14 +347,17 @@ export function useContributeSecret() {
     mutationFn: async ({
       crowdfundingAddress,
       amount,
+      tokenAddress,
     }: {
       crowdfundingAddress: string;
       amount: number;
+      tokenAddress: string;
     }) => {
-      const txn = await crowdfundingContract.contributeSecret(
+      const txn = await crowdfundingContract.contributeSecretWithApproval({
         crowdfundingAddress,
-        amount
-      );
+        amount,
+        tokenAddress,
+      });
       return txn;
     },
     onSuccess: (_, variables) => {
@@ -290,4 +417,22 @@ export function useWithdrawFunds() {
     ...mutation,
     requiresWalletConnection,
   };
+}
+
+type AllowanceEntry = { key: string; value: { value: string } };
+type AllowedEntry = { key: string; value: { allowances: AllowanceEntry[] } };
+
+function getAllowance(
+  json: { serializedContract: { allowed: AllowedEntry[] } },
+  owner: string,
+  spender: string
+): string | null {
+  const ownerEntry = json.serializedContract.allowed.find(
+    (entry) => entry.key.toLowerCase() === owner.toLowerCase()
+  );
+  if (!ownerEntry) return null;
+  const spenderEntry = ownerEntry.value.allowances.find(
+    (entry) => entry.key.toLowerCase() === spender.toLowerCase()
+  );
+  return spenderEntry ? spenderEntry.value.value : null;
 }
