@@ -23,6 +23,7 @@ function Home() {
   const useExampleContract = () => {
     setCampaignId(EXAMPLE_CONTRACT);
     setCampaignIdError(null);
+    setSearchId(EXAMPLE_CONTRACT);
   };
 
   const {
@@ -77,6 +78,7 @@ function Home() {
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2">
                   <Input
+                    autoFocus
                     className={cn(
                       "flex-1 bg-white border-2 border-gray-200 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-purple-400",
                       campaignIdError && "border-red-500"
@@ -99,7 +101,7 @@ function Home() {
                     ) : (
                       <SearchIcon className="w-4 h-4" />
                     )}
-                    {isLoading ? "Loading..." : "Find Campaign"}
+                    {isLoading ? "Searching..." : "Find campaign"}
                   </Button>
                 </div>
                 <Button
@@ -109,6 +111,13 @@ function Home() {
                 >
                   Use example contract
                 </Button>
+                <Button
+                  variant="ghost"
+                  className="text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 w-fit"
+                  onClick={useExampleContract}
+                >
+                  TODO: Button to docs to create a new campaign
+                </Button>
               </div>
               {campaignIdError && (
                 <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
@@ -117,7 +126,7 @@ function Home() {
               )}
               {error && (
                 <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
-                  Error loading campaign: {error.message}
+                  Could not find campaign: {error.message}
                 </p>
               )}
               <p className="text-xs text-slate-500 mt-2">
@@ -128,7 +137,7 @@ function Home() {
             </div>
           </div>
           {!isLoading && campaign && searchId && (
-            <section className="mt-8 container mx-auto max-w-[1100px] flex flex-col items-center">
+            <section className="my-8 container mx-auto max-w-[1100px] flex flex-col items-center">
               <CrowdfundingCard campaign={campaign} campaignId={searchId} />
             </section>
           )}
