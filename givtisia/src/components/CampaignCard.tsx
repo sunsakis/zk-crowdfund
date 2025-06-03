@@ -16,6 +16,10 @@ import {
   useContributeSecret,
 } from "@/hooks/useCampaignContract";
 import { ExternalLinkIcon } from "lucide-react";
+import { useAuth } from "@/auth/useAuth";
+import { TransactionDialog } from "@/components/shared/TransactionDialog";
+import { TransactionPointer } from "@/hooks/useCampaignTransaction";
+import { useTransactionStatus } from "@/hooks/useTransactionStatus";
 
 interface CrowdfundingCardProps {
   campaign: Crowdfunding;
@@ -32,31 +36,77 @@ export function CrowdfundingCard({
   campaignId,
 }: CrowdfundingCardProps) {
   const [amount, setAmount] = useState<string>("");
-  const { mutate: contribute, isPending: isContributing } = useContribute();
-  const { mutate: contributeSecret, isPending: isContributingSecret } =
+  const { mutateAsync: contribute, isPending: isContributing } =
+    useContribute();
+  const { mutateAsync: contributeSecret, isPending: isContributingSecret } =
     useContributeSecret();
+  const [amountInputError, setAmountInputError] = useState<string | null>(null);
+  const { account } = useAuth();
+  const [transactionPointer, setTransactionPointer] =
+    useState<TransactionPointer | null>(null);
+  const transactionStatus = useTransactionStatus(
+    transactionPointer?.identifier ?? "",
+    "other"
+  );
 
-  const isTargetRevealed =
+  const isTotalRevealed =
     campaign.totalRaised !== undefined &&
     campaign.totalRaised >= campaign.fundingTarget;
 
-  const progress = campaign.totalRaised
-    ? Math.min(100, (campaign.totalRaised / campaign.fundingTarget) * 100)
-    : 0;
+  const progress =
+    campaign.totalRaised !== undefined
+      ? Math.min(
+          100,
+          ((campaign.totalRaised ?? 0) / campaign.fundingTarget) * 100
+        )
+      : 0;
 
-  const handleContribute = (isSecret: boolean) => {
+  const handleContribute = async (isSecret: boolean) => {
+    if (!account) {
+      setAmountInputError("Please connect your wallet");
+      return;
+    }
+
+    if (amount === "") {
+      setAmountInputError("Please enter an amount");
+      return;
+    }
+
     const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) return;
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setAmountInputError("Please enter a valid amount");
+      return;
+    }
 
     // Convert display amount to raw token units (1_000_000 = 1 token)
     const rawAmount = Math.round(amountNum * 1_000_000);
 
-    if (isSecret) {
-      contributeSecret({ crowdfundingAddress: campaignId, amount: rawAmount });
-    } else {
-      contribute({ crowdfundingAddress: campaignId, amount: rawAmount });
+    try {
+      const params = {
+        crowdfundingAddress: campaignId,
+        amount: rawAmount,
+        tokenAddress: campaign.tokenAddress.asString(),
+      };
+
+      const result = isSecret
+        ? await contributeSecret(params)
+        : await contribute(params);
+
+      if (result) {
+        setTransactionPointer(result);
+        setAmount("");
+        setAmountInputError(null);
+      }
+    } catch (error) {
+      console.error("Contribution error:", error);
+      setAmountInputError(
+        error instanceof Error ? error.message : "Transaction failed"
+      );
     }
-    setAmount("");
+  };
+
+  const handleTransactionComplete = () => {
+    setTransactionPointer(null);
   };
 
   const getStatusText = (status: Crowdfunding["status"]) => {
@@ -94,21 +144,26 @@ export function CrowdfundingCard({
             <Progress value={progress} className="h-2" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-2 gap-5 text-sm">
             <div>
               <p className="text-muted-foreground">Total Raised</p>
-              <p className="text-lg font-medium">
-                {campaign.totalRaised !== undefined
-                  ? `${tokenUnitsToDisplayAmount(campaign.totalRaised).toFixed(6)} tokens`
-                  : "0 tokens"}
-              </p>
+              {isTotalRevealed ? (
+                <p className="text-lg font-medium">
+                  {tokenUnitsToDisplayAmount(campaign.totalRaised ?? 0).toFixed(
+                    6
+                  )}{" "}
+                  tokens
+                </p>
+              ) : (
+                <p className="text-sm bg-neutral-100 text-neutral-500 px-2 py-1 rounded-sm w-fit">
+                  Revealed when threshold is met
+                </p>
+              )}
             </div>
             <div>
               <p className="text-muted-foreground">Funding Target</p>
               <p className="text-lg font-medium">
-                {isTargetRevealed
-                  ? `${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(6)} tokens`
-                  : "???"}
+                {`${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(6)} tokens`}
               </p>
             </div>
             <div>
@@ -132,18 +187,24 @@ export function CrowdfundingCard({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="Amount to give"
-                className="flex-1 rounded-md border px-3 py-2"
-                min="0"
+                className={`flex-1 rounded-md border px-3 py-2 ${
+                  amountInputError ? "border-red-500" : ""
+                }`}
+                min="0.000001"
+                max="2147.483647"
                 step="0.000001"
               />
               <Button
                 className="bg-violet-800 hover:bg-violet-600 shadow-none"
-                onClick={() => handleContribute(false)}
+                onClick={() => handleContribute(true)}
                 disabled={isContributing || isContributingSecret}
               >
                 Contribute secretly
               </Button>
             </div>
+            {amountInputError && (
+              <p className="text-xs text-red-500">{amountInputError}</p>
+            )}
             <p className="text-xs text-muted-foreground">
               Last updated: {new Date(campaign.lastUpdated).toLocaleString()}
             </p>
@@ -161,6 +222,20 @@ export function CrowdfundingCard({
           </a>
         </CardFooter>
       </Card>
+
+      {transactionPointer && (
+        <TransactionDialog
+          transactionResult={{
+            isLoading: transactionStatus.isLoading,
+            isSuccess: transactionStatus.isSuccess,
+            isError: transactionStatus.isError,
+            error: transactionStatus.error,
+            transactionPointer,
+          }}
+          campaignId={campaignId}
+          onClose={handleTransactionComplete}
+        />
+      )}
     </div>
   );
 }
