@@ -131,7 +131,7 @@ export function CrowdfundingCard({
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="Amount to contribute"
+                placeholder="Amount to give"
                 className="flex-1 rounded-md border px-3 py-2"
                 min="0"
                 step="0.000001"
@@ -141,14 +141,7 @@ export function CrowdfundingCard({
                 onClick={() => handleContribute(false)}
                 disabled={isContributing || isContributingSecret}
               >
-                Contribute
-              </Button>
-              <Button
-                onClick={() => handleContribute(true)}
-                variant="outline"
-                disabled={isContributing || isContributingSecret}
-              >
-                Contribute Secretly
+                Contribute secretly
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
