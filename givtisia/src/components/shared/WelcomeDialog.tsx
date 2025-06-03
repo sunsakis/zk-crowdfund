@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,13 +10,13 @@ import { ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 
 export function WelcomeDialog() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   useEffect(() => {
-    const hasSeenWelcome = localStorage.getItem("hasSeenCampfireWelcome");
+    const hasSeenWelcome = localStorage.getItem("hasSeenGivtisiaWelcome");
     if (!hasSeenWelcome) {
       setOpen(true);
-      localStorage.setItem("hasSeenCampfireWelcome", "true");
+      localStorage.setItem("hasSeenGivtisiaWelcome", "true");
     }
   }, []);
 
@@ -25,37 +25,36 @@ export function WelcomeDialog() {
       <DialogContent className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-hidden transition-all duration-300 shadow-xl">
         <DialogHeader className="border-b border-gray-200 p-4">
           <DialogTitle className="text-xl font-bold">
-            Welcome to Campfire! 🎉
+            Welcome to Givtisia! 🫴🏽
           </DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col items-center pb-6 px-5 space-y-6 pt-4">
           <div className="flex flex-col items-center space-y-4 w-full">
             <p className="text-lg">
-              Create private ballots/polls for your decentralized organization,
-              powered by{" "}
+              Manage your crowdfunding campaign on{" "}
               <Link
                 to="https://partisiablockchain.com"
                 target="_blank"
-                className="text-blue-600 font-medium hover:underline"
+                className="text-violet-600 font-medium hover:underline"
               >
                 Partisia Blockchain
               </Link>
             </p>
 
-            <div className="w-full bg-blue-50 p-4 rounded-md border border-blue-200">
+            <div className="w-full bg-violet-50 p-4 rounded-md border border-violet-200">
               <div className="flex items-start gap-3">
                 <div>
-                  <h4 className="font-medium text-blue-900">
+                  <h4 className="font-medium text-violet-900">
                     🔑 Required Extension
                   </h4>
-                  <p className="text-sm text-blue-800 mt-1">
+                  <p className="text-sm text-violet-800 mt-1">
                     You'll need the{" "}
                     <a
                       href="https://chromewebstore.google.com/detail/parti-wallet/gjkdbeaiifkpoencioahhcilildpjhgh"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline font-medium"
+                      className="text-violet-600 hover:underline font-medium"
                     >
                       Parti Wallet extension
                     </a>{" "}
@@ -66,26 +65,41 @@ export function WelcomeDialog() {
               </div>
             </div>
 
-            <div className="w-full bg-amber-50 p-4 rounded-md border border-amber-200">
-              <div className="flex items-start gap-3">
-                <div>
-                  <h4 className="font-medium text-amber-900">🪲 Known Bug</h4>
-                  <p className="text-sm text-amber-800 mt-1">
-                    The wallet may disconnect randomly and when the page
-                    refreshes. We're working on a fix. If you encounter any
-                    other issues, please report them on our GitHub.
-                  </p>
-                </div>
-              </div>
+            <div className="bg-neutral-100 p-4 rounded-md border border-neutral-300">
+              <h3 className="font-medium">🙈 Privacy & Security Features</h3>
+              <ul className="flex flex-col gap-2 text-sm mt-2">
+                <li>
+                  <strong>Multiple Wallet Options:</strong> Connect using
+                  private key, MPC wallet extension, or MetaMask with Partisia
+                  snap
+                </li>
+                <li>
+                  <strong>Confidential Contributions:</strong> Individual
+                  contribution amounts remain completely private
+                </li>
+                <li>
+                  <strong>Threshold-Based Revelation:</strong> Total funds are
+                  only revealed if the campaign reaches its goal
+                </li>
+                <li>
+                  <strong>Zero-Knowledge Verification:</strong> Contributors can
+                  verify their participation without revealing amounts
+                </li>
+                <li>
+                  <strong>Secure Multi-Party Computation:</strong> Contributions
+                  are aggregated using cryptographic protocols that preserve
+                  privacy
+                </li>
+              </ul>
             </div>
 
             <div className="w-full flex items-center justify-between mt-1 p-2 bg-gray-50 rounded-md border border-gray-200">
               <span className="text-sm text-gray-600">Found a bug?</span>
               <a
-                href="https://github.com/thebeyondr/sekiva/issues/new"
+                href="https://github.com/sunsakis/zk-crowdfund/issues/new"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800"
+                className="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-800"
               >
                 Report Issue <ExternalLink className="w-3 h-3 ml-0.5" />
               </a>
