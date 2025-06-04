@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AlertCircle, ExternalLink, Lollipop } from "lucide-react";
 import { TransactionResult } from "@/hooks/useCampaignTransaction";
+import { TransactionStepper } from "./TransactionStepper";
 
 interface TransactionDialogProps {
   transactionResult: TransactionResult;
@@ -46,6 +47,11 @@ export function TransactionDialog({
     : "";
   const campaignExplorerUrl = `https://browser.testnet.partisiablockchain.com/contracts/${campaignId}?tab=state`;
 
+  // Find the first error step if any
+  const errorStep = transactionResult.steps?.find(
+    (step) => step.status === "error"
+  );
+
   const TransactionIdDisplay = () => {
     if (!transactionResult.transactionPointer) return null;
     return (
@@ -77,7 +83,6 @@ export function TransactionDialog({
     <Dialog
       open={open}
       onOpenChange={(newOpen) => {
-        // Only allow closing if transaction is successful or user explicitly closes
         if (!newOpen && transactionResult.isLoading) {
           return;
         }
@@ -107,84 +112,101 @@ export function TransactionDialog({
         />
 
         <div className="flex flex-col items-center pb-6 px-5 space-y-6 pt-4">
-          {transactionResult.isLoading && (
-            <div className="flex flex-col items-center space-y-4 w-full">
-              <div className="flex items-center justify-center w-24 h-24">
-                <Lollipop className="h-16 w-16 text-yellow-400 animate-spin" />
-              </div>
-              <div className="text-center space-y-1">
-                <p className="text-center text-lg font-medium">
-                  Processing transaction
-                </p>
-                <p className="text-sm text-gray-500">
-                  This may take a few moments...
-                </p>
-              </div>
-              <TransactionIdDisplay />
+          {transactionResult.steps ? (
+            <div className="w-full">
+              <TransactionStepper steps={transactionResult.steps} />
             </div>
-          )}
+          ) : (
+            <>
+              {transactionResult.isLoading && (
+                <div className="flex flex-col items-center space-y-4 w-full">
+                  <div className="flex items-center justify-center w-24 h-24">
+                    <Lollipop className="h-16 w-16 text-yellow-400 animate-spin" />
+                  </div>
+                  <div className="text-center space-y-1">
+                    <p className="text-center text-lg font-medium">
+                      Processing transaction
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      This may take a few moments...
+                    </p>
+                  </div>
+                  <TransactionIdDisplay />
+                </div>
+              )}
 
-          {transactionResult.isSuccess && (
-            <div className="flex flex-col items-center space-y-4 w-full">
-              {showConfetti && (
-                <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                  <div className="confetti-container" aria-hidden="true">
-                    {/*TODO: Add SVG confetti elements here if theres time */}
+              {transactionResult.isSuccess && (
+                <div className="flex flex-col items-center space-y-4 w-full">
+                  {showConfetti && (
+                    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                      <div className="confetti-container" aria-hidden="true" />
+                    </div>
+                  )}
+                  <h4 className="text-7xl font-bold animate-bounce">🎉</h4>
+                  <p className="text-center text-xl font-medium leading-tight">
+                    Your transaction has been processed!
+                  </p>
+
+                  <div className="w-full border-t border-gray-200 pt-4 mt-2">
+                    <h4 className="text-sm font-semibold mb-2">
+                      Transaction Details
+                    </h4>
+                    <TransactionIdDisplay />
+
+                    <div className="w-full flex items-center justify-between mt-3 p-2 bg-green-50 rounded-md border border-green-200">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-green-700 font-medium">
+                          Campaign Address:
+                        </span>
+                        <code className="text-xs font-mono bg-green-100 px-1.5 py-0.5 rounded text-green-800">
+                          {campaignId.substring(0, 8)}...
+                          {campaignId.substring(campaignId.length - 8)}
+                        </code>
+                      </div>
+                      <a
+                        href={campaignExplorerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center text-xs font-medium text-green-700 hover:text-green-900"
+                      >
+                        view <ExternalLink className="w-3 h-3 ml-0.5" />
+                      </a>
+                    </div>
                   </div>
                 </div>
               )}
-              <h4 className="text-7xl font-bold animate-bounce">🎉</h4>
-              <p className="text-center text-xl font-medium leading-tight">
-                Your transaction has been processed!
-              </p>
 
-              <div className="w-full border-t border-gray-200 pt-4 mt-2">
-                <h4 className="text-sm font-semibold mb-2">
-                  Transaction Details
-                </h4>
-                <TransactionIdDisplay />
-
-                <div className="w-full flex items-center justify-between mt-3 p-2 bg-green-50 rounded-md border border-green-200">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-green-700 font-medium">
-                      Campaign Address:
-                    </span>
-                    <code className="text-xs font-mono bg-green-100 px-1.5 py-0.5 rounded text-green-800">
-                      {campaignId.substring(0, 8)}...
-                      {campaignId.substring(campaignId.length - 8)}
-                    </code>
+              {transactionResult.isError && (
+                <div className="flex flex-col items-center space-y-4 w-full">
+                  <div className="relative flex items-center justify-center w-20 h-20 bg-red-50 rounded-full">
+                    <AlertCircle className="h-10 w-10 text-red-500" />
                   </div>
-                  <a
-                    href={campaignExplorerUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center text-xs font-medium text-green-700 hover:text-green-900"
-                  >
-                    view <ExternalLink className="w-3 h-3 ml-0.5" />
-                  </a>
+                  <p className="text-center text-lg font-medium">
+                    {errorStep
+                      ? "Transaction step failed"
+                      : "There was an error processing your transaction"}
+                  </p>
+                  <div className="w-full bg-red-50 p-4 rounded-md border border-red-200">
+                    <p className="text-sm text-red-600">
+                      {errorStep ? (
+                        <>
+                          <span className="font-medium">
+                            {errorStep.label}:
+                          </span>{" "}
+                          {errorStep.error?.message || "Unknown error"}
+                        </>
+                      ) : (
+                        transactionResult.error?.message || "Unknown error"
+                      )}
+                    </p>
+                    <p className="text-xs text-red-500 mt-2">
+                      Try again or contact support if this persists
+                    </p>
+                  </div>
+                  <TransactionIdDisplay />
                 </div>
-              </div>
-            </div>
-          )}
-
-          {transactionResult.isError && (
-            <div className="flex flex-col items-center space-y-4 w-full">
-              <div className="relative flex items-center justify-center w-20 h-20 bg-red-50 rounded-full">
-                <AlertCircle className="h-10 w-10 text-red-500" />
-              </div>
-              <p className="text-center text-lg font-medium">
-                There was an error processing your transaction
-              </p>
-              <div className="w-full bg-red-50 p-4 rounded-md border border-red-200">
-                <p className="text-sm text-red-600">
-                  {transactionResult.error?.message || "Unknown error"}
-                </p>
-                <p className="text-xs text-red-500 mt-2">
-                  Try again or contact support if this persists
-                </p>
-              </div>
-              <TransactionIdDisplay />
-            </div>
+              )}
+            </>
           )}
 
           <div className="flex flex-col w-full space-y-4 mt-2">

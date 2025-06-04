@@ -17,12 +17,20 @@ export interface TransactionPointer {
   destinationShardId: string;
 }
 
+export interface TransactionStep {
+  label: string;
+  status: "pending" | "success" | "error";
+  transactionPointer?: TransactionPointer;
+  error?: Error;
+}
+
 export interface TransactionResult {
   isLoading: boolean;
   isSuccess: boolean;
   isError: boolean;
   error: Error | null;
   transactionPointer: TransactionPointer | null;
+  steps?: TransactionStep[];
 }
 
 export interface SecretInputTransaction {

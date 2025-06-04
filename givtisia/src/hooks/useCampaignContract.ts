@@ -8,8 +8,12 @@ import {
   withdrawFunds,
 } from "@/contracts/CrowdfundGenerated";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
-import { useCampaignTransaction } from "./useCampaignTransaction";
+import { useMemo, useState } from "react";
+import {
+  TransactionStep,
+  TransactionPointer,
+  useCampaignTransaction,
+} from "./useCampaignTransaction";
 import {
   AbiBitOutput,
   AbiByteOutput,
@@ -292,12 +296,16 @@ export function useCrowdfundingContract() {
         endCampaignMutation.mutateAsync(crowdfundingAddress),
       withdrawFunds: (crowdfundingAddress: string) =>
         withdrawFundsMutation.mutateAsync(crowdfundingAddress),
+      getTokenAllowance,
     }),
     [
       contributeMutation,
       contributeSecretMutation,
       endCampaignMutation,
       withdrawFundsMutation,
+      getTokenAllowance,
+      contributeWithApproval,
+      contributeSecretWithApproval,
     ]
   );
 }
@@ -317,13 +325,21 @@ export function useContribute() {
       crowdfundingAddress: string;
       amount: number;
       tokenAddress: string;
-    }) => {
-      const txn = await crowdfundingContract.contributeWithApproval({
-        crowdfundingAddress,
-        amount,
-        tokenAddress,
-      });
-      return txn;
+    }): Promise<TransactionResult> => {
+      try {
+        const txn = await crowdfundingContract.contributeWithApproval({
+          crowdfundingAddress,
+          amount,
+          tokenAddress,
+        });
+        return txn;
+      } catch (error) {
+        return {
+          identifier: "",
+          destinationShardId: "",
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
@@ -338,10 +354,22 @@ export function useContribute() {
   };
 }
 
+// Add at the top with other types
+type TransactionResult = TransactionPointer & {
+  steps?: TransactionStep[];
+  error?: Error;
+};
+
 export function useContributeSecret() {
   const crowdfundingContract = useCrowdfundingContract();
   const queryClient = useQueryClient();
   const { requiresWalletConnection } = useCampaignTransaction();
+  const { account } = useAuth();
+  const [steps, setSteps] = useState<TransactionStep[]>([
+    { label: "Approving token transfer", status: "pending" },
+    { label: "Generating zero-knowledge proof", status: "pending" },
+    { label: "Submitting contribution", status: "pending" },
+  ]);
 
   const mutation = useMutation({
     mutationFn: async ({
@@ -352,13 +380,97 @@ export function useContributeSecret() {
       crowdfundingAddress: string;
       amount: number;
       tokenAddress: string;
-    }) => {
-      const txn = await crowdfundingContract.contributeSecretWithApproval({
-        crowdfundingAddress,
-        amount,
-        tokenAddress,
-      });
-      return txn;
+    }): Promise<TransactionResult> => {
+      if (!account) throw new Error("Wallet not connected");
+
+      try {
+        // Step 1: Token approval
+        setSteps((prev) =>
+          prev.map((step, i) =>
+            i === 0 ? { ...step, status: "pending" } : step
+          )
+        );
+
+        // Get current allowance first
+        const currentAllowance = await crowdfundingContract.getTokenAllowance(
+          tokenAddress,
+          account.getAddress(),
+          crowdfundingAddress
+        );
+
+        const weiAmount = BigInt(amount);
+        if (currentAllowance < weiAmount) {
+          // Need approval
+          const approvalTxn = await crowdfundingContract.contributeWithApproval(
+            {
+              crowdfundingAddress,
+              amount,
+              tokenAddress,
+            }
+          );
+
+          setSteps((prev) =>
+            prev.map((step, i) =>
+              i === 0
+                ? {
+                    ...step,
+                    status: "success",
+                    transactionPointer: approvalTxn,
+                  }
+                : step
+            )
+          );
+        } else {
+          // Skip approval step if already approved
+          setSteps((prev) =>
+            prev.map((step, i) =>
+              i === 0 ? { ...step, status: "success" } : step
+            )
+          );
+        }
+
+        // Step 2: ZK contribution
+        setSteps((prev) =>
+          prev.map((step, i) =>
+            i === 1 ? { ...step, status: "pending" } : step
+          )
+        );
+
+        const txn = await crowdfundingContract.contributeSecretWithApproval({
+          crowdfundingAddress,
+          amount,
+          tokenAddress,
+        });
+
+        setSteps((prev) =>
+          prev.map((step, i) =>
+            i === 2
+              ? { ...step, status: "success", transactionPointer: txn }
+              : step
+          )
+        );
+
+        return { ...txn, steps };
+      } catch (error) {
+        // Find the first pending step and mark it as error
+        const errorIndex = steps.findIndex((step) => step.status === "pending");
+        if (errorIndex !== -1) {
+          setSteps((prev) =>
+            prev.map((step, i) =>
+              i === errorIndex
+                ? { ...step, status: "error", error: error as Error }
+                : step
+            )
+          );
+        }
+        // Return a failed result instead of throwing
+        return {
+          identifier: "",
+          destinationShardId: "",
+          steps,
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
@@ -370,6 +482,7 @@ export function useContributeSecret() {
   return {
     ...mutation,
     requiresWalletConnection,
+    steps,
   };
 }
 
