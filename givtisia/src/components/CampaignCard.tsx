@@ -16,7 +16,6 @@ import {
   useContributeSecret,
 } from "@/hooks/useCampaignContract";
 import { ExternalLinkIcon } from "lucide-react";
-import { useAuth } from "@/auth/useAuth";
 import { TransactionDialog } from "@/components/shared/TransactionDialog";
 import { TransactionPointer } from "@/hooks/useCampaignTransaction";
 import { useTransactionStatus } from "@/hooks/useTransactionStatus";
@@ -36,14 +35,22 @@ export function CrowdfundingCard({
   campaignId,
 }: CrowdfundingCardProps) {
   const [amount, setAmount] = useState<string>("");
-  const { mutateAsync: contribute, isPending: isContributing } =
-    useContribute();
-  const { mutateAsync: contributeSecret, isPending: isContributingSecret } =
-    useContributeSecret();
+  const {
+    mutateAsync: contribute,
+    isPending: isContributing,
+    requiresWalletConnection: requiresWalletForContribute,
+  } = useContribute();
+  const {
+    mutateAsync: contributeSecret,
+    isPending: isContributingSecret,
+    steps: secretSteps,
+    requiresWalletConnection: requiresWalletForSecret,
+  } = useContributeSecret();
   const [amountInputError, setAmountInputError] = useState<string | null>(null);
-  const { account } = useAuth();
   const [transactionPointer, setTransactionPointer] =
     useState<TransactionPointer | null>(null);
+  const [isTransactionInProgress, setIsTransactionInProgress] = useState(false);
+  const [transactionError, setTransactionError] = useState<Error | null>(null);
   const transactionStatus = useTransactionStatus(
     transactionPointer?.identifier ?? "",
     "other"
@@ -62,7 +69,12 @@ export function CrowdfundingCard({
       : 0;
 
   const handleContribute = async (isSecret: boolean) => {
-    if (!account) {
+    // Check wallet connection first
+    if (isSecret && requiresWalletForSecret()) {
+      setAmountInputError("Please connect your wallet");
+      return;
+    }
+    if (!isSecret && requiresWalletForContribute()) {
       setAmountInputError("Please connect your wallet");
       return;
     }
@@ -82,6 +94,8 @@ export function CrowdfundingCard({
     const rawAmount = Math.round(amountNum * 1_000_000);
 
     try {
+      setIsTransactionInProgress(true);
+      setTransactionError(null);
       const params = {
         crowdfundingAddress: campaignId,
         amount: rawAmount,
@@ -92,21 +106,27 @@ export function CrowdfundingCard({
         ? await contributeSecret(params)
         : await contribute(params);
 
-      if (result) {
+      if (result.error) {
+        setTransactionError(result.error);
+      } else if (result) {
         setTransactionPointer(result);
         setAmount("");
         setAmountInputError(null);
       }
     } catch (error) {
       console.error("Contribution error:", error);
-      setAmountInputError(
-        error instanceof Error ? error.message : "Transaction failed"
+      setTransactionError(
+        error instanceof Error ? error : new Error(String(error))
       );
+    } finally {
+      setIsTransactionInProgress(false);
     }
   };
 
   const handleTransactionComplete = () => {
     setTransactionPointer(null);
+    setTransactionError(null);
+    setIsTransactionInProgress(false);
   };
 
   const getStatusText = (status: Crowdfunding["status"]) => {
@@ -223,14 +243,15 @@ export function CrowdfundingCard({
         </CardFooter>
       </Card>
 
-      {transactionPointer && (
+      {(transactionPointer || isTransactionInProgress || transactionError) && (
         <TransactionDialog
           transactionResult={{
-            isLoading: transactionStatus.isLoading,
+            isLoading: isTransactionInProgress || transactionStatus.isLoading,
             isSuccess: transactionStatus.isSuccess,
-            isError: transactionStatus.isError,
-            error: transactionStatus.error,
+            isError: !!transactionError || transactionStatus.isError,
+            error: transactionError || transactionStatus.error,
             transactionPointer,
+            steps: isContributingSecret ? secretSteps : undefined,
           }}
           campaignId={campaignId}
           onClose={handleTransactionComplete}
