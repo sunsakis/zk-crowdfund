@@ -19,11 +19,16 @@ import { ExternalLinkIcon } from "lucide-react";
 import { TransactionDialog } from "@/components/shared/TransactionDialog";
 import { TransactionPointer } from "@/hooks/useCampaignTransaction";
 import { useTransactionStatus } from "@/hooks/useTransactionStatus";
+import { useAuth } from "@/auth/useAuth";
+import ConnectButton from "./shared/ConnectButton";
 
 interface CrowdfundingCardProps {
   campaign: Crowdfunding;
   campaignId: string;
 }
+
+const MAX_AMOUNT = 2147.483647;
+const MIN_AMOUNT = 0.000001;
 
 // Helper functions for token unit conversion
 function tokenUnitsToDisplayAmount(tokenUnits: number): number {
@@ -34,6 +39,7 @@ export function CrowdfundingCard({
   campaign,
   campaignId,
 }: CrowdfundingCardProps) {
+  const { isConnected } = useAuth();
   const [amount, setAmount] = useState<string>("");
   const {
     mutateAsync: contribute,
@@ -69,24 +75,26 @@ export function CrowdfundingCard({
       : 0;
 
   const handleContribute = async (isSecret: boolean) => {
-    // Check wallet connection first
-    if (isSecret && requiresWalletForSecret()) {
-      setAmountInputError("Please connect your wallet");
-      return;
-    }
-    if (!isSecret && requiresWalletForContribute()) {
-      setAmountInputError("Please connect your wallet");
-      return;
-    }
-
     if (amount === "") {
       setAmountInputError("Please enter an amount");
       return;
     }
 
     const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setAmountInputError("Please enter a valid amount");
+    if (isNaN(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
+      setAmountInputError(
+        `Please enter an amount between ${MIN_AMOUNT} and ${MAX_AMOUNT}`
+      );
+      return;
+    }
+
+    if (isSecret && requiresWalletForSecret()) {
+      setAmountInputError("Please connect your wallet");
+      return;
+    }
+
+    if (!isSecret && requiresWalletForContribute()) {
+      setAmountInputError("Please connect your wallet");
       return;
     }
 
@@ -170,7 +178,7 @@ export function CrowdfundingCard({
               {isTotalRevealed ? (
                 <p className="text-lg font-medium">
                   {tokenUnitsToDisplayAmount(campaign.totalRaised ?? 0).toFixed(
-                    6
+                    5
                   )}{" "}
                   tokens
                 </p>
@@ -183,7 +191,7 @@ export function CrowdfundingCard({
             <div>
               <p className="text-muted-foreground">Funding Target</p>
               <p className="text-lg font-medium">
-                {`${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(6)} tokens`}
+                {`${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(5)} tokens`}
               </p>
             </div>
             <div>
@@ -207,20 +215,24 @@ export function CrowdfundingCard({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="Amount to give"
-                className={`flex-1 rounded-md border px-3 py-2 ${
+                className={`flex-1 rounded-md border-2 px-3 py-2 ${
                   amountInputError ? "border-red-500" : ""
                 }`}
-                min="0.000001"
-                max="2147.483647"
-                step="0.000001"
+                min={MIN_AMOUNT}
+                max={MAX_AMOUNT}
+                step={MIN_AMOUNT}
               />
-              <Button
-                className="bg-violet-800 hover:bg-violet-600 shadow-none"
-                onClick={() => handleContribute(true)}
-                disabled={isContributing || isContributingSecret}
-              >
-                Contribute secretly
-              </Button>
+              {isConnected ? (
+                <Button
+                  className="bg-violet-800 hover:bg-violet-600 shadow-none h-10"
+                  onClick={() => handleContribute(true)}
+                  disabled={isContributing || isContributingSecret}
+                >
+                  Contribute secretly
+                </Button>
+              ) : (
+                <ConnectButton label="Connect to give" />
+              )}
             </div>
             {amountInputError && (
               <p className="text-xs text-red-500">{amountInputError}</p>
