@@ -41,7 +41,7 @@ const NotificationToast = ({
   </div>
 );
 
-const ConnectButton = () => {
+const ConnectButton = ({ label = "Connect Wallet" }: { label?: string }) => {
   const {
     walletAddress,
     isConnecting,
@@ -100,9 +100,13 @@ const ConnectButton = () => {
             message={notification.message}
           />
         )}
-        <Button onClick={handleConnect} disabled={isConnecting}>
+        <Button
+          onClick={handleConnect}
+          disabled={isConnecting}
+          className="h-full"
+        >
           <Wallet size={16} />
-          {isConnecting ? "Connecting..." : "Connect Wallet"}
+          {isConnecting ? "Connecting..." : label}
         </Button>
       </div>
     );
