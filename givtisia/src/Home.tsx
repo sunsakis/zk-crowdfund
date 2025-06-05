@@ -14,11 +14,12 @@ import { Loader2, SearchIcon } from "lucide-react";
 
 function Home() {
   // 038e9300750a82ec9c4006f8ee634f08d0bc36c8ba
+  // latest: 038b01c9fb6709ebb402d115989b38c388280ecb8c
   const [campaignId, setCampaignId] = useState<string>("");
   const [searchId, setSearchId] = useState<string | null>(null);
   const [campaignIdError, setCampaignIdError] = useState<string | null>(null);
 
-  const EXAMPLE_CONTRACT = "038e9300750a82ec9c4006f8ee634f08d0bc36c8ba";
+  const EXAMPLE_CONTRACT = "038b01c9fb6709ebb402d115989b38c388280ecb8c";
 
   const useExampleContract = () => {
     setCampaignId(EXAMPLE_CONTRACT);
