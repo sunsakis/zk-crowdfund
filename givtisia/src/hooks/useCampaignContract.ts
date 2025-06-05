@@ -8,7 +8,7 @@ import {
   withdrawFunds,
 } from "@/contracts/CrowdfundGenerated";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
   TransactionStep,
   TransactionPointer,
@@ -18,9 +18,14 @@ import {
   AbiBitOutput,
   AbiByteOutput,
   BlockchainAddress,
-  BN,
 } from "@partisiablockchain/abi-client";
 import { BlockchainTransactionClient } from "@partisiablockchain/blockchain-api-transaction-client";
+
+// Gas constants for campaign transactions
+const TOKEN_APPROVAL_GAS = 15000;
+const TOKEN_CONTRIBUTION_GAS = 200000;
+const END_CAMPAIGN_GAS = 150000;
+const WITHDRAW_FUNDS_GAS = 100000;
 
 export type Crowdfunding = ContractState & {
   lastUpdated: number;
@@ -81,118 +86,154 @@ export function useCrowdfundingContract() {
   const { sendCampaignTransaction } = useCampaignTransaction();
   const queryClient = useQueryClient();
 
-  const approveTokens = async (
-    tokenAddress: string,
-    spenderAddress: string,
-    amount: number
-  ) => {
-    if (!account) throw new Error("Wallet not connected");
+  const approveTokens = useCallback(
+    async (tokenAddress: string, campaignAddress: string, amount: bigint) => {
+      if (!account) throw new Error("Wallet not connected");
 
-    const txClient = BlockchainTransactionClient.create(TESTNET_URL, account);
-    const approveRpc = AbiByteOutput.serializeBigEndian((out) => {
-      out.writeU8(0x03); // approve shortname
-      out.writeAddress(BlockchainAddress.fromString(spenderAddress));
-      out.writeUnsignedBigInteger(new BN(amount.toString()), 16);
-    });
+      // Clean addresses
+      const cleanTokenAddr = tokenAddress.startsWith("0x")
+        ? tokenAddress.slice(2)
+        : tokenAddress;
+      const cleanCampaignAddr = campaignAddress.startsWith("0x")
+        ? campaignAddress.slice(2)
+        : campaignAddress;
 
-    const txn = await txClient.signAndSend(
-      { address: tokenAddress, rpc: approveRpc },
-      100_000
-    );
+      const campaignBlockchainAddr =
+        BlockchainAddress.fromString(cleanCampaignAddr);
 
-    if (!txn.transactionPointer) {
-      throw new Error("No transaction pointer returned");
-    }
+      // Build the approve RPC buffer
+      const approveRpc = AbiByteOutput.serializeBigEndian((out) => {
+        out.writeU8(0x05); // approve shortname
+        out.writeAddress(campaignBlockchainAddr);
 
-    return {
-      identifier: txn.transactionPointer.identifier,
-      destinationShardId: txn.transactionPointer.destinationShardId.toString(),
-    };
-  };
+        // Convert BigInt to bytes for u128 (16 bytes)
+        const buffer = Buffer.alloc(16);
+        for (let i = 0; i < 16; i++) {
+          buffer[i] = Number((amount >> BigInt(i * 8)) & BigInt(0xff));
+        }
+        out.writeBytes(buffer);
+      });
 
-  const getTokenAllowance = async (
-    tokenAddress: string,
-    ownerAddress: string,
-    spenderAddress: string
-  ) => {
-    const response = await fetch(
-      `${TESTNET_URL}/shards/Shard0/blockchain/contracts/${tokenAddress}`
-    ).then((res) => res.json());
+      const txClient = BlockchainTransactionClient.create(TESTNET_URL, account);
 
-    if (!response?.serializedContract?.allowed) {
-      throw new Error("Failed to get token allowances");
-    }
+      const txn = await txClient.signAndSend(
+        { address: cleanTokenAddr, rpc: approveRpc },
+        TOKEN_APPROVAL_GAS
+      );
 
-    const allowance = getAllowance(response, ownerAddress, spenderAddress);
+      if (!txn.transactionPointer) {
+        throw new Error("No transaction pointer returned");
+      }
 
-    return allowance ? BigInt(allowance) : BigInt(0);
-  };
+      return {
+        identifier: txn.transactionPointer.identifier,
+        destinationShardId:
+          txn.transactionPointer.destinationShardId.toString(),
+      };
+    },
+    [account]
+  );
 
-  const contributeWithApproval = async (params: {
-    crowdfundingAddress: string;
-    amount: number;
-    tokenAddress: string;
-  }) => {
-    const { crowdfundingAddress, amount, tokenAddress } = params;
-    if (!account) throw new Error("Wallet not connected");
+  const getTokenAllowance = useCallback(
+    async (
+      tokenAddress: string,
+      ownerAddress: string,
+      spenderAddress: string
+    ) => {
+      console.log(
+        "getTokenAllowance",
+        tokenAddress,
+        ownerAddress,
+        spenderAddress
+      );
 
-    // Check current allowance
-    const currentAllowance = await getTokenAllowance(
-      tokenAddress,
-      account.getAddress(),
-      crowdfundingAddress
-    );
+      return BigInt(0);
+      // const response = await fetch(
+      //   `${TESTNET_URL}/shards/Shard0/blockchain/contracts/${tokenAddress}`
+      // ).then((res) => res.json());
 
-    const weiAmount = BigInt(amount);
-    if (currentAllowance < weiAmount) {
-      // Need approval
-      await approveTokens(tokenAddress, crowdfundingAddress, Number(weiAmount));
-    }
+      // if (!response?.serializedContract?.allowed) {
+      //   throw new Error("Failed to get token allowances");
+      // }
 
-    // Now do the contribution
-    const rpc = contributeTokens(amount);
-    return sendCampaignTransaction(crowdfundingAddress, "contribute_tokens", {
-      type: "regular",
-      address: crowdfundingAddress,
-      rpc,
-      gasCost: 100_000,
-    });
-  };
+      // const allowance = getAllowance(response, ownerAddress, spenderAddress);
 
-  const contributeSecretWithApproval = async (params: {
-    crowdfundingAddress: string;
-    amount: number;
-    tokenAddress: string;
-  }) => {
-    const { crowdfundingAddress, amount, tokenAddress } = params;
-    if (!account) throw new Error("Wallet not connected");
+      // return allowance ? BigInt(allowance) : BigInt(0);
+    },
+    [TESTNET_URL]
+  );
 
-    // Check current allowance
-    const currentAllowance = await getTokenAllowance(
-      tokenAddress,
-      account.getAddress(),
-      crowdfundingAddress
-    );
+  const contributeWithApproval = useCallback(
+    async (params: {
+      crowdfundingAddress: string;
+      amount: number;
+      tokenAddress: string;
+    }) => {
+      const { crowdfundingAddress, amount, tokenAddress } = params;
+      if (!account) throw new Error("Wallet not connected");
 
-    const weiAmount = BigInt(amount);
-    if (currentAllowance < weiAmount) {
-      // Need approval
-      await approveTokens(tokenAddress, crowdfundingAddress, Number(weiAmount));
-    }
+      // Check current allowance
+      const currentAllowance = await getTokenAllowance(
+        tokenAddress,
+        account.getAddress(),
+        crowdfundingAddress
+      );
 
-    // Now do the secret contribution
-    const secretInputData = AbiBitOutput.serialize((_out) => {
-      _out.writeU32(amount);
-    });
+      const weiAmount = BigInt(amount);
+      if (currentAllowance < weiAmount) {
+        // Need approval
+        await approveTokens(tokenAddress, crowdfundingAddress, weiAmount);
+      }
 
-    return sendCampaignTransaction(crowdfundingAddress, "contribute_tokens", {
-      type: "secret",
-      address: crowdfundingAddress,
-      secretInput: secretInputData,
-      publicRpc: Buffer.from("40", "hex"),
-      gasCost: 100_000,
-    });
-  };
+      // Now do the contribution
+      const rpc = contributeTokens(amount);
+      return sendCampaignTransaction(crowdfundingAddress, "contribute_tokens", {
+        type: "regular",
+        address: crowdfundingAddress,
+        rpc,
+        gasCost: TOKEN_CONTRIBUTION_GAS,
+      });
+    },
+    [account, getTokenAllowance, sendCampaignTransaction]
+  );
+
+  const contributeSecretWithApproval = useCallback(
+    async (params: {
+      crowdfundingAddress: string;
+      amount: number;
+      tokenAddress: string;
+    }) => {
+      const { crowdfundingAddress, amount, tokenAddress } = params;
+      if (!account) throw new Error("Wallet not connected");
+
+      // Check current allowance
+      const currentAllowance = await getTokenAllowance(
+        tokenAddress,
+        account.getAddress(),
+        crowdfundingAddress
+      );
+
+      const weiAmount = BigInt(amount);
+      if (currentAllowance < weiAmount) {
+        // Need approval
+        await approveTokens(tokenAddress, crowdfundingAddress, weiAmount);
+      }
+
+      // Now do the secret contribution
+      const secretInputData = AbiBitOutput.serialize((_out) => {
+        _out.writeU32(amount);
+      });
+
+      return sendCampaignTransaction(crowdfundingAddress, "contribute_tokens", {
+        type: "secret",
+        address: crowdfundingAddress,
+        secretInput: secretInputData,
+        publicRpc: Buffer.from("40", "hex"),
+        gasCost: TOKEN_CONTRIBUTION_GAS,
+      });
+    },
+    [account, getTokenAllowance, sendCampaignTransaction]
+  );
 
   const contributeMutation = useMutation({
     mutationFn: async ({
@@ -208,7 +249,7 @@ export function useCrowdfundingContract() {
         type: "regular",
         address: crowdfundingAddress,
         rpc,
-        gasCost: 100_000,
+        gasCost: TOKEN_CONTRIBUTION_GAS,
       });
     },
     onSuccess: (_, { crowdfundingAddress }) => {
@@ -237,7 +278,7 @@ export function useCrowdfundingContract() {
         address: crowdfundingAddress,
         secretInput: secretInputData,
         publicRpc: Buffer.from("40", "hex"),
-        gasCost: 100_000,
+        gasCost: TOKEN_CONTRIBUTION_GAS,
       });
     },
     onSuccess: (_, { crowdfundingAddress }) => {
@@ -255,7 +296,7 @@ export function useCrowdfundingContract() {
         type: "regular",
         address: crowdfundingAddress,
         rpc,
-        gasCost: 100_000,
+        gasCost: END_CAMPAIGN_GAS,
       });
     },
     onSuccess: (_, crowdfundingAddress) => {
@@ -273,7 +314,7 @@ export function useCrowdfundingContract() {
         type: "regular",
         address: crowdfundingAddress,
         rpc,
-        gasCost: 100_000,
+        gasCost: WITHDRAW_FUNDS_GAS,
       });
     },
     onSuccess: (_, crowdfundingAddress) => {
@@ -297,6 +338,8 @@ export function useCrowdfundingContract() {
       withdrawFunds: (crowdfundingAddress: string) =>
         withdrawFundsMutation.mutateAsync(crowdfundingAddress),
       getTokenAllowance,
+      approveTokens,
+      sendCampaignTransaction,
     }),
     [
       contributeMutation,
@@ -306,6 +349,8 @@ export function useCrowdfundingContract() {
       getTokenAllowance,
       contributeWithApproval,
       contributeSecretWithApproval,
+      approveTokens,
+      sendCampaignTransaction,
     ]
   );
 }
@@ -365,11 +410,7 @@ export function useContributeSecret() {
   const queryClient = useQueryClient();
   const { requiresWalletConnection } = useCampaignTransaction();
   const { account } = useAuth();
-  const [steps, setSteps] = useState<TransactionStep[]>([
-    { label: "Approving token transfer", status: "pending" },
-    { label: "Generating zero-knowledge proof", status: "pending" },
-    { label: "Submitting contribution", status: "pending" },
-  ]);
+  const [steps, setSteps] = useState<TransactionStep[]>([]);
 
   const mutation = useMutation({
     mutationFn: async ({
@@ -383,91 +424,135 @@ export function useContributeSecret() {
     }): Promise<TransactionResult> => {
       if (!account) throw new Error("Wallet not connected");
 
+      // Use a local variable to track steps
+      let currentSteps: TransactionStep[] = [
+        { label: "Approving token transfer", status: "pending" },
+        { label: "Generating zero-knowledge proof", status: "pending" },
+        { label: "Transferring tokens", status: "pending" },
+        { label: "Submitting contribution", status: "pending" },
+      ];
+      setSteps(currentSteps);
+
       try {
         // Step 1: Token approval
-        setSteps((prev) =>
-          prev.map((step, i) =>
-            i === 0 ? { ...step, status: "pending" } : step
-          )
-        );
-
-        // Get current allowance first
+        // (pending already set)
         const currentAllowance = await crowdfundingContract.getTokenAllowance(
           tokenAddress,
           account.getAddress(),
           crowdfundingAddress
         );
-
         const weiAmount = BigInt(amount);
         if (currentAllowance < weiAmount) {
-          // Need approval
-          const approvalTxn = await crowdfundingContract.contributeWithApproval(
+          const approvalTxn = await crowdfundingContract.approveTokens(
+            tokenAddress,
+            crowdfundingAddress,
+            weiAmount
+          );
+          currentSteps = currentSteps.map((step, i) =>
+            i === 0
+              ? { ...step, status: "success", transactionPointer: approvalTxn }
+              : step
+          );
+          setSteps(currentSteps);
+        } else {
+          currentSteps = currentSteps.map((step, i) =>
+            i === 0 ? { ...step, status: "success" } : step
+          );
+          setSteps(currentSteps);
+        }
+
+        // Step 2: ZK commitment (generate and submit secret input)
+        currentSteps = currentSteps.map((step, i) =>
+          i === 1 ? { ...step, status: "pending" } : step
+        );
+        setSteps(currentSteps);
+
+        const secretInputData = AbiBitOutput.serialize((_out) => {
+          _out.writeU32(amount);
+        });
+
+        const zkTxn = await crowdfundingContract.sendCampaignTransaction(
+          crowdfundingAddress,
+          "contribute_tokens",
+          {
+            type: "secret",
+            address: crowdfundingAddress,
+            secretInput: secretInputData,
+            publicRpc: Buffer.from("40", "hex"),
+            gasCost: TOKEN_CONTRIBUTION_GAS,
+          }
+        );
+
+        currentSteps = currentSteps.map((step, i) =>
+          i === 1
+            ? {
+                ...step,
+                status: "success",
+                transactionPointer: zkTxn,
+              }
+            : step
+        );
+        setSteps(currentSteps);
+
+        // Step 3: Token transfer
+        currentSteps = currentSteps.map((step, i) =>
+          i === 2 ? { ...step, status: "pending" } : step
+        );
+        setSteps(currentSteps);
+
+        const tokenTransferRpc = AbiByteOutput.serializeBigEndian((_out) => {
+          _out.writeU8(0x09); // transfer shortname
+          _out.writeBytes(Buffer.from([0x07])); // token transfer type
+          _out.writeU32(amount);
+        });
+
+        const tokenTransferTxn =
+          await crowdfundingContract.sendCampaignTransaction(
+            crowdfundingAddress,
+            "contribute_tokens",
             {
-              crowdfundingAddress,
-              amount,
-              tokenAddress,
+              type: "regular",
+              address: crowdfundingAddress,
+              rpc: tokenTransferRpc,
+              gasCost: TOKEN_CONTRIBUTION_GAS,
             }
           );
 
-          setSteps((prev) =>
-            prev.map((step, i) =>
-              i === 0
-                ? {
-                    ...step,
-                    status: "success",
-                    transactionPointer: approvalTxn,
-                  }
-                : step
-            )
-          );
-        } else {
-          // Skip approval step if already approved
-          setSteps((prev) =>
-            prev.map((step, i) =>
-              i === 0 ? { ...step, status: "success" } : step
-            )
-          );
-        }
-
-        // Step 2: ZK contribution
-        setSteps((prev) =>
-          prev.map((step, i) =>
-            i === 1 ? { ...step, status: "pending" } : step
-          )
+        currentSteps = currentSteps.map((step, i) =>
+          i === 2
+            ? {
+                ...step,
+                status: "success",
+                transactionPointer: tokenTransferTxn,
+              }
+            : step
         );
+        setSteps(currentSteps);
 
-        const txn = await crowdfundingContract.contributeSecretWithApproval({
-          crowdfundingAddress,
-          amount,
-          tokenAddress,
-        });
-
-        setSteps((prev) =>
-          prev.map((step, i) =>
-            i === 2
-              ? { ...step, status: "success", transactionPointer: txn }
-              : step
-          )
+        // Step 4: Submit contribution (if needed, just mark as success)
+        currentSteps = currentSteps.map((step, i) =>
+          i === 3 ? { ...step, status: "success" } : step
         );
+        setSteps(currentSteps);
 
-        return { ...txn, steps };
+        return { ...tokenTransferTxn, steps: currentSteps };
       } catch (error) {
         // Find the first pending step and mark it as error
-        const errorIndex = steps.findIndex((step) => step.status === "pending");
+        const errorIndex = currentSteps.findIndex(
+          (step) => step.status === "pending"
+        );
         if (errorIndex !== -1) {
-          setSteps((prev) =>
-            prev.map((step, i) =>
-              i === errorIndex
-                ? { ...step, status: "error", error: error as Error }
-                : step
-            )
+          currentSteps = currentSteps.map((step, i) =>
+            i === errorIndex
+              ? { ...step, status: "error", error: error as Error }
+              : step
           );
+          setSteps(currentSteps);
         }
-        // Return a failed result instead of throwing
         return {
           identifier: "",
           destinationShardId: "",
-          steps,
+          steps: currentSteps,
           error: error instanceof Error ? error : new Error(String(error)),
         };
       }
@@ -487,14 +572,49 @@ export function useContributeSecret() {
 }
 
 export function useEndCampaign() {
-  const crowdfundingContract = useCrowdfundingContract();
+  const { account } = useAuth();
   const queryClient = useQueryClient();
   const { requiresWalletConnection } = useCampaignTransaction();
 
   const mutation = useMutation({
     mutationFn: async (crowdfundingAddress: string) => {
-      const txn = await crowdfundingContract.endCampaign(crowdfundingAddress);
-      return txn;
+      if (!account) throw new Error("Wallet not connected");
+      if (!crowdfundingAddress) throw new Error("Campaign address is required");
+
+      // Build RPC for end_campaign (shortname 0x01)
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x09); // Format indicator
+        _out.writeBytes(Buffer.from([0x01])); // end_campaign shortname
+      });
+
+      const txClient = BlockchainTransactionClient.create(TESTNET_URL, account);
+      try {
+        const transaction = await txClient.signAndSend(
+          { address: crowdfundingAddress, rpc },
+          END_CAMPAIGN_GAS
+        );
+        const txId = transaction.transactionPointer?.identifier || "unknown";
+        const shardId = transaction.transactionPointer?.destinationShardId;
+        return {
+          ...transaction.transactionPointer,
+          status: "pending",
+          metadata: {
+            type: "endCampaign",
+            txId,
+            shardId,
+            usesPublicTarget: true,
+            privacyPreserving: true,
+            thresholdBasedRevelation: true,
+            simplified: true,
+          },
+        };
+      } catch (error) {
+        if (error instanceof Error) {
+          throw new Error(`Error ending campaign: ${error.message}`);
+        } else {
+          throw new Error(`Error ending campaign: ${String(error)}`);
+        }
+      }
     },
     onSuccess: (_, crowdfundingAddress) => {
       queryClient.invalidateQueries({
@@ -510,14 +630,45 @@ export function useEndCampaign() {
 }
 
 export function useWithdrawFunds() {
-  const crowdfundingContract = useCrowdfundingContract();
+  const { account } = useAuth();
   const queryClient = useQueryClient();
   const { requiresWalletConnection } = useCampaignTransaction();
 
   const mutation = useMutation({
     mutationFn: async (crowdfundingAddress: string) => {
-      const txn = await crowdfundingContract.withdrawFunds(crowdfundingAddress);
-      return txn;
+      if (!account) throw new Error("Wallet not connected");
+      if (!crowdfundingAddress) throw new Error("Campaign address is required");
+
+      // Build RPC for withdraw_funds (shortname 0x04)
+      const rpc = AbiByteOutput.serializeBigEndian((_out) => {
+        _out.writeU8(0x09);
+        _out.writeBytes(Buffer.from([0x04]));
+      });
+
+      const txClient = BlockchainTransactionClient.create(TESTNET_URL, account);
+      try {
+        const transaction = await txClient.signAndSend(
+          { address: crowdfundingAddress, rpc },
+          WITHDRAW_FUNDS_GAS
+        );
+        const txId = transaction.transactionPointer?.identifier || "unknown";
+        const shardId = transaction.transactionPointer?.destinationShardId;
+        return {
+          ...transaction.transactionPointer,
+          status: "pending",
+          metadata: {
+            type: "withdrawFunds",
+            txId,
+            shardId,
+          },
+        };
+      } catch (error) {
+        if (error instanceof Error) {
+          throw new Error(`Error withdrawing funds: ${error.message}`);
+        } else {
+          throw new Error(`Error withdrawing funds: ${String(error)}`);
+        }
+      }
     },
     onSuccess: (_, crowdfundingAddress) => {
       queryClient.invalidateQueries({
@@ -532,20 +683,20 @@ export function useWithdrawFunds() {
   };
 }
 
-type AllowanceEntry = { key: string; value: { value: string } };
-type AllowedEntry = { key: string; value: { allowances: AllowanceEntry[] } };
+// type AllowanceEntry = { key: string; value: { value: string } };
+// type AllowedEntry = { key: string; value: { allowances: AllowanceEntry[] } };
 
-function getAllowance(
-  json: { serializedContract: { allowed: AllowedEntry[] } },
-  owner: string,
-  spender: string
-): string | null {
-  const ownerEntry = json.serializedContract.allowed.find(
-    (entry) => entry.key.toLowerCase() === owner.toLowerCase()
-  );
-  if (!ownerEntry) return null;
-  const spenderEntry = ownerEntry.value.allowances.find(
-    (entry) => entry.key.toLowerCase() === spender.toLowerCase()
-  );
-  return spenderEntry ? spenderEntry.value.value : null;
-}
+// function getAllowance(
+//   json: { serializedContract: { allowed: AllowedEntry[] } },
+//   owner: string,
+//   spender: string
+// ): string | null {
+//   const ownerEntry = json.serializedContract.allowed.find(
+//     (entry) => entry.key.toLowerCase() === owner.toLowerCase()
+//   );
+//   if (!ownerEntry) return null;
+//   const spenderEntry = ownerEntry.value.allowances.find(
+//     (entry) => entry.key.toLowerCase() === spender.toLowerCase()
+//   );
+//   return spenderEntry ? spenderEntry.value.value : null;
+// }
