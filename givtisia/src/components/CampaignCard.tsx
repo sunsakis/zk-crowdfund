@@ -14,6 +14,8 @@ import { useState } from "react";
 import {
   useContribute,
   useContributeSecret,
+  useEndCampaign,
+  useWithdrawFunds,
 } from "@/hooks/useCampaignContract";
 import { ExternalLinkIcon } from "lucide-react";
 import { TransactionDialog } from "@/components/shared/TransactionDialog";
@@ -39,7 +41,7 @@ export function CrowdfundingCard({
   campaign,
   campaignId,
 }: CrowdfundingCardProps) {
-  const { isConnected } = useAuth();
+  const { isConnected, walletAddress } = useAuth();
   const [amount, setAmount] = useState<string>("");
   const {
     mutateAsync: contribute,
@@ -61,6 +63,15 @@ export function CrowdfundingCard({
     transactionPointer?.identifier ?? "",
     "other"
   );
+  const { mutateAsync: endCampaign, isPending: isEnding } = useEndCampaign();
+  const { mutateAsync: withdrawFunds, isPending: isWithdrawing } =
+    useWithdrawFunds();
+  const [adminTxnResult, setAdminTxnResult] = useState<
+    TransactionPointer | { error: unknown } | null
+  >(null);
+  const [adminAction, setAdminAction] = useState<null | "end" | "withdraw">(
+    null
+  );
 
   const isTotalRevealed =
     campaign.totalRaised !== undefined &&
@@ -73,6 +84,17 @@ export function CrowdfundingCard({
           ((campaign.totalRaised ?? 0) / campaign.fundingTarget) * 100
         )
       : 0;
+
+  const isOwner =
+    walletAddress &&
+    campaign.owner?.asString &&
+    walletAddress.toLowerCase() === campaign.owner.asString().toLowerCase();
+  const canEnd =
+    campaign.status.discriminant !== CampaignStatusD.Completed &&
+    campaign.status.discriminant !== CampaignStatusD.Computing;
+  const canWithdraw =
+    campaign.status.discriminant === CampaignStatusD.Completed &&
+    !campaign.fundsWithdrawn;
 
   const handleContribute = async (isSecret: boolean) => {
     if (amount === "") {
@@ -135,6 +157,27 @@ export function CrowdfundingCard({
     setTransactionPointer(null);
     setTransactionError(null);
     setIsTransactionInProgress(false);
+  };
+
+  const handleAdminAction = async (action: "end" | "withdraw") => {
+    try {
+      setAdminAction(action);
+      setAdminTxnResult(null);
+      if (action === "end") {
+        const result = await endCampaign(campaignId);
+        setAdminTxnResult(result);
+      } else if (action === "withdraw") {
+        const result = await withdrawFunds(campaignId);
+        setAdminTxnResult(result);
+      }
+    } catch (e) {
+      setAdminTxnResult({ error: e });
+    }
+  };
+
+  const handleAdminDialogClose = () => {
+    setAdminTxnResult(null);
+    setAdminAction(null);
   };
 
   const getStatusText = (status: Crowdfunding["status"]) => {
@@ -252,6 +295,27 @@ export function CrowdfundingCard({
           >
             view on explorer <ExternalLinkIcon className="w-3 h-3 ml-1" />
           </a>
+
+          {isOwner && (
+            <div className="flex gap-2 ml-auto">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canEnd || isEnding}
+                onClick={() => handleAdminAction("end")}
+              >
+                {isEnding ? "Ending..." : "End Campaign"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canWithdraw || isWithdrawing}
+                onClick={() => handleAdminAction("withdraw")}
+              >
+                {isWithdrawing ? "Withdrawing..." : "Withdraw Funds"}
+              </Button>
+            </div>
+          )}
         </CardFooter>
       </Card>
 
@@ -267,6 +331,33 @@ export function CrowdfundingCard({
           }}
           campaignId={campaignId}
           onClose={handleTransactionComplete}
+        />
+      )}
+
+      {adminAction && (
+        <TransactionDialog
+          transactionResult={{
+            isLoading:
+              (adminAction === "end" ? isEnding : isWithdrawing) &&
+              !adminTxnResult,
+            isSuccess: !!adminTxnResult && !("error" in adminTxnResult),
+            isError: !!adminTxnResult && "error" in adminTxnResult,
+            error:
+              adminTxnResult && "error" in adminTxnResult
+                ? (adminTxnResult.error as Error)
+                : null,
+            transactionPointer:
+              adminTxnResult &&
+              "identifier" in adminTxnResult &&
+              "destinationShardId" in adminTxnResult
+                ? {
+                    identifier: adminTxnResult.identifier,
+                    destinationShardId: adminTxnResult.destinationShardId,
+                  }
+                : null,
+          }}
+          campaignId={campaignId}
+          onClose={handleAdminDialogClose}
         />
       )}
     </div>
