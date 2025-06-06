@@ -11,15 +11,14 @@ import {
 } from "@/hooks/useCampaignContract";
 import { cn } from "./lib/utils";
 import { Loader2, SearchIcon } from "lucide-react";
+import { Link } from "react-router";
 
 function Home() {
-  // 038e9300750a82ec9c4006f8ee634f08d0bc36c8ba
-  // latest: 038b01c9fb6709ebb402d115989b38c388280ecb8c
   const [campaignId, setCampaignId] = useState<string>("");
   const [searchId, setSearchId] = useState<string | null>(null);
   const [campaignIdError, setCampaignIdError] = useState<string | null>(null);
 
-  const EXAMPLE_CONTRACT = "038b01c9fb6709ebb402d115989b38c388280ecb8c";
+  const EXAMPLE_CONTRACT = "03260695d27fb2266de9579092ef39ddd38261065c";
 
   const useExampleContract = () => {
     setCampaignId(EXAMPLE_CONTRACT);
@@ -105,20 +104,30 @@ function Home() {
                     {isLoading ? "Searching..." : "Find campaign"}
                   </Button>
                 </div>
-                <Button
-                  variant="ghost"
-                  className="text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 w-fit"
-                  onClick={useExampleContract}
-                >
-                  Use example contract
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 w-fit"
-                  onClick={useExampleContract}
-                >
-                  TODO: Button to docs to create a new campaign
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 w-fit"
+                    onClick={useExampleContract}
+                  >
+                    👁️ View example campaign
+                  </Button>
+                  <Link
+                    to={
+                      "https://github.com/sunsakis/zk-crowdfund/blob/master/README.md#rust-setup"
+                    }
+                    target="_blank"
+                  >
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-sm text-purple-600 hover:text-purple-700 hover:bg-purple-50 w-fit"
+                    >
+                      📚 Create a campaign
+                    </Button>
+                  </Link>
+                </div>
               </div>
               {campaignIdError && (
                 <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
@@ -130,7 +139,7 @@ function Home() {
                   Could not find campaign: {error.message}
                 </p>
               )}
-              <p className="text-xs text-slate-500 mt-2">
+              <p className="text-xs text-slate-500 mt-2 ml-1">
                 <span className="font-medium">Tip:</span> The campaign address
                 is a 42-character string starting with{" "}
                 <code className="bg-slate-100 px-1 rounded">03</code>.
