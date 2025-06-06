@@ -494,9 +494,24 @@ export function useContributeSecret() {
         );
         setSteps(currentSteps);
 
+        // Wait for ZK state propagation (30 seconds)
+        currentSteps = currentSteps.map((step, i) =>
+          i === 2
+            ? {
+                ...step,
+                status: "pending",
+                label: "Waiting for ZK state propagation...",
+              }
+            : step
+        );
+        setSteps(currentSteps);
+        await new Promise((resolve) => setTimeout(resolve, 30000));
+
         // Step 3: Token transfer
         currentSteps = currentSteps.map((step, i) =>
-          i === 2 ? { ...step, status: "pending" } : step
+          i === 2
+            ? { ...step, status: "pending", label: "Transferring tokens" }
+            : step
         );
         setSteps(currentSteps);
 
