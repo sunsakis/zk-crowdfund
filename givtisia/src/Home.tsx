@@ -68,7 +68,7 @@ function Home() {
             </a>
           </p>
           <div className="w-full max-w-lg">
-            <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200 flex flex-col gap-4">
+            <div className="bg-white rounded-xl p-6 border-[1.5px] border-neutral-200 flex flex-col gap-4">
               <p className="text-base text-slate-700">
                 <span className="font-semibold">
                   Enter the contract address

@@ -215,11 +215,11 @@ export function CrowdfundingCard({
   return (
     <div className="pb-1 px-1 bg-violet-100 rounded-xl w-lg">
       <div className="py-1 pl-2">
-        <code className="uppercase text-xs font-mono text-violet-600 tracking-wide">
+        <code className="uppercase text-xs font-mono text-violet-600 tracking-wide ml-4">
           {campaign.shardId} ♦️ {campaignId}
         </code>
       </div>
-      <Card className="w-full max-w-2xl shadow-none border-none mt-1">
+      <Card className="w-full max-w-2xl shadow-none border-none my-auto rounded-lg">
         <CardHeader>
           <CardTitle className="text-2xl font-bold">{campaign.title}</CardTitle>
           <CardDescription className="text-base">
