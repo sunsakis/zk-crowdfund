@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useCampaignContract";
 import { ExternalLinkIcon } from "lucide-react";
 import { TransactionDialog } from "@/components/shared/TransactionDialog";
+import { StepTransactionDialog } from "@/components/shared/StepTransactionDialog";
 import { TransactionPointer } from "@/hooks/useCampaignTransaction";
 import { useTransactionStatus } from "@/hooks/useTransactionStatus";
 import { useAuth } from "@/auth/useAuth";
@@ -79,24 +80,41 @@ export function CrowdfundingCard({
 
   const progress =
     campaign.totalRaised !== undefined
-      ? Math.min(
-          100,
-          ((campaign.totalRaised ?? 0) / campaign.fundingTarget) * 100
-        )
+      ? ((campaign.totalRaised ?? 0) / campaign.fundingTarget) * 100
       : 0;
 
   const isOwner =
     walletAddress &&
     campaign.owner?.asString &&
     walletAddress.toLowerCase() === campaign.owner.asString().toLowerCase();
-  const canEnd =
-    campaign.status.discriminant !== CampaignStatusD.Completed &&
-    campaign.status.discriminant !== CampaignStatusD.Computing;
+
+  const canEnd = campaign.status.discriminant === CampaignStatusD.Active;
   const canWithdraw =
     campaign.status.discriminant === CampaignStatusD.Completed &&
-    !campaign.fundsWithdrawn;
+    !campaign.fundsWithdrawn &&
+    (campaign.numContributors ?? 0) > 0;
+
+  const showAdminActions =
+    isOwner &&
+    ((campaign.status.discriminant === CampaignStatusD.Active && canEnd) ||
+      (campaign.status.discriminant === CampaignStatusD.Completed &&
+        canWithdraw));
+
+  const showConnectButton =
+    (!isConnected &&
+      campaign.status.discriminant === CampaignStatusD.Completed &&
+      !campaign.fundsWithdrawn) ||
+    (campaign.status.discriminant === CampaignStatusD.Active && !isOwner);
+
+  const showContributeSection =
+    campaign.status.discriminant === CampaignStatusD.Active;
 
   const handleContribute = async (isSecret: boolean) => {
+    // Reset all transaction state before starting a new transaction
+    setTransactionPointer(null);
+    setTransactionError(null);
+    setIsTransactionInProgress(false);
+
     if (amount === "") {
       setAmountInputError("Please enter an amount");
       return;
@@ -138,6 +156,7 @@ export function CrowdfundingCard({
 
       if (result.error) {
         setTransactionError(result.error);
+        setTransactionPointer(result);
       } else if (result) {
         setTransactionPointer(result);
         setAmount("");
@@ -194,7 +213,7 @@ export function CrowdfundingCard({
   };
 
   return (
-    <div className="pb-1 px-1 bg-violet-100 rounded-xl">
+    <div className="pb-1 px-1 bg-violet-100 rounded-xl w-[475px]">
       <div className="py-1 pl-2">
         <code className="uppercase text-xs font-mono text-violet-600 tracking-wide">
           {campaign.shardId} ♦️ {campaignId}
@@ -202,17 +221,41 @@ export function CrowdfundingCard({
       </div>
       <Card className="w-full max-w-2xl shadow-none border-none mt-1">
         <CardHeader>
-          <CardTitle className="text-xl font-bold">{campaign.title}</CardTitle>
-          <CardDescription>{campaign.description}</CardDescription>
+          <CardTitle className="text-2xl font-bold">{campaign.title}</CardTitle>
+          <CardDescription className="text-base">
+            {campaign.description}
+          </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span>Progress</span>
-              <span>{progress.toFixed(1)}%</span>
+              <span
+                className={progress > 100 ? "text-violet-600 font-medium" : ""}
+              >
+                {progress > 100 ? "⚡ " : ""}
+                {progress.toFixed(1)}%
+              </span>
             </div>
-            <Progress value={progress} className="h-2" />
+            <div className="relative">
+              <Progress
+                value={Math.min(100, progress)}
+                className={`h-2 transition-all duration-300 ${
+                  progress > 100 ? "bg-violet-100" : ""
+                }`}
+              />
+              {progress > 100 && (
+                <>
+                  <div className="absolute inset-0 bg-gradient-to-r from-violet-500 via-violet-600 to-amber-500 opacity-80 h-2 rounded-full animate-pulse" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-violet-400 via-violet-500 to-amber-400 opacity-60 h-2 rounded-full animate-pulse [animation-delay:150ms]" />
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-[2px] bg-violet-600"
+                    style={{ left: `${progress}%` }}
+                  />
+                </>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-5 text-sm">
@@ -221,25 +264,25 @@ export function CrowdfundingCard({
               {campaign.status.discriminant === CampaignStatusD.Completed &&
               !campaign.isSuccessful ? (
                 <p className="text-sm bg-red-100 text-red-600 px-2 py-1 rounded-sm w-fit">
-                  Did not raise enough to reveal 😔
+                  Campaign ended without meeting target 😔
                 </p>
               ) : isTotalRevealed ? (
                 <p className="text-lg font-medium">
                   {tokenUnitsToDisplayAmount(campaign.totalRaised ?? 0).toFixed(
-                    5
+                    6
                   )}{" "}
                   tokens
                 </p>
               ) : (
                 <p className="text-sm bg-neutral-100 text-neutral-500 px-2 py-1 rounded-sm w-fit">
-                  Revealed when threshold is met
+                  Hidden until target reached
                 </p>
               )}
             </div>
             <div>
               <p className="text-muted-foreground">Funding Target</p>
               <p className="text-lg font-medium">
-                {`${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(5)} tokens`}
+                {`${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(6)} tokens`}
               </p>
             </div>
             <div>
@@ -256,7 +299,7 @@ export function CrowdfundingCard({
             </div>
           </div>
 
-          {campaign.status.discriminant !== CampaignStatusD.Completed && (
+          {showContributeSection && (
             <div className="space-y-2">
               <div className="flex gap-2">
                 <input
@@ -303,7 +346,13 @@ export function CrowdfundingCard({
             view on explorer <ExternalLinkIcon className="w-3 h-3 ml-1" />
           </a>
 
-          {isOwner && (
+          {showConnectButton && (
+            <div className="ml-auto">
+              <ConnectButton label="Manage campaign" />
+            </div>
+          )}
+
+          {showAdminActions && (
             <div className="flex gap-2 ml-auto">
               <Button
                 size="sm"
@@ -323,23 +372,47 @@ export function CrowdfundingCard({
               </Button>
             </div>
           )}
+          {isOwner && campaign.fundsWithdrawn && (
+            <p className="text-xs text-muted-foreground ml-auto p-0.5 border-[1.5px] rounded-sm">
+              💸 Funds withdrawn
+            </p>
+          )}
         </CardFooter>
       </Card>
 
-      {(transactionPointer || isTransactionInProgress || transactionError) && (
-        <TransactionDialog
-          transactionResult={{
-            isLoading: isTransactionInProgress || transactionStatus.isLoading,
-            isSuccess: transactionStatus.isSuccess,
-            isError: !!transactionError || transactionStatus.isError,
-            error: transactionError || transactionStatus.error,
-            transactionPointer,
-            steps: isContributingSecret ? secretSteps : undefined,
-          }}
-          campaignId={campaignId}
-          onClose={handleTransactionComplete}
-        />
-      )}
+      {(transactionPointer || isTransactionInProgress || transactionError) &&
+        (isContributingSecret ? (
+          <StepTransactionDialog
+            transactionResult={{
+              isLoading: isTransactionInProgress || transactionStatus.isLoading,
+              isSuccess:
+                !transactionError &&
+                !secretSteps?.some((s) => s.status === "error") &&
+                transactionStatus.isSuccess,
+              isError:
+                !!transactionError ||
+                !!secretSteps?.find((s) => s.status === "error") ||
+                transactionStatus.isError,
+              error: transactionError || transactionStatus.error,
+              transactionPointer,
+              steps: secretSteps,
+            }}
+            campaignId={campaignId}
+            onClose={handleTransactionComplete}
+          />
+        ) : (
+          <TransactionDialog
+            transactionResult={{
+              isLoading: isTransactionInProgress || transactionStatus.isLoading,
+              isSuccess: transactionStatus.isSuccess,
+              isError: !!transactionError || transactionStatus.isError,
+              error: transactionError || transactionStatus.error,
+              transactionPointer,
+            }}
+            campaignId={campaignId}
+            onClose={handleTransactionComplete}
+          />
+        ))}
 
       {adminAction && (
         <TransactionDialog
