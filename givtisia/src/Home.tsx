@@ -1,9 +1,9 @@
 import NavBar from "@/components/shared/NavBar";
-import { WelcomeDialog } from "./components/shared/WelcomeDialog";
+import { WelcomeDialog } from "@/components/shared/WelcomeDialog";
 import { useState } from "react";
-import { Input } from "./components/ui/input";
-import { Button } from "./components/ui/button";
-import { CrowdfundingCard } from "./components/CampaignCard";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { CrowdfundingCard } from "@/components/CampaignCard";
 import { useQuery } from "@tanstack/react-query";
 import {
   getCrowdfundingState,
