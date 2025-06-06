@@ -187,7 +187,7 @@ export function CrowdfundingCard({
       case CampaignStatusD.Computing:
         return "Computing";
       case CampaignStatusD.Completed:
-        return "Completed";
+        return "Ended";
       default:
         return "Unknown";
     }
@@ -218,7 +218,12 @@ export function CrowdfundingCard({
           <div className="grid grid-cols-2 gap-5 text-sm">
             <div>
               <p className="text-muted-foreground">Total Raised</p>
-              {isTotalRevealed ? (
+              {campaign.status.discriminant === CampaignStatusD.Completed &&
+              !campaign.isSuccessful ? (
+                <p className="text-sm bg-red-100 text-red-600 px-2 py-1 rounded-sm w-fit">
+                  Did not raise enough to reveal 😔
+                </p>
+              ) : isTotalRevealed ? (
                 <p className="text-lg font-medium">
                   {tokenUnitsToDisplayAmount(campaign.totalRaised ?? 0).toFixed(
                     5
@@ -251,39 +256,41 @@ export function CrowdfundingCard({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="Amount to give"
-                className={`flex-1 rounded-md border-2 px-3 py-2 ${
-                  amountInputError ? "border-red-500" : ""
-                }`}
-                min={MIN_AMOUNT}
-                max={MAX_AMOUNT}
-                step={MIN_AMOUNT}
-              />
-              {isConnected ? (
-                <Button
-                  className="bg-violet-800 hover:bg-violet-600 shadow-none h-10"
-                  onClick={() => handleContribute(true)}
-                  disabled={isContributing || isContributingSecret}
-                >
-                  Contribute secretly
-                </Button>
-              ) : (
-                <ConnectButton label="Connect to give" />
+          {campaign.status.discriminant !== CampaignStatusD.Completed && (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="Amount to give"
+                  className={`flex-1 rounded-md border-2 px-3 py-2 ${
+                    amountInputError ? "border-red-500" : ""
+                  }`}
+                  min={MIN_AMOUNT}
+                  max={MAX_AMOUNT}
+                  step={MIN_AMOUNT}
+                />
+                {isConnected ? (
+                  <Button
+                    className="bg-violet-800 hover:bg-violet-600 shadow-none h-10"
+                    onClick={() => handleContribute(true)}
+                    disabled={isContributing || isContributingSecret}
+                  >
+                    Contribute secretly
+                  </Button>
+                ) : (
+                  <ConnectButton label="Connect to give" />
+                )}
+              </div>
+              {amountInputError && (
+                <p className="text-xs text-red-500">{amountInputError}</p>
               )}
             </div>
-            {amountInputError && (
-              <p className="text-xs text-red-500">{amountInputError}</p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Last updated: {new Date(campaign.lastUpdated).toLocaleString()}
-            </p>
-          </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Last updated: {new Date(campaign.lastUpdated).toLocaleString()}
+          </p>
         </CardContent>
 
         <CardFooter className="text-xs text-muted-foreground">
