@@ -6,20 +6,106 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, ExternalLink, Lollipop } from "lucide-react";
+import {
+  AlertCircle,
+  ExternalLink,
+  Lollipop,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { TransactionResult } from "@/hooks/useCampaignTransaction";
 import { TESTNET_URL } from "@/partisia-config";
+import { TransactionStatus } from "@/hooks/useTransactionStatus";
 
 interface TransactionDialogProps {
   transactionResult: TransactionResult;
   campaignId: string;
   onClose?: () => void;
+  status?: TransactionStatus;
 }
+
+const EventChainDisplay = ({
+  eventChain,
+}: {
+  eventChain: TransactionStatus["eventChain"];
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Only show if there are errors in the chain
+  const errorsInChain = eventChain.filter(
+    (event) => event.executionStatus?.failure
+  );
+
+  if (!errorsInChain.length) return null;
+
+  return (
+    <div className="w-full space-y-2 mt-4">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center justify-between w-full p-2 text-left hover:bg-gray-50 rounded-md transition-colors"
+      >
+        <h4 className="text-sm font-semibold text-red-700">
+          Errors in Transaction Chain ({errorsInChain.length})
+        </h4>
+        {isExpanded ? (
+          <ChevronUp className="w-4 h-4 text-red-700" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-red-700" />
+        )}
+      </button>
+
+      {isExpanded && (
+        <div className="space-y-2 max-w-md">
+          {errorsInChain.map((event) => (
+            <div
+              key={event.identifier}
+              className="p-3 bg-red-50 rounded-md border border-red-200"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <code className="text-xs font-mono bg-red-100 px-1.5 py-0.5 rounded text-red-800">
+                  {event.identifier.substring(0, 8)}...
+                  {event.identifier.substring(event.identifier.length - 8)}
+                </code>
+                <a
+                  href={`${TESTNET_URL.replace("node1", "browser")}/transactions/${event.identifier}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center text-xs font-medium text-red-700 hover:text-red-900"
+                >
+                  view <ExternalLink className="w-3 h-3 ml-0.5" />
+                </a>
+              </div>
+              {event.executionStatus?.failure && (
+                <div>
+                  <p className="text-xs text-red-600 font-medium">Error:</p>
+                  <p className="text-xs text-red-600 mt-1">
+                    {event.executionStatus.failure.errorMessage}
+                  </p>
+                  {event.executionStatus.failure.stackTrace && (
+                    <>
+                      <p className="text-xs text-red-600 mt-1 font-medium">
+                        Stack Trace:
+                      </p>
+                      <pre className="text-xs text-red-500 mt-1 whitespace-pre-wrap max-h-40 overflow-auto max-w-full">
+                        {event.executionStatus.failure.stackTrace}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export function TransactionDialog({
   transactionResult,
   campaignId,
   onClose,
+  status,
 }: TransactionDialogProps) {
   const [open, setOpen] = useState(true);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -30,15 +116,15 @@ export function TransactionDialog({
   }, [onClose]);
 
   useEffect(() => {
-    if (transactionResult.isSuccess) {
+    if (status?.isSuccess) {
       setShowConfetti(true);
     }
-  }, [transactionResult.isSuccess]);
+  }, [status?.isSuccess]);
 
   const getProgressPercentage = () => {
-    if (transactionResult.isLoading) return 40;
-    if (transactionResult.isSuccess) return 100;
-    if (transactionResult.isError) return 100;
+    if (status?.isLoading) return 40;
+    if (status?.isSuccess) return 100;
+    if (status?.isError) return 100;
     return 20;
   };
 
@@ -78,11 +164,13 @@ export function TransactionDialog({
     <Dialog
       open={open}
       onOpenChange={(newOpen) => {
-        if (!newOpen && transactionResult.isLoading) {
+        if (!newOpen && status?.isLoading) {
           return;
         }
         setOpen(newOpen);
-        if (!newOpen) onClose?.();
+        if (!newOpen) {
+          onClose?.();
+        }
       }}
     >
       <DialogContent
@@ -97,9 +185,9 @@ export function TransactionDialog({
 
         <div
           className={`h-1.5 transition-all duration-700 ease-in-out ${
-            transactionResult.isError
+            status?.isError
               ? "bg-red-500"
-              : transactionResult.isSuccess
+              : status?.isSuccess
                 ? "bg-green-500"
                 : "bg-blue-500"
           }`}
@@ -107,7 +195,7 @@ export function TransactionDialog({
         />
 
         <div className="flex flex-col items-center pb-6 px-5 space-y-6 pt-4">
-          {transactionResult.isError ? (
+          {status?.isError ? (
             <div className="flex flex-col items-center space-y-4 w-full">
               <div className="relative flex items-center justify-center w-20 h-20 bg-red-50 rounded-full">
                 <AlertCircle className="h-10 w-10 text-red-500" />
@@ -117,17 +205,18 @@ export function TransactionDialog({
               </p>
               <div className="w-full bg-red-50 p-4 rounded-md border border-red-200">
                 <p className="text-sm text-red-600">
-                  {transactionResult.error?.message || "Unknown error"}
+                  {status.error?.message || "Unknown error"}
                 </p>
                 <p className="text-xs text-red-500 mt-2">
                   Try again or contact support if this persists
                 </p>
               </div>
               <TransactionIdDisplay />
+              <EventChainDisplay eventChain={status.eventChain} />
             </div>
-          ) : transactionResult.isSuccess ? (
+          ) : status?.isSuccess ? (
             <div className="flex flex-col items-center space-y-4 w-full">
-              {showConfetti && !transactionResult.isError && (
+              {showConfetti && !status.isError && (
                 <div className="absolute inset-0 pointer-events-none overflow-hidden">
                   <div className="confetti-container" aria-hidden="true" />
                 </div>
@@ -162,9 +251,11 @@ export function TransactionDialog({
                     view <ExternalLink className="w-3 h-3 ml-0.5" />
                   </a>
                 </div>
+
+                <EventChainDisplay eventChain={status.eventChain} />
               </div>
             </div>
-          ) : transactionResult.isLoading ? (
+          ) : status?.isLoading ? (
             <div className="flex flex-col items-center space-y-4 w-full">
               <div className="flex items-center justify-center w-24 h-24">
                 <Lollipop className="h-16 w-16 text-yellow-400 animate-spin" />
@@ -178,6 +269,7 @@ export function TransactionDialog({
                 </p>
               </div>
               <TransactionIdDisplay />
+              <EventChainDisplay eventChain={status.eventChain} />
             </div>
           ) : null}
 
@@ -186,7 +278,7 @@ export function TransactionDialog({
               variant="default"
               onClick={handleClose}
               className={`w-full py-5 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] ${
-                transactionResult.isError
+                status?.isError
                   ? "bg-red-600 hover:bg-red-700"
                   : "bg-black hover:bg-stone-800"
               }`}
