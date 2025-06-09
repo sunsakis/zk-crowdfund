@@ -1,5 +1,5 @@
 import { ReactNode, useCallback } from "react";
-import { AuthContext } from "./AuthContext";
+import { AuthContext, AuthMethod } from "./AuthContext";
 import { SenderAuthentication } from "@partisiablockchain/blockchain-api-transaction-client";
 import { BlockchainAddress } from "@partisiablockchain/abi-client";
 import { checkPermission, CrowdfundAction } from "./permissions";
@@ -7,6 +7,8 @@ import { usePartisiaWallet } from "./usePartisiaWallet";
 import { deserializeState } from "@/contracts/CrowdfundGenerated";
 import { TESTNET_URL } from "@/partisia-config";
 import { PbcClient } from "@/client/PbcClient";
+import { connectPrivateKey } from "@/shared/PrivateKeySignatureProvider";
+import { CryptoUtils } from "@/client/CryptoUtils";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const {
@@ -14,6 +16,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     address,
     error: connectError,
     isConnecting,
+    authMethod,
     connect: connectWallet,
     disconnect: disconnectWallet,
     signMessage,
@@ -21,20 +24,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isConnected = connected && address !== null;
 
-  // Create SenderAuthentication from SDK
+  // Create SenderAuthentication from SDK or private key
   const account: SenderAuthentication | null = isConnected
     ? {
         getAddress: () => address!,
         sign: async (transactionPayload: Buffer) => {
+          if (authMethod === "privateKey") {
+            const stored = localStorage.getItem("partisia_sdk_connection");
+            if (!stored) throw new Error("No private key found");
+            const { privateKey } = JSON.parse(stored);
+
+            const keyPair = CryptoUtils.privateKeyToKeypair(privateKey);
+            const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
+            const auth = await connectPrivateKey(sender, keyPair);
+            return auth.sign(transactionPayload, "Partisia Blockchain Testnet");
+          }
+
+          // MPC wallet signing
           const res = await signMessage(transactionPayload.toString("hex"));
           return res.signature;
         },
       }
     : null;
 
-  const connect = useCallback(async () => {
-    await connectWallet();
-  }, [connectWallet]);
+  const connect = useCallback(
+    async (method: AuthMethod, privateKey?: string) => {
+      await connectWallet(method, privateKey);
+    },
+    [connectWallet]
+  );
 
   const disconnect = useCallback(async () => {
     await disconnectWallet();
@@ -43,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const ensureSigningCapability = useCallback(async (): Promise<boolean> => {
     if (connected) return true;
     try {
-      await connect();
+      await connect("mpc"); // Default to MPC for auto-reconnection
       return true;
     } catch {
       return false;
@@ -80,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         walletAddress: address,
         isConnecting,
         connectError,
+        authMethod,
         connect,
         disconnect,
         ensureSigningCapability,

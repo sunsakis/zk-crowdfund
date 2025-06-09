@@ -1,16 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import PartisiaSdk from "partisia-sdk";
+import { connectPrivateKey } from "@/shared/PrivateKeySignatureProvider";
+import { AuthMethod } from "./AuthContext";
+import { CryptoUtils } from "@/client/CryptoUtils";
 
 const STORAGE_KEY = "partisia_sdk_connection";
 
 // SDK types are not exported, so we define our own
-type PermissionType = string; // SDK accepts any string for permissions
+type PermissionType = string;
 
 interface StoredConnection {
   address: string;
   permissions: PermissionType[];
   dappName: string;
   chainId: string;
+  authMethod: AuthMethod;
+  privateKey?: string;
 }
 
 interface PartisiaAccount {
@@ -55,6 +60,7 @@ export function usePartisiaWallet() {
   const [address, setAddress] = useState<string | null>(null);
   const [error, setError] = useState<WalletError | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [authMethod, setAuthMethod] = useState<AuthMethod | null>(null);
 
   // Restore connection on mount
   useEffect(() => {
@@ -63,29 +69,47 @@ export function usePartisiaWallet() {
 
     const checkConnection = async () => {
       try {
-        if (!sdk.connection) {
-          const storedData = JSON.parse(stored) as StoredConnection;
-          const connectParams: ConnectParams = {
-            permissions: storedData.permissions,
-            dappName: storedData.dappName,
-            chainId: storedData.chainId,
-          };
-          await connectToSDK(sdk, connectParams);
-        }
+        const storedData = JSON.parse(stored) as StoredConnection;
 
-        const account = sdk.connection?.account as PartisiaAccount | undefined;
-        if (account?.address) {
+        if (storedData.authMethod === "privateKey" && storedData.privateKey) {
+          // Restore private key connection
           setConnected(true);
-          setAddress(account.address);
-          console.log("Restored connection for:", account.address);
+          setAddress(storedData.address);
+          setAuthMethod("privateKey");
+          console.log(
+            "Restored private key connection for:",
+            storedData.address
+          );
+        } else if (storedData.authMethod === "mpc") {
+          if (!sdk.connection) {
+            const connectParams: ConnectParams = {
+              permissions: storedData.permissions,
+              dappName: storedData.dappName,
+              chainId: storedData.chainId,
+            };
+            await connectToSDK(sdk, connectParams);
+          }
+
+          const account = sdk.connection?.account as
+            | PartisiaAccount
+            | undefined;
+          if (account?.address) {
+            setConnected(true);
+            setAddress(account.address);
+            setAuthMethod("mpc");
+            console.log("Restored MPC connection for:", account.address);
+          } else {
+            throw new WalletError("Invalid connection", "INVALID_CONNECTION");
+          }
         } else {
-          throw new WalletError("Invalid connection", "INVALID_CONNECTION");
+          throw new WalletError("Invalid auth method", "INVALID_AUTH_METHOD");
         }
       } catch (err) {
         console.error("Failed to restore connection:", err);
         localStorage.removeItem(STORAGE_KEY);
         setConnected(false);
         setAddress(null);
+        setAuthMethod(null);
         setError(
           err instanceof WalletError
             ? err
@@ -97,7 +121,49 @@ export function usePartisiaWallet() {
     checkConnection();
   }, [sdk]);
 
-  const connect = useCallback(async () => {
+  const connectWithPrivateKey = useCallback(
+    async (privateKey: string) => {
+      if (isConnecting) return;
+      setIsConnecting(true);
+      setError(null);
+
+      try {
+        const keyPair = CryptoUtils.privateKeyToKeypair(privateKey);
+        const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
+        const auth = await connectPrivateKey(sender, keyPair);
+
+        //! not comfy storing private key in local storage
+
+        // const connectionData: StoredConnection = {
+        //   address: auth.getAddress(),
+        //   permissions: DEFAULT_PERMISSIONS,
+        //   dappName: "Sekiva",
+        //   chainId: "Partisia Blockchain Testnet",
+        //   authMethod: "privateKey",
+        //   privateKey, // Note: In production, encrypt this
+        // };
+
+        // localStorage.setItem(STORAGE_KEY, JSON.stringify(connectionData));
+        setConnected(true);
+        setAddress(auth.getAddress());
+        setAuthMethod("privateKey");
+        setError(null);
+        console.log("Connected with private key:", auth.getAddress());
+      } catch (err) {
+        const error = new WalletError(
+          err instanceof Error ? err.message : "Private key connection failed",
+          "PRIVATE_KEY_ERROR"
+        );
+        setError(error);
+        throw error;
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [isConnecting]
+  );
+
+  const connectWithMPC = useCallback(async () => {
     if (isConnecting) return;
     setIsConnecting(true);
     setError(null);
@@ -123,13 +189,15 @@ export function usePartisiaWallet() {
         permissions: DEFAULT_PERMISSIONS,
         dappName: "Sekiva",
         chainId: "Partisia Blockchain Testnet",
+        authMethod: "mpc",
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(connectionData));
       setConnected(true);
       setAddress(account.address);
+      setAuthMethod("mpc");
       setError(null);
-      console.log("Connected to wallet:", account.address);
+      console.log("Connected to MPC wallet:", account.address);
     } catch (err) {
       const error =
         err instanceof WalletError
@@ -146,12 +214,29 @@ export function usePartisiaWallet() {
     }
   }, [sdk, isConnecting]);
 
+  const connect = useCallback(
+    async (method: AuthMethod, privateKey?: string) => {
+      if (method === "privateKey" && privateKey) {
+        return connectWithPrivateKey(privateKey);
+      } else if (method === "mpc") {
+        return connectWithMPC();
+      } else {
+        throw new WalletError(
+          "Invalid auth method or missing private key",
+          "INVALID_AUTH_METHOD"
+        );
+      }
+    },
+    [connectWithPrivateKey, connectWithMPC]
+  );
+
   const disconnect = useCallback(async () => {
     try {
       // SDK doesn't have disconnect, just clear state
       setConnected(false);
       setAddress(null);
       setError(null);
+      setAuthMethod(null);
       localStorage.removeItem(STORAGE_KEY);
       console.log("Wallet disconnected");
     } catch (err) {
@@ -161,17 +246,43 @@ export function usePartisiaWallet() {
 
   const signMessage = useCallback(
     async (message: string) => {
-      if (!connected || !sdk.connection?.account) {
+      if (!connected || !address) {
         throw new WalletError("Wallet not connected", "NOT_CONNECTED");
       }
 
       try {
-        const result = await sdk.signMessage({
-          payload: message,
-          payloadType: "hex",
-          dontBroadcast: true,
-        });
-        return result;
+        if (authMethod === "privateKey") {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (!stored) throw new Error("No private key found");
+          const { privateKey } = JSON.parse(stored);
+
+          const keyPair = CryptoUtils.privateKeyToKeypair(privateKey);
+          const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
+          const auth = await connectPrivateKey(sender, keyPair);
+          return {
+            signature: await auth.sign(
+              Buffer.from(message, "hex"),
+              "Partisia Blockchain Testnet"
+            ),
+            digest: message,
+            trxHash: "",
+            isFinalOnChain: false,
+          };
+        } else {
+          // MPC wallet signing
+          if (!sdk.connection?.account) {
+            throw new WalletError(
+              "MPC wallet not connected",
+              "MPC_NOT_CONNECTED"
+            );
+          }
+          const result = await sdk.signMessage({
+            payload: message,
+            payloadType: "hex",
+            dontBroadcast: true,
+          });
+          return result;
+        }
       } catch (err) {
         throw new WalletError(
           err instanceof Error ? err.message : "Failed to sign message",
@@ -179,7 +290,7 @@ export function usePartisiaWallet() {
         );
       }
     },
-    [sdk, connected]
+    [sdk, connected, address, authMethod]
   );
 
   return {
@@ -188,6 +299,7 @@ export function usePartisiaWallet() {
     address,
     error,
     isConnecting,
+    authMethod,
     connect,
     disconnect,
     signMessage,

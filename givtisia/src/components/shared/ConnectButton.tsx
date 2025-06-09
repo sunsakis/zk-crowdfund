@@ -15,6 +15,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { AuthMethodDialog } from "@/components/auth/AuthMethodDialog";
+import { AuthMethod } from "@/auth/AuthContext";
 
 const truncateAddress = (address: string) => {
   return address.slice(0, 6) + "..." + address.slice(-4);
@@ -52,6 +54,7 @@ const ConnectButton = ({ label = "Connect Wallet" }: { label?: string }) => {
   } = useAuth();
 
   const [copied, setCopied] = useState(false);
+  const [showAuthDialog, setShowAuthDialog] = useState(false);
   const [notification, setNotification] = useState<{
     message: string;
     type: "success" | "error";
@@ -65,9 +68,13 @@ const ConnectButton = ({ label = "Connect Wallet" }: { label?: string }) => {
     setTimeout(() => setNotification(null), 2000);
   };
 
-  const handleConnect = async () => {
+  const handleAuthMethodSelect = async (
+    method: AuthMethod,
+    privateKey?: string
+  ) => {
     try {
-      await connect();
+      await connect(method, privateKey);
+      setShowAuthDialog(false);
       showNotification("Wallet connected");
     } catch {
       showNotification(connectError?.message || "Connection failed", "error");
@@ -101,13 +108,18 @@ const ConnectButton = ({ label = "Connect Wallet" }: { label?: string }) => {
           />
         )}
         <Button
-          onClick={handleConnect}
+          onClick={() => setShowAuthDialog(true)}
           disabled={isConnecting}
           className="h-full"
         >
           <Wallet size={16} />
           {isConnecting ? "Connecting..." : label}
         </Button>
+        <AuthMethodDialog
+          open={showAuthDialog}
+          onClose={() => setShowAuthDialog(false)}
+          onAuthMethodSelect={handleAuthMethodSelect}
+        />
       </div>
     );
   }

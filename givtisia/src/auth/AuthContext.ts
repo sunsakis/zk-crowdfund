@@ -2,6 +2,8 @@ import { createContext } from "react";
 import { SenderAuthentication } from "@partisiablockchain/blockchain-api-transaction-client";
 import { CrowdfundAction } from "./permissions";
 
+export type AuthMethod = "mpc" | "privateKey";
+
 export interface AuthContextType {
   // Single source of truth for wallet connection
   isConnected: boolean;
@@ -15,8 +17,11 @@ export interface AuthContextType {
   isConnecting: boolean;
   connectError: Error | null;
 
+  // Auth method
+  authMethod: AuthMethod | null;
+
   // Methods
-  connect: () => Promise<void>;
+  connect: (method: AuthMethod, privateKey?: string) => Promise<void>;
   disconnect: () => Promise<void>;
   ensureSigningCapability: () => Promise<boolean>; // Forces reconnection if needed
 
