@@ -61,8 +61,7 @@ export function CrowdfundingCard({
   const [isTransactionInProgress, setIsTransactionInProgress] = useState(false);
   const [transactionError, setTransactionError] = useState<Error | null>(null);
   const transactionStatus = useTransactionStatus(
-    transactionPointer?.identifier ?? "",
-    "other"
+    transactionPointer?.identifier ?? ""
   );
   const { mutateAsync: endCampaign, isPending: isEnding } = useEndCampaign();
   const { mutateAsync: withdrawFunds, isPending: isWithdrawing } =
@@ -173,9 +172,12 @@ export function CrowdfundingCard({
   };
 
   const handleTransactionComplete = () => {
+    // Reset all transaction state when dialog closes
     setTransactionPointer(null);
     setTransactionError(null);
     setIsTransactionInProgress(false);
+    setAmount("");
+    setAmountInputError(null);
   };
 
   const handleAdminAction = async (action: "end" | "withdraw") => {
@@ -195,6 +197,7 @@ export function CrowdfundingCard({
   };
 
   const handleAdminDialogClose = () => {
+    // Reset all admin transaction state when dialog closes
     setAdminTxnResult(null);
     setAdminAction(null);
   };
