@@ -30,26 +30,51 @@ Before you begin, ensure you have:
 
 ```bash
 git clone https://github.com/your-org/zk-crowdfund.git
-cd zk-crowdfund/givtisia
 ```
 
-2. Install dependencies:
+2. Navigate to contract directory
 
 ```bash
-npm install
-# or
+cd zk-crowdfund
+```
+
+3. Build the contract
+
+```bash
+cargo pbc build --release
+```
+
+4. Create a new account
+
+```bash
+cargo pbc account create
+```
+
+5. Deploy the contract (inputs: gas allocation, your account name, compiled contract location, campaign name, campaign description, MPC-20 token address, funding target in wei)
+
+```bash
+cargo partisia-contract transaction deploy --gas 10000000 --privatekey YOUR_ACCOUNT_NAME.pk target/wasm32-unknown-unknown/release/zk_crowdfunding.pbc "YOUR CAMPAIGN NAME" "your campaign description" "0117f2ccfcb0c56ce5b2ad440e879711a5ac8b64a6" 10
+```
+
+6. Navigate to frontend directory
+
+```bash
+cd ../givtisia
+```
+
+7. Install dependencies:
+
+```bash
 bun install
 ```
 
-3. Start the development server:
+8. Start the development server:
 
 ```bash
-npm run dev
-# or
 bun run dev
 ```
 
-4. Open [http://localhost:5173](http://localhost:5173) in your browser
+9. Open [http://localhost:5173](http://localhost:5173) in your browser
 
 ## 💡 Usage
 
@@ -79,3 +104,28 @@ Campaign addresses can be found:
 ## 📝 License
 
 MIT License - see LICENSE file for details
+
+### Rust Setup
+
+```bash
+
+# Navigate to contract directory
+cd zk-crowdfund
+
+# Build the contract
+cargo partisia-contract build --release
+
+# Create a new account
+cargo partisia-contract account create
+
+# Deploy the contract (inputs: gas allocation, your account name, compiled contract location, campaign name, campaign description, MPC-20 token address, funding target in wei)
+cargo partisia-contract transaction deploy --gas 10000000 --privatekey YOUR_ACCOUNT_NAME.pk target/wasm32-unknown-unknown/release/zk_crowdfunding.pbc "YOUR CAMPAIGN NAME" "your campaign description" "0117f2ccfcb0c56ce5b2ad440e879711a5ac8b64a6" 10
+
+# Navigate to frontend directory
+cd zk-crowdfunding-frontend
+
+# Install dependencies
+npm install
+
+# Launch the frontend
+npm start
