@@ -22,7 +22,7 @@ export function WelcomeDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-hidden transition-all duration-300 shadow-xl">
+      <DialogContent className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-x-hidden overflow-y-auto transition-all duration-300 shadow-xl">
         <DialogHeader className="border-b border-gray-200 p-4">
           <DialogTitle className="text-xl font-bold">
             Welcome to Givtisia! 🫴🏽
