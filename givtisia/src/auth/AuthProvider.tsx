@@ -7,8 +7,6 @@ import { usePartisiaWallet } from "./usePartisiaWallet";
 import { deserializeState } from "@/contracts/CrowdfundGenerated";
 import { TESTNET_URL } from "@/partisia-config";
 import { PbcClient } from "@/client/PbcClient";
-import { connectPrivateKey } from "@/shared/PrivateKeySignatureProvider";
-import { CryptoUtils } from "@/client/CryptoUtils";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const {
@@ -29,18 +27,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ? {
         getAddress: () => address!,
         sign: async (transactionPayload: Buffer) => {
-          if (authMethod === "privateKey") {
-            const stored = localStorage.getItem("partisia_sdk_connection");
-            if (!stored) throw new Error("No private key found");
-            const { privateKey } = JSON.parse(stored);
-
-            const keyPair = CryptoUtils.privateKeyToKeypair(privateKey);
-            const sender = CryptoUtils.keyPairToAccountAddress(keyPair);
-            const auth = await connectPrivateKey(sender, keyPair);
-            return auth.sign(transactionPayload, "Partisia Blockchain Testnet");
-          }
-
-          // MPC wallet signing
           const res = await signMessage(transactionPayload.toString("hex"));
           return res.signature;
         },
@@ -93,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         isConnected,
-        canSign: connected,
+        canSign: isConnected,
         account,
         walletAddress: address,
         isConnecting,
