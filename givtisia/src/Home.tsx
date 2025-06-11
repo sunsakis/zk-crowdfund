@@ -3,22 +3,23 @@ import { WelcomeDialog } from "@/components/shared/WelcomeDialog";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { CrowdfundingCard } from "@/components/CampaignCard";
+import { CampaignCard } from "@/components/CampaignCard";
 import { useQuery } from "@tanstack/react-query";
 import {
   getCrowdfundingState,
   Crowdfunding,
 } from "@/hooks/useCampaignContract";
 import { cn } from "./lib/utils";
-import { Loader2, SearchIcon } from "lucide-react";
+import { Loader2, SearchIcon, ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 
 function Home() {
   const [campaignId, setCampaignId] = useState<string>("");
   const [searchId, setSearchId] = useState<string | null>(null);
   const [campaignIdError, setCampaignIdError] = useState<string | null>(null);
-
-  const EXAMPLE_CONTRACT = "03260695d27fb2266de9579092ef39ddd38261065c";
+  //  03ce6bb3ed579b4ec154511db4091e6f6b2eb255b4
+  // 03260695d27fb2266de9579092ef39ddd38261065c
+  const EXAMPLE_CONTRACT = "03ce6bb3ed579b4ec154511db4091e6f6b2eb255b4";
 
   const useExampleContract = () => {
     setCampaignId(EXAMPLE_CONTRACT);
@@ -104,6 +105,21 @@ function Home() {
                     {isLoading ? "Searching..." : "Find campaign"}
                   </Button>
                 </div>
+                {campaignIdError && (
+                  <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
+                    {campaignIdError}
+                  </p>
+                )}
+                {error && (
+                  <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
+                    Could not find campaign: {error.message}
+                  </p>
+                )}
+                <p className="text-xs text-slate-500 mt-2 ml-1">
+                  <span className="font-medium">Tip:</span> The campaign address
+                  is a 42-character string starting with{" "}
+                  <code className="bg-slate-100 px-1 rounded">03</code>.
+                </p>
                 <div className="flex gap-2">
                   <Button
                     size="sm"
@@ -128,27 +144,62 @@ function Home() {
                     </Button>
                   </Link>
                 </div>
+
+                {/* Bridge Instructions */}
+                <div className="border-t border-gray-100 pt-4">
+                  <div className="p-4 bg-violet-50 rounded-lg border border-violet-100">
+                    <h4 className="text-sm font-semibold text-violet-900 mb-3">
+                      Need tokens? How to get them on Partisia Blockchain:
+                    </h4>
+                    <div className="space-y-3 text-sm text-violet-800">
+                      <div className="flex items-start gap-3">
+                        <span className="flex-shrink-0 w-6 h-6 bg-violet-200 text-violet-900 rounded-full flex items-center justify-center text-xs font-semibold">
+                          1
+                        </span>
+                        <div>
+                          <p className="font-medium mb-1">
+                            Get ETH on Sepolia testnet
+                          </p>
+                          <a
+                            href="https://www.alchemy.com/faucets/ethereum-sepolia"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-violet-600 hover:text-violet-700 hover:underline"
+                          >
+                            Alchemy Sepolia Faucet
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3">
+                        <span className="flex-shrink-0 w-6 h-6 bg-violet-200 text-violet-900 rounded-full flex items-center justify-center text-xs font-semibold">
+                          2
+                        </span>
+                        <div>
+                          <p className="font-medium mb-1">
+                            Bridge to Partisia Blockchain
+                          </p>
+                          <a
+                            href="https://browser.partisiablockchain.com/bridge"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-violet-600 hover:text-violet-700 hover:underline"
+                          >
+                            Partisia Bridge
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              {campaignIdError && (
-                <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
-                  {campaignIdError}
-                </p>
-              )}
-              {error && (
-                <p className="text-sm text-red-500 mt-0.5 p-2 bg-red-100 rounded-md">
-                  Could not find campaign: {error.message}
-                </p>
-              )}
-              <p className="text-xs text-slate-500 mt-2 ml-1">
-                <span className="font-medium">Tip:</span> The campaign address
-                is a 42-character string starting with{" "}
-                <code className="bg-slate-100 px-1 rounded">03</code>.
-              </p>
             </div>
           </div>
           {!isLoading && campaign && searchId && (
             <section className="my-8 container mx-auto max-w-[1100px] flex flex-col items-center">
-              <CrowdfundingCard campaign={campaign} campaignId={searchId} />
+              <CampaignCard campaign={campaign} campaignId={searchId} />
             </section>
           )}
         </div>
