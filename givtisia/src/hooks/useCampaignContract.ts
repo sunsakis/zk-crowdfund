@@ -8,7 +8,7 @@ import {
   withdrawFunds,
 } from "@/contracts/CrowdfundGenerated";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import {
   TransactionStep,
   TransactionPointer,
@@ -20,6 +20,8 @@ import {
   BlockchainAddress,
 } from "@partisiablockchain/abi-client";
 import { BlockchainTransactionClient } from "@partisiablockchain/blockchain-api-transaction-client";
+import { useStepTransactionStatus } from "./useStepTransactionStatus";
+import { getTransactionStatus } from "./useTransactionStatus";
 
 // Gas constants for campaign transactions
 const TOKEN_APPROVAL_GAS = 15000;
@@ -405,12 +407,71 @@ type TransactionResult = TransactionPointer & {
   error?: Error;
 };
 
+// Helper to wait for a transaction to be finalized
+async function waitForTxnSuccess(txnId: string, destinationShardId: string) {
+  while (true) {
+    const status = await getTransactionStatus({
+      identifier: txnId,
+      destinationShardId,
+    });
+    if (status.isError) {
+      throw status.error || new Error(`Transaction failed: ${txnId}`);
+    }
+    if (status.isSuccess) return;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 export function useContributeSecret() {
   const crowdfundingContract = useCrowdfundingContract();
   const queryClient = useQueryClient();
   const { requiresWalletConnection } = useCampaignTransaction();
   const { account } = useAuth();
   const [steps, setSteps] = useState<TransactionStep[]>([]);
+  const [transactionIds, setTransactionIds] = useState<
+    { identifier: string; destinationShardId: string }[]
+  >([]);
+
+  // Use useStepTxnStatus to track all transaction IDs for internal step mapping only
+  const { stepStatuses } = useStepTransactionStatus(transactionIds);
+
+  // Update steps based on stepStatuses
+  useEffect(() => {
+    if (stepStatuses.length === 0) return;
+
+    const updatedSteps: TransactionStep[] = [
+      { label: "Approving token transfer", status: "pending" },
+      { label: "Generating zero-knowledge proof", status: "pending" },
+      { label: "Submitting contribution", status: "pending" },
+    ];
+
+    stepStatuses.forEach((stepStatus, index) => {
+      if (stepStatus.isPending) {
+        updatedSteps[index] = { ...updatedSteps[index], status: "pending" };
+      } else if (stepStatus.status.isError) {
+        updatedSteps[index] = {
+          ...updatedSteps[index],
+          status: "error",
+          error: stepStatus.status.error || undefined,
+        };
+      } else if (stepStatus.status.isSuccess) {
+        updatedSteps[index] = {
+          ...updatedSteps[index],
+          status: "success",
+          transactionPointer: transactionIds[index]
+            ? {
+                identifier: transactionIds[index].identifier,
+                destinationShardId: transactionIds[index].destinationShardId,
+              }
+            : undefined,
+        };
+      } else if (stepStatus.status.isLoading) {
+        updatedSteps[index] = { ...updatedSteps[index], status: "pending" };
+      }
+    });
+
+    setSteps(updatedSteps);
+  }, [stepStatuses, transactionIds]);
 
   const mutation = useMutation({
     mutationFn: async ({
@@ -424,18 +485,11 @@ export function useContributeSecret() {
     }): Promise<TransactionResult> => {
       if (!account) throw new Error("Wallet not connected");
 
-      // Use a local variable to track steps
-      let currentSteps: TransactionStep[] = [
-        { label: "Approving token transfer", status: "pending" },
-        { label: "Generating zero-knowledge proof", status: "pending" },
-        { label: "Transferring tokens", status: "pending" },
-        { label: "Submitting contribution", status: "pending" },
-      ];
-      setSteps(currentSteps);
+      // Reset transaction IDs for new flow
+      setTransactionIds([]);
 
       try {
         // Step 1: Token approval
-        // (pending already set)
         const currentAllowance = await crowdfundingContract.getTokenAllowance(
           tokenAddress,
           account.getAddress(),
@@ -448,25 +502,20 @@ export function useContributeSecret() {
             crowdfundingAddress,
             weiAmount
           );
-          currentSteps = currentSteps.map((step, i) =>
-            i === 0
-              ? { ...step, status: "success", transactionPointer: approvalTxn }
-              : step
+          setTransactionIds((prev) => [
+            ...prev,
+            {
+              identifier: approvalTxn.identifier,
+              destinationShardId: approvalTxn.destinationShardId,
+            },
+          ]);
+          await waitForTxnSuccess(
+            approvalTxn.identifier,
+            approvalTxn.destinationShardId
           );
-          setSteps(currentSteps);
-        } else {
-          currentSteps = currentSteps.map((step, i) =>
-            i === 0 ? { ...step, status: "success" } : step
-          );
-          setSteps(currentSteps);
         }
 
         // Step 2: ZK commitment (generate and submit secret input)
-        currentSteps = currentSteps.map((step, i) =>
-          i === 1 ? { ...step, status: "pending" } : step
-        );
-        setSteps(currentSteps);
-
         const secretInputData = AbiBitOutput.serialize((_out) => {
           _out.writeU32(amount);
         });
@@ -483,38 +532,16 @@ export function useContributeSecret() {
           }
         );
 
-        currentSteps = currentSteps.map((step, i) =>
-          i === 1
-            ? {
-                ...step,
-                status: "success",
-                transactionPointer: zkTxn,
-              }
-            : step
-        );
-        setSteps(currentSteps);
-
-        // Wait for ZK state propagation (30 seconds)
-        currentSteps = currentSteps.map((step, i) =>
-          i === 2
-            ? {
-                ...step,
-                status: "pending",
-                label: "Waiting for ZK state propagation...",
-              }
-            : step
-        );
-        setSteps(currentSteps);
-        await new Promise((resolve) => setTimeout(resolve, 30000));
+        setTransactionIds((prev) => [
+          ...prev,
+          {
+            identifier: zkTxn.identifier,
+            destinationShardId: zkTxn.destinationShardId,
+          },
+        ]);
+        await waitForTxnSuccess(zkTxn.identifier, zkTxn.destinationShardId);
 
         // Step 3: Token transfer
-        currentSteps = currentSteps.map((step, i) =>
-          i === 2
-            ? { ...step, status: "pending", label: "Transferring tokens" }
-            : step
-        );
-        setSteps(currentSteps);
-
         const tokenTransferRpc = AbiByteOutput.serializeBigEndian((_out) => {
           _out.writeU8(0x09); // transfer shortname
           _out.writeBytes(Buffer.from([0x07])); // token transfer type
@@ -533,41 +560,33 @@ export function useContributeSecret() {
             }
           );
 
-        currentSteps = currentSteps.map((step, i) =>
-          i === 2
-            ? {
-                ...step,
-                status: "success",
-                transactionPointer: tokenTransferTxn,
-              }
-            : step
+        setTransactionIds((prev) => [
+          ...prev,
+          {
+            identifier: tokenTransferTxn.identifier,
+            destinationShardId: tokenTransferTxn.destinationShardId,
+          },
+        ]);
+        await waitForTxnSuccess(
+          tokenTransferTxn.identifier,
+          tokenTransferTxn.destinationShardId
         );
-        setSteps(currentSteps);
 
-        // Step 4: Submit contribution (if needed, just mark as success)
-        currentSteps = currentSteps.map((step, i) =>
-          i === 3 ? { ...step, status: "success" } : step
-        );
-        setSteps(currentSteps);
-
-        return { ...tokenTransferTxn, steps: currentSteps };
-      } catch (error) {
-        // Find the first pending step and mark it as error
-        const errorIndex = currentSteps.findIndex(
-          (step) => step.status === "pending"
-        );
-        if (errorIndex !== -1) {
-          currentSteps = currentSteps.map((step, i) =>
-            i === errorIndex
-              ? { ...step, status: "error", error: error as Error }
-              : step
-          );
-          setSteps(currentSteps);
-        }
+        // For multi-step transactions, return the first transaction as reference
+        // The actual status should be tracked via useStepTxnStatus
+        const firstTxId = transactionIds[0];
         return {
-          identifier: "",
-          destinationShardId: "",
-          steps: currentSteps,
+          identifier: firstTxId?.identifier || "",
+          destinationShardId: firstTxId?.destinationShardId || "",
+          steps,
+        };
+      } catch (error) {
+        // Return the first valid transaction ID if we have one, otherwise empty
+        const firstTxId = transactionIds[0];
+        return {
+          identifier: firstTxId?.identifier || "",
+          destinationShardId: firstTxId?.destinationShardId || "",
+          steps,
           error: error instanceof Error ? error : new Error(String(error)),
         };
       }
@@ -583,6 +602,7 @@ export function useContributeSecret() {
     ...mutation,
     requiresWalletConnection,
     steps,
+    transactionIds,
   };
 }
 
