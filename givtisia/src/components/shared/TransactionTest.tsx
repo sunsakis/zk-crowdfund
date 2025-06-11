@@ -25,7 +25,10 @@ export default function TransactionTest() {
     shard: "Shard2" as ShardId,
   };
 
-  const status = useTransactionStatus(txId);
+  const status = useTransactionStatus({
+    identifier: txId,
+    destinationShardId: selectedShard,
+  });
 
   const handleShowDialog = () => {
     if (!txId) {
