@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { SHARD_PRIORITY, TESTNET_URL, ShardId } from "@/partisia-config";
+import { TESTNET_URL, ShardId } from "@/partisia-config";
 
 interface ExecutionStatus {
   success: boolean;
@@ -34,115 +34,193 @@ export interface TransactionStatus {
   eventChain: TransactionData[];
 }
 
-const fetchTransactionFromShard = async (id: string, shard: ShardId) => {
+// --- Pure utility functions ---
+
+async function fetchTransactionFromShard(id: string, shard: ShardId) {
   try {
-    console.log(`Fetching transaction ${id} from shard ${shard}...`);
     const response = await fetch(
       `${TESTNET_URL}/chain/shards/${shard}/transactions/${id}`
     );
-
-    if (!response.ok) {
-      console.log(`No transaction found in shard ${shard}`);
-      return null;
-    }
-
+    if (!response.ok) return null;
     const data = await response.json();
-    if (data?.identifier === id) {
-      console.log(`Found transaction in ${shard}`, {
-        id,
-        hasEvents: !!data.executionStatus?.events?.length,
-        eventCount: data.executionStatus?.events?.length || 0,
-        success: data.executionStatus?.success,
-        failure: !!data.executionStatus?.failure,
-        events: data.executionStatus?.events,
-      });
-      return { data, shard };
-    }
+    if (data?.identifier === id) return { data, shard };
     return null;
-  } catch (e) {
-    console.debug(`Failed to fetch transaction from shard ${shard}:`, e);
+  } catch {
     return null;
   }
+}
+
+const parseErrorMessage = (errorMessage: string) => {
+  if (errorMessage.includes("Index 2 out of bounds for length 2")) {
+    return "Please get ETH SEPOLIA tokens and bridge them to Partisia";
+  }
+  return errorMessage;
 };
 
-const checkEventChain = async (
+async function checkEventChain(
   events: ExecutionStatus["events"] = [],
   currentChain: TransactionData[] = [],
   depth: number = 0
-): Promise<{ chain: TransactionData[]; error: Error | null }> => {
-  if (!events?.length) {
-    console.log(`Reached end of event chain at depth ${depth}`);
-    return { chain: currentChain, error: null };
-  }
-
-  console.log(`Checking ${events.length} events at depth ${depth}...`);
-
+): Promise<{ chain: TransactionData[]; error: Error | null }> {
+  if (!events?.length) return { chain: currentChain, error: null };
   for (const event of events) {
-    console.log(`Processing event at depth ${depth}:`, {
-      id: event.identifier,
-      shard: event.destinationShardId,
-    });
-
     const result = await fetchTransactionFromShard(
       event.identifier,
       event.destinationShardId
     );
-    if (!result) {
-      console.log(
-        `Could not find event transaction ${event.identifier} in shard ${event.destinationShardId}`
-      );
-      continue;
-    }
-
+    if (!result) continue;
     const { data } = result;
     const executionStatus = data.executionStatus as ExecutionStatus;
-
-    // If we find a failure, stop checking and return error
     if (executionStatus?.failure) {
-      console.log(`Found failure in event chain at depth ${depth}:`, {
-        id: event.identifier,
-        message: executionStatus.failure.errorMessage,
-      });
+      console.log(
+        `[checkEventChain] Error found at depth ${depth}:`,
+        executionStatus.failure.errorMessage,
+        event.identifier,
+        event.destinationShardId
+      );
       return {
         chain: [...currentChain, data],
-        error: new Error(`${executionStatus.failure.errorMessage}`),
+        error: new Error(
+          `${parseErrorMessage(executionStatus.failure.errorMessage)}`
+        ),
       };
     }
-
-    // Add this transaction to the chain
     const updatedChain = [...currentChain, data];
-
-    // If this transaction has events, recursively check them
     if (executionStatus?.events?.length) {
-      console.log(
-        `Found ${executionStatus.events.length} nested events at depth ${depth}`
-      );
       const { chain, error } = await checkEventChain(
         executionStatus.events,
         updatedChain,
         depth + 1
       );
-
-      if (error) {
-        console.log(`Error in nested event chain at depth ${depth}:`, error);
-        return { chain, error };
-      }
-
-      // Update our chain with the nested events
+      if (error) return { chain, error };
       currentChain = chain;
     } else {
-      console.log(`No nested events found at depth ${depth}`);
       currentChain = updatedChain;
     }
   }
-
-  console.log(
-    `Completed checking events at depth ${depth}, chain length: ${currentChain.length}`
-  );
   return { chain: currentChain, error: null };
-};
+}
 
-export function useTransactionStatus(id: string) {
+// --- Pure async status fetcher ---
+export async function getTransactionStatus({
+  identifier,
+  destinationShardId,
+}: {
+  identifier: string;
+  destinationShardId: string;
+}): Promise<TransactionStatus> {
+  // Default status
+  const defaultStatus: TransactionStatus = {
+    isLoading: true,
+    isSuccess: false,
+    isError: false,
+    isFinalized: false,
+    error: null,
+    data: null,
+    contractAddress: null,
+    eventChain: [],
+  };
+  if (!identifier) return defaultStatus;
+  try {
+    let result = null;
+    result = await fetchTransactionFromShard(
+      identifier,
+      destinationShardId as ShardId
+    );
+    if (!result) {
+      return { ...defaultStatus, isLoading: true };
+    }
+    const { data } = result;
+    const executionStatus = data.executionStatus;
+    if (!executionStatus) {
+      return { ...defaultStatus, isLoading: true };
+    }
+    // Check for immediate failure
+    if (executionStatus.failure) {
+      const errorObj = new Error(
+        `${executionStatus.failure.errorMessage}${
+          executionStatus.failure.stackTrace
+            ? `\n${executionStatus.failure.stackTrace}`
+            : ""
+        }`
+      );
+      console.log(`[getTransactionStatus] Immediate failure:`, errorObj);
+      return {
+        isLoading: false,
+        isSuccess: false,
+        isError: true,
+        isFinalized: true,
+        error: errorObj,
+        data,
+        contractAddress: null,
+        eventChain: [data],
+      };
+    }
+
+    const { chain, error } = await checkEventChain(executionStatus.events, [
+      data,
+    ]);
+
+    if (error) {
+      return {
+        isLoading: false,
+        isSuccess: false,
+        isError: true,
+        isFinalized: executionStatus.finalized,
+        error,
+        data,
+        contractAddress: null,
+        eventChain: chain,
+      };
+    }
+
+    let contractAddress: string | null = null;
+    if (executionStatus.success) {
+      contractAddress = identifier.substring(identifier.length - 40);
+    }
+    // All steps must be successful and finalized
+    const allStepsSuccessful = chain.every(
+      (tx) =>
+        tx.executionStatus &&
+        tx.executionStatus.success &&
+        tx.executionStatus.finalized
+    );
+
+    const isSuccess = allStepsSuccessful;
+    const isError = !allStepsSuccessful || !!error;
+    const statusObj = {
+      isLoading: false,
+      isSuccess,
+      isError,
+      isFinalized: allStepsSuccessful,
+      error: error || null,
+      data,
+      contractAddress,
+      eventChain: chain,
+    };
+    console.log(`[getTransactionStatus] Final status:`, statusObj);
+    return statusObj;
+  } catch (error) {
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    console.log(`[getTransactionStatus] Exception:`, errObj);
+    return {
+      ...defaultStatus,
+      isLoading: false,
+      isError: true,
+      error: errObj,
+    };
+  }
+}
+
+// --- Main hook ---
+
+export function useTransactionStatus({
+  identifier,
+  destinationShardId,
+}: {
+  identifier: string;
+  destinationShardId: string;
+}) {
   const [status, setStatus] = useState<TransactionStatus>({
     isLoading: true,
     isSuccess: false,
@@ -166,23 +244,17 @@ export function useTransactionStatus(id: string) {
       contractAddress: null,
       eventChain: [],
     });
-  }, [id]);
+  }, [identifier, destinationShardId]);
 
   const fetchStatus = useCallback(async () => {
-    if (!id) return;
-
+    if (!identifier) return;
     try {
-      console.log(`Starting transaction status check for ${id}`);
-
-      // Try each shard until we find the transaction
       let result = null;
-      for (const shard of SHARD_PRIORITY) {
-        result = await fetchTransactionFromShard(id, shard);
-        if (result) break;
-      }
-
+      result = await fetchTransactionFromShard(
+        identifier,
+        destinationShardId as ShardId
+      );
       if (!result) {
-        console.log(`Transaction ${id} not found in any shard`);
         setStatus((prev) => ({
           ...prev,
           isLoading: true,
@@ -192,12 +264,9 @@ export function useTransactionStatus(id: string) {
         }));
         return;
       }
-
       const { data } = result;
       const executionStatus = data.executionStatus;
-
       if (!executionStatus) {
-        console.log(`No execution status for transaction ${id}`);
         setStatus((prev) => ({
           ...prev,
           isLoading: true,
@@ -207,20 +276,15 @@ export function useTransactionStatus(id: string) {
         }));
         return;
       }
-
       // Check for immediate failure
       if (executionStatus.failure) {
-        console.log(
-          `Found immediate failure for transaction ${id}:`,
-          executionStatus.failure
-        );
         setStatus({
           isLoading: false,
           isSuccess: false,
           isError: true,
           isFinalized: true,
           error: new Error(
-            `${executionStatus.failure.message}${
+            `${executionStatus.failure.errorMessage}${
               executionStatus.failure.stackTrace
                 ? `\n${executionStatus.failure.stackTrace}`
                 : ""
@@ -232,37 +296,52 @@ export function useTransactionStatus(id: string) {
         });
         return;
       }
-
-      console.log(`Checking event chain for transaction ${id}`);
       // Check event chain recursively
       const { chain, error } = await checkEventChain(executionStatus.events, [
         data,
       ]);
 
-      let contractAddress: string | null = null;
-      if (executionStatus.success) {
-        contractAddress = id.substring(id.length - 40);
+      // If there's an error in the event chain, return early with error status
+      if (error) {
+        setStatus({
+          isLoading: false,
+          isSuccess: false,
+          isError: true,
+          isFinalized: executionStatus.finalized,
+          error,
+          data,
+          contractAddress: null,
+          eventChain: chain,
+        });
+        return;
       }
 
-      console.log(`Transaction ${id} status update:`, {
-        success: !error && executionStatus.success,
-        error: !!error,
-        finalized: executionStatus.finalized,
-        chainLength: chain.length,
-      });
+      let contractAddress: string | null = null;
+      if (executionStatus.success) {
+        contractAddress = identifier.substring(identifier.length - 40);
+      }
+      // All steps must be successful and finalized
+      const allStepsSuccessful = chain.every(
+        (tx) =>
+          tx.executionStatus &&
+          tx.executionStatus.success &&
+          tx.executionStatus.finalized
+      );
 
-      setStatus({
+      const isSuccess = allStepsSuccessful;
+      const isError = !allStepsSuccessful || !!error;
+      const statusObj = {
         isLoading: false,
-        isSuccess: !error && executionStatus.success,
-        isError: !!error || !executionStatus.success,
-        isFinalized: executionStatus.finalized,
-        error,
+        isSuccess,
+        isError,
+        isFinalized: allStepsSuccessful,
+        error: error || null,
         data,
         contractAddress,
         eventChain: chain,
-      });
+      };
+      setStatus(statusObj);
     } catch (error) {
-      console.error(`Error checking transaction ${id}:`, error);
       setStatus((prev) => ({
         ...prev,
         isLoading: false,
@@ -270,15 +349,13 @@ export function useTransactionStatus(id: string) {
         error: error instanceof Error ? error : new Error(String(error)),
       }));
     }
-  }, [id]);
+  }, [identifier, destinationShardId]);
 
   useEffect(() => {
     if (status.isFinalized || status.isError) return;
-
     const interval = setInterval(() => {
       fetchStatus();
     }, 3000);
-
     return () => clearInterval(interval);
   }, [status.isFinalized, status.isError, fetchStatus]);
 
