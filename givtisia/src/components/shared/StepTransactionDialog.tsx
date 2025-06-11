@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,21 +14,24 @@ import {
   ChevronUp,
 } from "lucide-react";
 import {
-  TransactionResult,
+  TransactionResult as BaseTransactionResult,
   TransactionStep,
 } from "@/hooks/useCampaignTransaction";
 import { TransactionStepper } from "./TransactionStepper";
 import { TESTNET_URL } from "@/partisia-config";
-import {
-  useTransactionStatus,
-  TransactionStatus,
-} from "@/hooks/useTransactionStatus";
+import { TransactionStatus } from "@/hooks/useTransactionStatus";
+import { useStepTransactionStatus } from "@/hooks/useStepTransactionStatus";
 
 interface StepTransactionDialogProps {
   transactionResult: TransactionResult;
   campaignId: string;
   onClose?: () => void;
 }
+
+// Extend TransactionResult to allow allTransactionPointers
+type TransactionResult = BaseTransactionResult & {
+  allTransactionPointers?: { identifier: string; destinationShardId: string }[];
+};
 
 const EventChainDisplay = ({
   eventChain,
@@ -107,6 +110,40 @@ const EventChainDisplay = ({
   );
 };
 
+const TransactionIdDisplay = ({
+  transactionPointer,
+  explorerUrl,
+}: {
+  transactionPointer: { identifier: string } | null;
+  explorerUrl: string;
+}) => {
+  if (!transactionPointer) return null;
+
+  return (
+    <div className="w-full flex items-center justify-between mt-1 p-2 bg-gray-50 rounded-md border border-gray-200">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-500 font-medium">
+          Transaction ID:
+        </span>
+        <code className="text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded">
+          {transactionPointer.identifier.substring(0, 8)}...
+          {transactionPointer.identifier.substring(
+            transactionPointer.identifier.length - 8
+          )}
+        </code>
+      </div>
+      <a
+        href={explorerUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center text-xs font-medium text-blue-600 hover:text-blue-800"
+      >
+        view <ExternalLink className="w-3 h-3 ml-0.5" />
+      </a>
+    </div>
+  );
+};
+
 export function StepTransactionDialog({
   transactionResult,
   campaignId,
@@ -114,14 +151,133 @@ export function StepTransactionDialog({
 }: StepTransactionDialogProps) {
   const [open, setOpen] = useState(true);
   const [showConfetti, setShowConfetti] = useState(false);
-  // Keep track of the last transaction ID to detect new transactions
   const lastTransactionId = useRef<string | null>(null);
-  // Persist steps in state
   const [persistedSteps, setPersistedSteps] = useState<TransactionStep[]>([]);
 
-  // Get transaction status for the current transaction
-  const transactionId = transactionResult.transactionPointer?.identifier;
-  const status = useTransactionStatus(transactionId || "");
+  const transactionIds = useMemo(
+    () =>
+      transactionResult.allTransactionPointers ||
+      (transactionResult.transactionPointer
+        ? [
+            {
+              identifier: transactionResult.transactionPointer.identifier,
+              destinationShardId:
+                transactionResult.transactionPointer.destinationShardId,
+            },
+          ]
+        : []),
+    [
+      transactionResult.allTransactionPointers,
+      transactionResult.transactionPointer,
+    ]
+  );
+
+  // Use useStepTxnStatus for transaction status tracking
+  const stepStatuses = useStepTransactionStatus(
+    transactionIds as { identifier: string; destinationShardId: string }[]
+  );
+
+  // Use action status for overall state, individual step statuses for detailed tracking
+  const overallStatus = stepStatuses.actionStatus;
+  const individualStepStatuses = stepStatuses.stepStatuses;
+
+  // Check if all steps are actually completed (both transaction status and UI steps)
+  const allStepsCompleted = useMemo(() => {
+    if (!transactionIds[0]?.identifier) return false;
+    if (individualStepStatuses.length !== transactionIds.length) return false;
+
+    const allTxnsSuccessful = individualStepStatuses.every(
+      (s) => s.status.isSuccess
+    );
+    const allPersistedStepsCompleted =
+      persistedSteps.length > 0 &&
+      persistedSteps.every((step) => step.status === "success");
+
+    return persistedSteps.length === 0
+      ? allTxnsSuccessful
+      : allTxnsSuccessful && allPersistedStepsCompleted;
+  }, [individualStepStatuses, persistedSteps, transactionIds.length]);
+
+  // Override the overall status to use our custom completion check
+  const effectiveStatus = useMemo(() => {
+    if (!overallStatus) return null;
+    // Guard: if not all statuses are present, force loading
+    if (individualStepStatuses.length !== transactionIds.length) {
+      return {
+        ...overallStatus,
+        isLoading: true,
+        isSuccess: false,
+        isError: false,
+      };
+    }
+    // If there's an error, keep the error state
+    if (overallStatus.isError) {
+      return overallStatus;
+    }
+
+    // Check if any individual step has an error
+    const hasStepError = individualStepStatuses.some((s) => s.status.isError);
+    if (hasStepError) {
+      const firstError = individualStepStatuses.find((s) => s.status.isError);
+      return {
+        ...overallStatus,
+        isLoading: false,
+        isSuccess: false,
+        isError: true,
+        error: firstError?.status.error || new Error("Transaction step failed"),
+      };
+    }
+    // If all steps are completed, show success
+    if (allStepsCompleted) {
+      return {
+        ...overallStatus,
+        isLoading: false,
+        isSuccess: true,
+        isError: false,
+      };
+    }
+    // Otherwise, keep loading state
+    return {
+      ...overallStatus,
+      isLoading: true,
+      isSuccess: false,
+      isError: false,
+    };
+  }, [
+    overallStatus,
+    allStepsCompleted,
+    individualStepStatuses,
+    transactionIds.length,
+  ]);
+
+  useEffect(() => {
+    if (effectiveStatus?.isSuccess) {
+      setShowConfetti(true);
+    }
+  }, [effectiveStatus?.isSuccess]);
+
+  // Helper to get event chain from step statuses
+  const getEventChain = () => {
+    // Get event chain from the first step that has one
+    return (
+      individualStepStatuses.find((s) => s.status.eventChain?.length)?.status
+        .eventChain || []
+    );
+  };
+
+  // Helper to get detailed step information for error reporting
+  const getStepErrorDetails = () => {
+    if (transactionIds.length <= 1) return [];
+
+    return individualStepStatuses
+      .map((status, index) => ({
+        stepIndex: index,
+        status,
+        hasError: status.status.isError,
+        error: status.status.error,
+      }))
+      .filter((step) => step.hasError);
+  };
 
   // Reset state when a new transaction starts
   useEffect(() => {
@@ -137,23 +293,10 @@ export function StepTransactionDialog({
     }
   }, [transactionResult.transactionPointer?.identifier]);
 
-  // Update persisted steps when new steps come in
+  // Always sync persisted steps to latest steps if provided
   useEffect(() => {
     if (transactionResult.steps) {
-      setPersistedSteps((prevSteps) => {
-        // Merge new steps with existing ones, updating status of existing steps
-        const newSteps = [...prevSteps];
-        transactionResult.steps?.forEach((step, index) => {
-          if (index < newSteps.length) {
-            // Update existing step
-            newSteps[index] = { ...newSteps[index], ...step };
-          } else {
-            // Add new step
-            newSteps.push(step);
-          }
-        });
-        return newSteps;
-      });
+      setPersistedSteps(transactionResult.steps);
     }
   }, [transactionResult.steps]);
 
@@ -162,16 +305,10 @@ export function StepTransactionDialog({
     onClose?.();
   }, [onClose]);
 
-  useEffect(() => {
-    if (status?.isSuccess) {
-      setShowConfetti(true);
-    }
-  }, [status?.isSuccess]);
-
   const getProgressPercentage = () => {
-    if (status?.isLoading) return 40;
-    if (status?.isSuccess) return 100;
-    if (status?.isError) return 100;
+    if (effectiveStatus?.isLoading) return 40;
+    if (effectiveStatus?.isSuccess) return 100;
+    if (effectiveStatus?.isError) return 100;
     return 20;
   };
 
@@ -185,38 +322,11 @@ export function StepTransactionDialog({
     (step) => step.status === "error"
   );
 
-  const TransactionIdDisplay = () => {
-    if (!transactionResult.transactionPointer) return null;
-    return (
-      <div className="w-full flex items-center justify-between mt-1 p-2 bg-gray-50 rounded-md border border-gray-200">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500 font-medium">
-            Transaction ID:
-          </span>
-          <code className="text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded">
-            {transactionResult.transactionPointer.identifier.substring(0, 8)}...
-            {transactionResult.transactionPointer.identifier.substring(
-              transactionResult.transactionPointer.identifier.length - 8
-            )}
-          </code>
-        </div>
-        <a
-          href={transactionExplorerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center text-xs font-medium text-blue-600 hover:text-blue-800"
-        >
-          view <ExternalLink className="w-3 h-3 ml-0.5" />
-        </a>
-      </div>
-    );
-  };
-
   return (
     <Dialog
       open={open}
       onOpenChange={(newOpen) => {
-        if (!newOpen && status?.isLoading) {
+        if (!newOpen && effectiveStatus?.isLoading) {
           return;
         }
         setOpen(newOpen);
@@ -224,7 +334,7 @@ export function StepTransactionDialog({
       }}
     >
       <DialogContent
-        className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-hidden transition-all duration-300 shadow-xl"
+        className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-x-hidden overflow-y-auto transition-all duration-300 shadow-xl"
         onPointerDownOutside={(e) => e.preventDefault()}
       >
         <DialogHeader className="border-b border-gray-200 p-4">
@@ -235,9 +345,9 @@ export function StepTransactionDialog({
 
         <div
           className={`h-1.5 transition-all duration-700 ease-in-out ${
-            status?.isError
+            effectiveStatus?.isError
               ? "bg-red-500"
-              : status?.isSuccess
+              : effectiveStatus?.isSuccess
                 ? "bg-green-500"
                 : "bg-blue-500"
           }`}
@@ -254,7 +364,7 @@ export function StepTransactionDialog({
 
           {/* Show final transaction status below steps */}
           <div className="w-full border-t border-gray-200 pt-4">
-            {status?.isError ? (
+            {effectiveStatus?.isError ? (
               <div className="flex flex-col items-center space-y-4 w-full">
                 <div className="relative flex items-center justify-center w-20 h-20 bg-red-50 rounded-full">
                   <AlertCircle className="h-10 w-10 text-red-500" />
@@ -272,19 +382,40 @@ export function StepTransactionDialog({
                         {errorStep.error?.message || "Unknown error"}
                       </>
                     ) : (
-                      status.error?.message || "Unknown error"
+                      effectiveStatus.error?.message || "Unknown error"
                     )}
                   </p>
+                  {transactionIds.length > 1 && (
+                    <div className="mt-2">
+                      <p className="text-xs text-red-600 font-medium">
+                        Step Details:
+                      </p>
+                      {getStepErrorDetails().map((stepDetail) => (
+                        <div
+                          key={stepDetail.stepIndex}
+                          className="mt-1 text-xs text-red-600"
+                        >
+                          <span className="font-medium">
+                            Step {stepDetail.stepIndex + 1}:
+                          </span>{" "}
+                          {stepDetail.error?.message || "Unknown error"}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <p className="text-xs text-red-500 mt-2">
                     Try again or contact support if this persists
                   </p>
                 </div>
-                <TransactionIdDisplay />
-                <EventChainDisplay eventChain={status.eventChain} />
+                <TransactionIdDisplay
+                  transactionPointer={transactionResult.transactionPointer}
+                  explorerUrl={transactionExplorerUrl}
+                />
+                <EventChainDisplay eventChain={getEventChain()} />
               </div>
-            ) : status?.isSuccess ? (
+            ) : effectiveStatus?.isSuccess ? (
               <div className="flex flex-col items-center space-y-4 w-full">
-                {showConfetti && !status.isError && (
+                {showConfetti && !effectiveStatus.isError && (
                   <div className="absolute inset-0 pointer-events-none overflow-hidden">
                     <div className="confetti-container" aria-hidden="true" />
                   </div>
@@ -298,7 +429,10 @@ export function StepTransactionDialog({
                   <h4 className="text-sm font-semibold mb-2">
                     Transaction Details
                   </h4>
-                  <TransactionIdDisplay />
+                  <TransactionIdDisplay
+                    transactionPointer={transactionResult.transactionPointer}
+                    explorerUrl={transactionExplorerUrl}
+                  />
 
                   <div className="w-full flex items-center justify-between mt-3 p-2 bg-green-50 rounded-md border border-green-200">
                     <div className="flex items-center gap-1.5">
@@ -320,10 +454,10 @@ export function StepTransactionDialog({
                     </a>
                   </div>
 
-                  <EventChainDisplay eventChain={status.eventChain} />
+                  <EventChainDisplay eventChain={getEventChain()} />
                 </div>
               </div>
-            ) : status?.isLoading ? (
+            ) : effectiveStatus?.isLoading ? (
               <div className="flex flex-col items-center space-y-4 w-full">
                 <div className="flex items-center justify-center w-24 h-24">
                   <Lollipop className="h-16 w-16 text-yellow-400 animate-spin" />
@@ -336,8 +470,11 @@ export function StepTransactionDialog({
                     This may take a few moments...
                   </p>
                 </div>
-                <TransactionIdDisplay />
-                <EventChainDisplay eventChain={status.eventChain} />
+                <TransactionIdDisplay
+                  transactionPointer={transactionResult.transactionPointer}
+                  explorerUrl={transactionExplorerUrl}
+                />
+                <EventChainDisplay eventChain={getEventChain()} />
               </div>
             ) : null}
           </div>
@@ -347,7 +484,7 @@ export function StepTransactionDialog({
               variant="default"
               onClick={handleClose}
               className={`w-full py-5 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] ${
-                status?.isError
+                effectiveStatus?.isError
                   ? "bg-red-600 hover:bg-red-700"
                   : "bg-black hover:bg-stone-800"
               }`}
