@@ -181,6 +181,8 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
     const rawAmount = Math.round(amountNum * 1_000_000);
 
     try {
+      setIsTransactionInProgress(true);
+      setIsSecretTransactionFlow(isSecret);
       const params = {
         crowdfundingAddress: campaignId,
         amount: rawAmount,
@@ -188,9 +190,6 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
       };
 
       const result = await contributeSecret(params);
-
-      setIsTransactionInProgress(true);
-      setIsSecretTransactionFlow(isSecret);
 
       if (isSecret) {
         // For secret transactions, only set transactionPointer, let useStepTxnStatus handle errors
@@ -478,7 +477,9 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
 
       {/* Show dialog if there's any transaction activity */}
       {isSecretTransactionFlow &&
-      (secretActionStatus?.isError ||
+      (transactionPointer ||
+        isTransactionInProgress ||
+        secretActionStatus?.isError ||
         secretActionStatus?.isLoading ||
         secretActionStatus?.isSuccess) ? (
         <StepTransactionDialog
