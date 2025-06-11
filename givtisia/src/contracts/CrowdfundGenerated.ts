@@ -27,7 +27,7 @@ type Option<K> = K | undefined;
 export class CrowdfundGenerated {
   private readonly _client: BlockchainStateClient | undefined;
   private readonly _address: BlockchainAddress | undefined;
-  
+
   public constructor(
     client: BlockchainStateClient | undefined,
     address: BlockchainAddress | undefined
@@ -59,10 +59,23 @@ export class CrowdfundGenerated {
     let balanceTrackerId: Option<SecretVarId> = undefined;
     const balanceTrackerId_isSome = _input.readBoolean();
     if (balanceTrackerId_isSome) {
-      const balanceTrackerId_option: SecretVarId = this.deserializeSecretVarId(_input);
+      const balanceTrackerId_option: SecretVarId =
+        this.deserializeSecretVarId(_input);
       balanceTrackerId = balanceTrackerId_option;
     }
-    return { owner, title, description, tokenAddress, fundingTarget, status, totalRaised, numContributors, isSuccessful, fundsWithdrawn, balanceTrackerId };
+    return {
+      owner,
+      title,
+      description,
+      tokenAddress,
+      fundingTarget,
+      status,
+      totalRaised,
+      numContributors,
+      isSuccessful,
+      fundsWithdrawn,
+      balanceTrackerId,
+    };
   }
   public deserializeCampaignStatus(_input: AbiInput): CampaignStatus {
     const discriminant = _input.readU8();
@@ -75,14 +88,20 @@ export class CrowdfundGenerated {
     }
     throw new Error("Unknown discriminant: " + discriminant);
   }
-  public deserializeCampaignStatusActive(_input: AbiInput): CampaignStatusActive {
-    return { discriminant: CampaignStatusD.Active,  };
+  public deserializeCampaignStatusActive(
+    _input: AbiInput
+  ): CampaignStatusActive {
+    return { discriminant: CampaignStatusD.Active };
   }
-  public deserializeCampaignStatusComputing(_input: AbiInput): CampaignStatusComputing {
-    return { discriminant: CampaignStatusD.Computing,  };
+  public deserializeCampaignStatusComputing(
+    _input: AbiInput
+  ): CampaignStatusComputing {
+    return { discriminant: CampaignStatusD.Computing };
   }
-  public deserializeCampaignStatusCompleted(_input: AbiInput): CampaignStatusCompleted {
-    return { discriminant: CampaignStatusD.Completed,  };
+  public deserializeCampaignStatusCompleted(
+    _input: AbiInput
+  ): CampaignStatusCompleted {
+    return { discriminant: CampaignStatusD.Completed };
   }
   public deserializeSecretVarId(_input: AbiInput): SecretVarId {
     const rawId: number = _input.readU32();
@@ -98,19 +117,23 @@ export class CrowdfundGenerated {
   }
 
   public deserializeEndCampaignAction(_input: AbiInput): EndCampaignAction {
-    return { discriminant: "end_campaign",  };
+    return { discriminant: "end_campaign" };
   }
 
   public deserializeWithdrawFundsAction(_input: AbiInput): WithdrawFundsAction {
-    return { discriminant: "withdraw_funds",  };
+    return { discriminant: "withdraw_funds" };
   }
 
-  public deserializeContributeTokensAction(_input: AbiInput): ContributeTokensAction {
+  public deserializeContributeTokensAction(
+    _input: AbiInput
+  ): ContributeTokensAction {
     const amount: number = _input.readU32();
     return { discriminant: "contribute_tokens", amount };
   }
 
-  public deserializeContributeCallbackCallback(_input: AbiInput): ContributeCallbackCallback {
+  public deserializeContributeCallbackCallback(
+    _input: AbiInput
+  ): ContributeCallbackCallback {
     const Amount: number = _input.readU32();
     return { discriminant: "contribute_callback", Amount };
   }
@@ -120,9 +143,14 @@ export class CrowdfundGenerated {
     const description: string = _input.readString();
     const tokenAddress: BlockchainAddress = _input.readAddress();
     const fundingTarget: number = _input.readU32();
-    return { discriminant: "initialize", title, description, tokenAddress, fundingTarget };
+    return {
+      discriminant: "initialize",
+      title,
+      description,
+      tokenAddress,
+      fundingTarget,
+    };
   }
-
 }
 export interface ContractState {
   owner: BlockchainAddress;
@@ -164,7 +192,12 @@ export interface SecretVarId {
   rawId: number;
 }
 
-export function initialize(title: string, description: string, tokenAddress: BlockchainAddress, fundingTarget: number): Buffer {
+export function initialize(
+  title: string,
+  description: string,
+  tokenAddress: BlockchainAddress,
+  fundingTarget: number
+): Buffer {
   return AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeBytes(Buffer.from("ffffffff0f", "hex"));
     _out.writeString(title);
@@ -200,9 +233,10 @@ export function addContribution(): SecretInputBuilder<number> {
   const _publicRpc: Buffer = AbiByteOutput.serializeBigEndian((_out) => {
     _out.writeBytes(Buffer.from("40", "hex"));
   });
-  const _secretInput = (secret_input_lambda: number): CompactBitArray => AbiBitOutput.serialize((_out) => {
-    _out.writeU32(secret_input_lambda);
-  });
+  const _secretInput = (secret_input_lambda: number): CompactBitArray =>
+    AbiBitOutput.serialize((_out) => {
+      _out.writeU32(secret_input_lambda);
+    });
   return new SecretInputBuilder(_publicRpc, _secretInput);
 }
 
@@ -220,7 +254,9 @@ export function deserializeState(
 ): ContractState {
   if (Buffer.isBuffer(state)) {
     const input = AbiByteInput.createLittleEndian(state);
-    return new CrowdfundGenerated(client, address).deserializeContractState(input);
+    return new CrowdfundGenerated(client, address).deserializeContractState(
+      input
+    );
   } else {
     const input = AbiByteInput.createLittleEndian(state.bytes);
     return new CrowdfundGenerated(
@@ -260,8 +296,7 @@ export function deserializeAction(bytes: Buffer): Action {
   throw new Error("Illegal shortname: " + shortname);
 }
 
-export type Callback =
-  | ContributeCallbackCallback;
+export type Callback = ContributeCallbackCallback;
 
 export interface ContributeCallbackCallback {
   discriminant: "contribute_callback";
@@ -277,8 +312,7 @@ export function deserializeCallback(bytes: Buffer): Callback {
   throw new Error("Illegal shortname: " + shortname);
 }
 
-export type Init =
-  | InitializeInit;
+export type Init = InitializeInit;
 
 export interface InitializeInit {
   discriminant: "initialize";
@@ -296,4 +330,3 @@ export function deserializeInit(bytes: Buffer): Init {
   }
   throw new Error("Illegal shortname: " + shortname);
 }
-
