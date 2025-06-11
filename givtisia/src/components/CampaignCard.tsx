@@ -10,9 +10,8 @@ import { Crowdfunding } from "@/hooks/useCampaignContract";
 import { CampaignStatusD } from "@/contracts/CrowdfundGenerated";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
-  useContribute,
   useContributeSecret,
   useEndCampaign,
   useWithdrawFunds,
@@ -24,6 +23,7 @@ import { TransactionPointer } from "@/hooks/useCampaignTransaction";
 import { useTransactionStatus } from "@/hooks/useTransactionStatus";
 import { useAuth } from "@/auth/useAuth";
 import ConnectButton from "./shared/ConnectButton";
+import { useStepTransactionStatus } from "@/hooks/useStepTransactionStatus";
 
 interface CrowdfundingCardProps {
   campaign: Crowdfunding;
@@ -32,37 +32,49 @@ interface CrowdfundingCardProps {
 
 const MAX_AMOUNT = 2147.483647;
 const MIN_AMOUNT = 0.000001;
+const ETH_SEPOLIA_TOKEN_ADDRESS = "0117f2ccfcb0c56ce5b2ad440e879711a5ac8b64a6";
 
 // Helper functions for token unit conversion
 function tokenUnitsToDisplayAmount(tokenUnits: number): number {
   return tokenUnits / 1_000_000;
 }
 
-export function CrowdfundingCard({
-  campaign,
-  campaignId,
-}: CrowdfundingCardProps) {
+async function fetchTokenBalance(tokenAddress: string, walletAddress: string) {
+  const response = await fetch(
+    `https://node1.testnet.partisiablockchain.com/chain/accounts/${walletAddress}`
+  );
+  const data = await response.json();
+
+  // ETH Sepolia is the 3rd token (index 2) in accountCoins array
+  const accountCoins = data.account?.accountCoins || [];
+  const ethSepoliaBalance = accountCoins[2]?.balance || "0";
+
+  return parseInt(ethSepoliaBalance);
+}
+
+export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
   const { isConnected, walletAddress } = useAuth();
   const [amount, setAmount] = useState<string>("");
-  const {
-    mutateAsync: contribute,
-    isPending: isContributing,
-    requiresWalletConnection: requiresWalletForContribute,
-  } = useContribute();
+  const [userBalance, setUserBalance] = useState<number | null>(null);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const {
     mutateAsync: contributeSecret,
     isPending: isContributingSecret,
     steps: secretSteps,
+    transactionIds: secretTransactionIds,
     requiresWalletConnection: requiresWalletForSecret,
   } = useContributeSecret();
+  const { stepStatuses: secretStepStatuses, actionStatus: secretActionStatus } =
+    useStepTransactionStatus(secretTransactionIds);
   const [amountInputError, setAmountInputError] = useState<string | null>(null);
   const [transactionPointer, setTransactionPointer] =
     useState<TransactionPointer | null>(null);
   const [isTransactionInProgress, setIsTransactionInProgress] = useState(false);
   const [transactionError, setTransactionError] = useState<Error | null>(null);
-  const transactionStatus = useTransactionStatus(
-    transactionPointer?.identifier ?? ""
-  );
+  const transactionStatus = useTransactionStatus({
+    identifier: transactionPointer?.identifier ?? "",
+    destinationShardId: transactionPointer?.destinationShardId ?? "",
+  });
   const { mutateAsync: endCampaign, isPending: isEnding } = useEndCampaign();
   const { mutateAsync: withdrawFunds, isPending: isWithdrawing } =
     useWithdrawFunds();
@@ -72,6 +84,12 @@ export function CrowdfundingCard({
   const [adminAction, setAdminAction] = useState<null | "end" | "withdraw">(
     null
   );
+  const [isSecretTransactionFlow, setIsSecretTransactionFlow] = useState(false);
+
+  const isSepoliaEth =
+    campaign.tokenAddress.asString() === ETH_SEPOLIA_TOKEN_ADDRESS;
+
+  const tokenLabel = isSepoliaEth ? "SEPOLIA ETH" : "TOKEN";
 
   const isTotalRevealed =
     campaign.totalRaised !== undefined &&
@@ -87,11 +105,13 @@ export function CrowdfundingCard({
     campaign.owner?.asString &&
     walletAddress.toLowerCase() === campaign.owner.asString().toLowerCase();
 
-  const canEnd = campaign.status.discriminant === CampaignStatusD.Active;
+  const canEnd =
+    isOwner && campaign.status.discriminant === CampaignStatusD.Active;
+
   const canWithdraw =
+    isOwner &&
     campaign.status.discriminant === CampaignStatusD.Completed &&
-    !campaign.fundsWithdrawn &&
-    (campaign.numContributors ?? 0) > 0;
+    !campaign.fundsWithdrawn;
 
   const showAdminActions =
     isOwner &&
@@ -99,14 +119,28 @@ export function CrowdfundingCard({
       (campaign.status.discriminant === CampaignStatusD.Completed &&
         canWithdraw));
 
-  const showConnectButton =
-    (!isConnected &&
-      campaign.status.discriminant === CampaignStatusD.Completed &&
-      !campaign.fundsWithdrawn) ||
-    (campaign.status.discriminant === CampaignStatusD.Active && !isOwner);
-
   const showContributeSection =
     campaign.status.discriminant === CampaignStatusD.Active;
+
+  // Fetch user balance when connected and campaign uses ETH Sepolia
+  useEffect(() => {
+    if (isConnected && walletAddress && isSepoliaEth) {
+      setIsLoadingBalance(true);
+      fetchTokenBalance(campaign.tokenAddress.asString(), walletAddress)
+        .then((balance) => {
+          setUserBalance(balance);
+        })
+        .catch((error) => {
+          console.error("Failed to fetch balance:", error);
+          setUserBalance(null);
+        })
+        .finally(() => {
+          setIsLoadingBalance(false);
+        });
+    } else {
+      setUserBalance(null);
+    }
+  }, [isConnected, walletAddress, isSepoliaEth, campaign.tokenAddress]);
 
   const handleContribute = async (isSecret: boolean) => {
     // Reset all transaction state before starting a new transaction
@@ -127,12 +161,18 @@ export function CrowdfundingCard({
       return;
     }
 
-    if (isSecret && requiresWalletForSecret()) {
-      setAmountInputError("Please connect your wallet");
-      return;
+    // Check if amount exceeds user balance for ETH Sepolia
+    if (isSepoliaEth && userBalance !== null) {
+      const userDisplayBalance = userBalance / 1_000_000_000_000_000_000;
+      if (amountNum > userDisplayBalance) {
+        setAmountInputError(
+          `Amount exceeds your balance of ${userDisplayBalance.toFixed(6)} SEPOLIA ETH`
+        );
+        return;
+      }
     }
 
-    if (!isSecret && requiresWalletForContribute()) {
+    if (isSecret && requiresWalletForSecret()) {
       setAmountInputError("Please connect your wallet");
       return;
     }
@@ -141,25 +181,37 @@ export function CrowdfundingCard({
     const rawAmount = Math.round(amountNum * 1_000_000);
 
     try {
-      setIsTransactionInProgress(true);
-      setTransactionError(null);
       const params = {
         crowdfundingAddress: campaignId,
         amount: rawAmount,
         tokenAddress: campaign.tokenAddress.asString(),
       };
 
-      const result = isSecret
-        ? await contributeSecret(params)
-        : await contribute(params);
+      const result = await contributeSecret(params);
 
-      if (result.error) {
-        setTransactionError(result.error);
-        setTransactionPointer(result);
-      } else if (result) {
-        setTransactionPointer(result);
-        setAmount("");
-        setAmountInputError(null);
+      setIsTransactionInProgress(true);
+      setIsSecretTransactionFlow(isSecret);
+
+      if (isSecret) {
+        // For secret transactions, only set transactionPointer, let useStepTxnStatus handle errors
+        if (result && result.identifier) {
+          setTransactionPointer(result);
+          setAmount("");
+          setAmountInputError(null);
+        }
+      } else {
+        // For regular transactions, handle errors normally
+        if (result.error) {
+          setTransactionError(result.error);
+          // Only set transactionPointer if we have a valid identifier
+          if (result.identifier) {
+            setTransactionPointer(result);
+          }
+        } else if (result) {
+          setTransactionPointer(result);
+          setAmount("");
+          setAmountInputError(null);
+        }
       }
     } catch (error) {
       console.error("Contribution error:", error);
@@ -176,6 +228,7 @@ export function CrowdfundingCard({
     setTransactionPointer(null);
     setTransactionError(null);
     setIsTransactionInProgress(false);
+    setIsSecretTransactionFlow(false);
     setAmount("");
     setAmountInputError(null);
   };
@@ -214,6 +267,22 @@ export function CrowdfundingCard({
         return "Unknown";
     }
   };
+
+  // Map UI steps to on-chain status
+  const stepsWithStatus = secretSteps.map((step, i) => {
+    // Safely access the transaction status with bounds checking
+    const txnStatus =
+      secretStepStatuses && i < secretStepStatuses.length
+        ? secretStepStatuses[i]
+        : null;
+    if (!txnStatus) return { ...step, status: "pending" as const };
+    if (txnStatus.status.isError) return { ...step, status: "error" as const };
+    if (txnStatus.status.isSuccess)
+      return { ...step, status: "success" as const };
+    if (txnStatus.status.isLoading)
+      return { ...step, status: "pending" as const };
+    return { ...step, status: "pending" as const };
+  });
 
   return (
     <div className="pb-1 px-1 bg-violet-100 rounded-xl w-lg">
@@ -274,7 +343,7 @@ export function CrowdfundingCard({
                   {tokenUnitsToDisplayAmount(campaign.totalRaised ?? 0).toFixed(
                     6
                   )}{" "}
-                  tokens
+                  {tokenLabel}
                 </p>
               ) : (
                 <p className="text-sm bg-neutral-100 text-neutral-500 px-2 py-1 rounded-sm w-fit">
@@ -285,7 +354,12 @@ export function CrowdfundingCard({
             <div>
               <p className="text-muted-foreground">Funding Target</p>
               <p className="text-lg font-medium">
-                {`${tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(6)} tokens`}
+                <span className="text-lg font-medium">
+                  {tokenUnitsToDisplayAmount(campaign.fundingTarget).toFixed(6)}
+                </span>
+                <span className="text-xs text-muted-foreground ml-1">
+                  {tokenLabel}
+                </span>
               </p>
             </div>
             <div>
@@ -304,11 +378,30 @@ export function CrowdfundingCard({
 
           {showContributeSection && (
             <div className="space-y-2">
+              {/* Show user balance if connected and ETH Sepolia */}
+              {isConnected && isSepoliaEth && (
+                <div className="text-sm text-muted-foreground">
+                  {isLoadingBalance ? (
+                    <span>Loading balance...</span>
+                  ) : userBalance !== null ? (
+                    <span>
+                      Your balance:{" "}
+                      {(userBalance / 1000000000000000000).toFixed(6)}{" "}
+                      {tokenLabel}
+                    </span>
+                  ) : (
+                    <span>Unable to load balance</span>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2">
                 <input
                   type="number"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    setAmountInputError(null);
+                  }}
                   placeholder="Amount to give"
                   className={`flex-1 rounded-md border-2 px-3 py-2 ${
                     amountInputError ? "border-red-500" : ""
@@ -321,7 +414,7 @@ export function CrowdfundingCard({
                   <Button
                     className="bg-violet-800 hover:bg-violet-600 shadow-none h-10"
                     onClick={() => handleContribute(true)}
-                    disabled={isContributing || isContributingSecret}
+                    disabled={isContributingSecret}
                   >
                     Contribute secretly
                   </Button>
@@ -349,7 +442,7 @@ export function CrowdfundingCard({
             view on explorer <ExternalLinkIcon className="w-3 h-3 ml-1" />
           </a>
 
-          {showConnectButton && (
+          {!isConnected && (
             <div className="ml-auto">
               <ConnectButton label="Manage campaign" />
             </div>
@@ -383,27 +476,29 @@ export function CrowdfundingCard({
         </CardFooter>
       </Card>
 
-      {(transactionPointer || isTransactionInProgress || transactionError) &&
-        (isContributingSecret ? (
-          <StepTransactionDialog
-            transactionResult={{
-              isLoading: isTransactionInProgress || transactionStatus.isLoading,
-              isSuccess:
-                !transactionError &&
-                !secretSteps?.some((s) => s.status === "error") &&
-                transactionStatus.isSuccess,
-              isError:
-                !!transactionError ||
-                !!secretSteps?.find((s) => s.status === "error") ||
-                transactionStatus.isError,
-              error: transactionError || transactionStatus.error,
-              transactionPointer,
-              steps: secretSteps,
-            }}
-            campaignId={campaignId}
-            onClose={handleTransactionComplete}
-          />
-        ) : (
+      {/* Show dialog if there's any transaction activity */}
+      {isSecretTransactionFlow &&
+      (secretActionStatus?.isError ||
+        secretActionStatus?.isLoading ||
+        secretActionStatus?.isSuccess) ? (
+        <StepTransactionDialog
+          transactionResult={{
+            isLoading: isTransactionInProgress || secretActionStatus?.isLoading,
+            isSuccess: secretActionStatus?.isSuccess,
+            isError: secretActionStatus?.isError,
+            error: secretActionStatus?.error,
+            transactionPointer,
+            steps: stepsWithStatus,
+            allTransactionPointers: secretTransactionIds.map((tx) => ({
+              identifier: tx.identifier,
+              destinationShardId: tx.destinationShardId,
+            })),
+          }}
+          campaignId={campaignId}
+          onClose={handleTransactionComplete}
+        />
+      ) : (
+        (transactionPointer || isTransactionInProgress || transactionError) && (
           <TransactionDialog
             transactionResult={{
               isLoading: isTransactionInProgress || transactionStatus.isLoading,
@@ -415,7 +510,8 @@ export function CrowdfundingCard({
             campaignId={campaignId}
             onClose={handleTransactionComplete}
           />
-        ))}
+        )
+      )}
 
       {adminAction && (
         <TransactionDialog
