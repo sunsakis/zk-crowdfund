@@ -174,7 +174,7 @@ export function TransactionDialog({
       }}
     >
       <DialogContent
-        className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-hidden transition-all duration-300 shadow-xl"
+        className="sm:max-w-[480px] border-2 border-black rounded-lg p-0 overflow-x-hidden overflow-y-auto transition-all duration-300 shadow-xl"
         onPointerDownOutside={(e) => e.preventDefault()}
       >
         <DialogHeader className="border-b border-gray-200 p-4">
