@@ -17,9 +17,7 @@ function Home() {
   const [campaignId, setCampaignId] = useState<string>("");
   const [searchId, setSearchId] = useState<string | null>(null);
   const [campaignIdError, setCampaignIdError] = useState<string | null>(null);
-  //  03ce6bb3ed579b4ec154511db4091e6f6b2eb255b4
-  // 03260695d27fb2266de9579092ef39ddd38261065c
-  const EXAMPLE_CONTRACT = "03ce6bb3ed579b4ec154511db4091e6f6b2eb255b4";
+  const EXAMPLE_CONTRACT = "039d1de13adfbdba0498e046b990ca4c037e5165e5";
 
   const useExampleContract = () => {
     setCampaignId(EXAMPLE_CONTRACT);
