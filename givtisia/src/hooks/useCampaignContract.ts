@@ -541,6 +541,9 @@ export function useContributeSecret() {
         ]);
         await waitForTxnSuccess(zkTxn.identifier, zkTxn.destinationShardId);
 
+        // Wait for ZK state propagation (like in the API)
+        await new Promise((resolve) => setTimeout(resolve, 30000));
+
         // Step 3: Token transfer
         const tokenTransferRpc = AbiByteOutput.serializeBigEndian((_out) => {
           _out.writeU8(0x09); // transfer shortname
