@@ -116,15 +116,15 @@ export function TransactionDialog({
   }, [onClose]);
 
   useEffect(() => {
-    if (status?.isSuccess) {
+    if (transactionResult.isSuccess) {
       setShowConfetti(true);
     }
-  }, [status?.isSuccess]);
+  }, [transactionResult.isSuccess]);
 
   const getProgressPercentage = () => {
-    if (status?.isLoading) return 40;
-    if (status?.isSuccess) return 100;
-    if (status?.isError) return 100;
+    if (transactionResult.isLoading) return 40;
+    if (transactionResult.isSuccess) return 100;
+    if (transactionResult.isError) return 100;
     return 20;
   };
 
@@ -164,7 +164,7 @@ export function TransactionDialog({
     <Dialog
       open={open}
       onOpenChange={(newOpen) => {
-        if (!newOpen && status?.isLoading) {
+        if (!newOpen && transactionResult.isLoading) {
           return;
         }
         setOpen(newOpen);
@@ -185,9 +185,9 @@ export function TransactionDialog({
 
         <div
           className={`h-1.5 transition-all duration-700 ease-in-out ${
-            status?.isError
+            transactionResult.isError
               ? "bg-red-500"
-              : status?.isSuccess
+              : transactionResult.isSuccess
                 ? "bg-green-500"
                 : "bg-blue-500"
           }`}
@@ -195,7 +195,7 @@ export function TransactionDialog({
         />
 
         <div className="flex flex-col items-center pb-6 px-5 space-y-6 pt-4">
-          {status?.isError ? (
+          {transactionResult.isError ? (
             <div className="flex flex-col items-center space-y-4 w-full">
               <div className="relative flex items-center justify-center w-20 h-20 bg-red-50 rounded-full">
                 <AlertCircle className="h-10 w-10 text-red-500" />
@@ -205,18 +205,18 @@ export function TransactionDialog({
               </p>
               <div className="w-full bg-red-50 p-4 rounded-md border border-red-200">
                 <p className="text-sm text-red-600">
-                  {status.error?.message || "Unknown error"}
+                  {transactionResult.error?.message || "Unknown error"}
                 </p>
                 <p className="text-xs text-red-500 mt-2">
                   Try again or contact support if this persists
                 </p>
               </div>
               <TransactionIdDisplay />
-              <EventChainDisplay eventChain={status.eventChain} />
+              <EventChainDisplay eventChain={status?.eventChain || []} />
             </div>
-          ) : status?.isSuccess ? (
+          ) : transactionResult.isSuccess ? (
             <div className="flex flex-col items-center space-y-4 w-full">
-              {showConfetti && !status.isError && (
+              {showConfetti && !transactionResult.isError && (
                 <div className="absolute inset-0 pointer-events-none overflow-hidden">
                   <div className="confetti-container" aria-hidden="true" />
                 </div>
@@ -252,10 +252,10 @@ export function TransactionDialog({
                   </a>
                 </div>
 
-                <EventChainDisplay eventChain={status.eventChain} />
+                <EventChainDisplay eventChain={status?.eventChain || []} />
               </div>
             </div>
-          ) : status?.isLoading ? (
+          ) : transactionResult.isLoading ? (
             <div className="flex flex-col items-center space-y-4 w-full">
               <div className="flex items-center justify-center w-24 h-24">
                 <Lollipop className="h-16 w-16 text-yellow-400 animate-spin" />
@@ -269,7 +269,7 @@ export function TransactionDialog({
                 </p>
               </div>
               <TransactionIdDisplay />
-              <EventChainDisplay eventChain={status.eventChain} />
+              <EventChainDisplay eventChain={status?.eventChain || []} />
             </div>
           ) : null}
 
@@ -278,7 +278,7 @@ export function TransactionDialog({
               variant="default"
               onClick={handleClose}
               className={`w-full py-5 transition-all duration-200 hover:scale-[1.01] active:scale-[0.99] ${
-                status?.isError
+                transactionResult.isError
                   ? "bg-red-600 hover:bg-red-700"
                   : "bg-black hover:bg-stone-800"
               }`}
