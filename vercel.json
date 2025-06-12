@@ -7,13 +7,9 @@
   "devCommand": "cd givtisia && bun run dev",
   "framework": null,
   "env": {
-    "BUN_VERSION": "1.1.29"
+    "NODE_ENV": "production"
   },
-  "functions": {
-    "givtisia/src/**": {
-      "runtime": "nodejs18.x"
-    }
-  },
+
   "headers": [
     {
       "source": "/(.*)",
