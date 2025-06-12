@@ -375,9 +375,15 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
             </div>
             <div>
               <p className="text-muted-foreground">Contributors</p>
-              <p className="text-lg font-medium">
-                {campaign.numContributors ?? 0}
-              </p>
+              {campaign.status.discriminant === CampaignStatusD.Completed ? (
+                <p className="text-lg font-medium">
+                  {campaign.numContributors ?? 0}
+                </p>
+              ) : (
+                <p className="text-sm bg-neutral-100 text-neutral-500 px-2 py-1 rounded-sm w-fit">
+                  Hidden until campaign ends
+                </p>
+              )}
             </div>
             <div>
               <p className="text-muted-foreground">Status</p>
