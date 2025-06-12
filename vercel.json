@@ -1,11 +1,19 @@
 {
   "version": 2,
   "name": "zk-crowdfunding-platform",
-  "buildCommand": "cd zk-crowdfunding-frontend && npm ci && npm run build",
-  "outputDirectory": "zk-crowdfunding-frontend/dist",
-  "installCommand": "cd zk-crowdfunding-frontend && npm ci",
-  "devCommand": "cd zk-crowdfunding-frontend && npm start",
+  "buildCommand": "cd givtisia && bun install && bun run build",
+  "outputDirectory": "givtisia/dist",
+  "installCommand": "cd givtisia && bun install",
+  "devCommand": "cd givtisia && bun run dev",
   "framework": null,
+  "env": {
+    "BUN_VERSION": "1.1.29"
+  },
+  "functions": {
+    "givtisia/src/**": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
@@ -25,11 +33,15 @@
         {
           "key": "Referrer-Policy",
           "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://node1.testnet.partisiablockchain.com https://browser.testnet.partisiablockchain.com; img-src 'self' data: https:; object-src 'none';"
         }
       ]
     },
     {
-      "source": "/public/config.js",
+      "source": "/config.js",
       "headers": [
         {
           "key": "Content-Type",
@@ -46,6 +58,13 @@
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/index.html",
+      "permanent": false
     }
   ]
 }
