@@ -631,20 +631,15 @@ export function useEndCampaign() {
           { address: crowdfundingAddress, rpc },
           END_CAMPAIGN_GAS
         );
-        const txId = transaction.transactionPointer?.identifier || "unknown";
-        const shardId = transaction.transactionPointer?.destinationShardId;
+
+        if (!transaction.transactionPointer) {
+          throw new Error("No transaction pointer returned");
+        }
+
         return {
-          ...transaction.transactionPointer,
-          status: "pending",
-          metadata: {
-            type: "endCampaign",
-            txId,
-            shardId,
-            usesPublicTarget: true,
-            privacyPreserving: true,
-            thresholdBasedRevelation: true,
-            simplified: true,
-          },
+          identifier: transaction.transactionPointer.identifier,
+          destinationShardId:
+            transaction.transactionPointer.destinationShardId.toString(),
         };
       } catch (error) {
         if (error instanceof Error) {
@@ -689,16 +684,15 @@ export function useWithdrawFunds() {
           { address: crowdfundingAddress, rpc },
           WITHDRAW_FUNDS_GAS
         );
-        const txId = transaction.transactionPointer?.identifier || "unknown";
-        const shardId = transaction.transactionPointer?.destinationShardId;
+
+        if (!transaction.transactionPointer) {
+          throw new Error("No transaction pointer returned");
+        }
+
         return {
-          ...transaction.transactionPointer,
-          status: "pending",
-          metadata: {
-            type: "withdrawFunds",
-            txId,
-            shardId,
-          },
+          identifier: transaction.transactionPointer.identifier,
+          destinationShardId:
+            transaction.transactionPointer.destinationShardId.toString(),
         };
       } catch (error) {
         if (error instanceof Error) {
