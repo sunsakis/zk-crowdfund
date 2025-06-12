@@ -86,6 +86,18 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
   );
   const [isSecretTransactionFlow, setIsSecretTransactionFlow] = useState(false);
 
+  // Add transaction status tracking for admin actions
+  const adminTransactionStatus = useTransactionStatus({
+    identifier:
+      adminTxnResult && "identifier" in adminTxnResult
+        ? adminTxnResult.identifier
+        : "",
+    destinationShardId:
+      adminTxnResult && "destinationShardId" in adminTxnResult
+        ? adminTxnResult.destinationShardId
+        : "",
+  });
+
   const isSepoliaEth =
     campaign.tokenAddress.asString() === ETH_SEPOLIA_TOKEN_ADDRESS;
 
@@ -518,14 +530,18 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
         <TransactionDialog
           transactionResult={{
             isLoading:
-              (adminAction === "end" ? isEnding : isWithdrawing) &&
-              !adminTxnResult,
-            isSuccess: !!adminTxnResult && !("error" in adminTxnResult),
-            isError: !!adminTxnResult && "error" in adminTxnResult,
+              ((adminAction === "end" ? isEnding : isWithdrawing) &&
+                !adminTxnResult) ||
+              adminTransactionStatus.isLoading,
+            isSuccess: adminTransactionStatus.isSuccess,
+            isError:
+              adminTransactionStatus.isError ||
+              (!!adminTxnResult && "error" in adminTxnResult),
             error:
-              adminTxnResult && "error" in adminTxnResult
+              adminTransactionStatus.error ||
+              (adminTxnResult && "error" in adminTxnResult
                 ? (adminTxnResult.error as Error)
-                : null,
+                : null),
             transactionPointer:
               adminTxnResult &&
               "identifier" in adminTxnResult &&
@@ -538,6 +554,7 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
           }}
           campaignId={campaignId}
           onClose={handleAdminDialogClose}
+          status={adminTransactionStatus}
         />
       )}
     </div>
