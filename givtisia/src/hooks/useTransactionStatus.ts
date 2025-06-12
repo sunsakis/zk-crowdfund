@@ -62,16 +62,36 @@ async function checkEventChain(
   currentChain: TransactionData[] = [],
   depth: number = 0
 ): Promise<{ chain: TransactionData[]; error: Error | null }> {
+  // No events means we've reached a terminal node - this is success
   if (!events?.length) return { chain: currentChain, error: null };
+
   for (const event of events) {
     const result = await fetchTransactionFromShard(
       event.identifier,
       event.destinationShardId
     );
-    if (!result) continue;
+
+    // If we can't find the event transaction, that's an error
+    if (!result) {
+      return {
+        chain: currentChain,
+        error: new Error(`Event transaction not found: ${event.identifier}`),
+      };
+    }
+
     const { data } = result;
     const executionStatus = data.executionStatus as ExecutionStatus;
-    if (executionStatus?.failure) {
+
+    // If this event transaction hasn't executed yet, we're still loading
+    if (!executionStatus) {
+      return {
+        chain: [...currentChain, data],
+        error: null, // Still loading, not an error
+      };
+    }
+
+    // If this event transaction failed, that's an error
+    if (executionStatus.failure) {
       console.log(
         `[checkEventChain] Error found at depth ${depth}:`,
         executionStatus.failure.errorMessage,
@@ -85,19 +105,27 @@ async function checkEventChain(
         ),
       };
     }
+
+    // Add this transaction to the chain
     const updatedChain = [...currentChain, data];
-    if (executionStatus?.events?.length) {
+
+    // If this transaction has more events, follow them recursively
+    if (executionStatus.events?.length) {
       const { chain, error } = await checkEventChain(
         executionStatus.events,
         updatedChain,
         depth + 1
       );
       if (error) return { chain, error };
+      // Update currentChain with the complete sub-chain
       currentChain = chain;
     } else {
+      // No more events - this is a terminal node, update the chain
       currentChain = updatedChain;
     }
   }
+
+  // All events processed successfully without errors
   return { chain: currentChain, error: null };
 }
 
@@ -179,20 +207,19 @@ export async function getTransactionStatus({
       contractAddress = identifier.substring(identifier.length - 40);
     }
     // All steps must be successful and finalized
-    const allStepsSuccessful = chain.every(
-      (tx) =>
-        tx.executionStatus &&
-        tx.executionStatus.success &&
-        tx.executionStatus.finalized
+    const allStepsFinalized = chain.every(
+      (tx) => tx.executionStatus && tx.executionStatus.finalized
     );
 
-    const isSuccess = allStepsSuccessful;
-    const isError = !allStepsSuccessful || !!error;
+    const isSuccess = allStepsFinalized && !error;
+    const isError = !!error;
+    const isLoading = !allStepsFinalized && !error;
+
     const statusObj = {
-      isLoading: false,
+      isLoading,
       isSuccess,
       isError,
-      isFinalized: allStepsSuccessful,
+      isFinalized: allStepsFinalized,
       error: error || null,
       data,
       contractAddress,
@@ -321,20 +348,19 @@ export function useTransactionStatus({
         contractAddress = identifier.substring(identifier.length - 40);
       }
       // All steps must be successful and finalized
-      const allStepsSuccessful = chain.every(
-        (tx) =>
-          tx.executionStatus &&
-          tx.executionStatus.success &&
-          tx.executionStatus.finalized
+      const allStepsFinalized = chain.every(
+        (tx) => tx.executionStatus && tx.executionStatus.finalized
       );
 
-      const isSuccess = allStepsSuccessful;
-      const isError = !allStepsSuccessful || !!error;
+      const isSuccess = allStepsFinalized && !error;
+      const isError = !!error;
+      const isLoading = !allStepsFinalized && !error;
+
       const statusObj = {
-        isLoading: false,
+        isLoading,
         isSuccess,
         isError,
-        isFinalized: allStepsSuccessful,
+        isFinalized: allStepsFinalized,
         error: error || null,
         data,
         contractAddress,
