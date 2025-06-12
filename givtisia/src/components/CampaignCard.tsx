@@ -24,22 +24,27 @@ import { useTransactionStatus } from "@/hooks/useTransactionStatus";
 import { useAuth } from "@/auth/useAuth";
 import ConnectButton from "./shared/ConnectButton";
 import { useStepTransactionStatus } from "@/hooks/useStepTransactionStatus";
+import {
+  displayAmountToTokenUnits,
+  tokenUnitsToDisplayAmount,
+  validateDisplayAmount,
+  tokenUnitsToWei,
+  weiToDisplayAmount,
+  MIN_DISPLAY_AMOUNT,
+  MAX_DISPLAY_AMOUNT,
+} from "@/lib/tokenUnits";
 
 interface CrowdfundingCardProps {
   campaign: Crowdfunding;
   campaignId: string;
 }
 
-const MAX_AMOUNT = 2147.483647;
-const MIN_AMOUNT = 0.000001;
 const ETH_SEPOLIA_TOKEN_ADDRESS = "0117f2ccfcb0c56ce5b2ad440e879711a5ac8b64a6";
 
-// Helper functions for token unit conversion
-function tokenUnitsToDisplayAmount(tokenUnits: number): number {
-  return tokenUnits / 1_000_000;
-}
-
-async function fetchTokenBalance(tokenAddress: string, walletAddress: string) {
+async function fetchTokenBalance(
+  tokenAddress: string,
+  walletAddress: string
+): Promise<bigint> {
   const response = await fetch(
     `https://node1.testnet.partisiablockchain.com/chain/accounts/${walletAddress}`
   );
@@ -49,13 +54,14 @@ async function fetchTokenBalance(tokenAddress: string, walletAddress: string) {
   const accountCoins = data.account?.accountCoins || [];
   const ethSepoliaBalance = accountCoins[2]?.balance || "0";
 
-  return parseInt(ethSepoliaBalance);
+  // Balance comes back in wei (1e18)
+  return BigInt(ethSepoliaBalance);
 }
 
 export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
   const { isConnected, walletAddress } = useAuth();
   const [amount, setAmount] = useState<string>("");
-  const [userBalance, setUserBalance] = useState<number | null>(null);
+  const [userBalance, setUserBalance] = useState<bigint | null>(null);
   const [isLoadingBalance, setIsLoadingBalance] = useState(false);
   const {
     mutateAsync: contributeSecret,
@@ -166,19 +172,24 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
     }
 
     const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
+    try {
+      validateDisplayAmount(amountNum);
+    } catch (error) {
       setAmountInputError(
-        `Please enter an amount between ${MIN_AMOUNT} and ${MAX_AMOUNT}`
+        error instanceof Error ? error.message : String(error)
       );
       return;
     }
 
     // Check if amount exceeds user balance for ETH Sepolia
     if (isSepoliaEth && userBalance !== null) {
-      const userDisplayBalance = userBalance / 1_000_000_000_000_000_000;
-      if (amountNum > userDisplayBalance) {
+      // Convert input amount to wei for precise comparison
+      const inputTokenUnits = displayAmountToTokenUnits(amountNum);
+      const inputWei = tokenUnitsToWei(inputTokenUnits);
+
+      if (inputWei > userBalance) {
         setAmountInputError(
-          `Amount exceeds your balance of ${userDisplayBalance.toFixed(6)} SEPOLIA ETH`
+          `Amount exceeds your balance of ${weiToDisplayAmount(userBalance)} SEPOLIA ETH`
         );
         return;
       }
@@ -189,8 +200,8 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
       return;
     }
 
-    // Convert display amount to raw token units (1_000_000 = 1 token)
-    const rawAmount = Math.round(amountNum * 1_000_000);
+    // Convert display amount to raw token units
+    const rawAmount = displayAmountToTokenUnits(amountNum);
 
     try {
       setIsTransactionInProgress(true);
@@ -402,8 +413,7 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
                     <span>Loading balance...</span>
                   ) : userBalance !== null ? (
                     <span>
-                      Your balance:{" "}
-                      {(userBalance / 1000000000000000000).toFixed(6)}{" "}
+                      Your balance: {weiToDisplayAmount(userBalance)}{" "}
                       {tokenLabel}
                     </span>
                   ) : (
@@ -423,9 +433,9 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
                   className={`flex-1 rounded-md border-2 px-3 py-2 ${
                     amountInputError ? "border-red-500" : ""
                   }`}
-                  min={MIN_AMOUNT}
-                  max={MAX_AMOUNT}
-                  step={MIN_AMOUNT}
+                  min={MIN_DISPLAY_AMOUNT}
+                  max={MAX_DISPLAY_AMOUNT}
+                  step={MIN_DISPLAY_AMOUNT}
                 />
                 {isConnected ? (
                   <Button

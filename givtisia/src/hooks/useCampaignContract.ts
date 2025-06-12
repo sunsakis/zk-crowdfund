@@ -22,6 +22,7 @@ import {
 import { BlockchainTransactionClient } from "@partisiablockchain/blockchain-api-transaction-client";
 import { useStepTransactionStatus } from "./useStepTransactionStatus";
 import { getTransactionStatus } from "./useTransactionStatus";
+import { tokenUnitsToWei } from "@/lib/tokenUnits";
 
 // Gas constants for campaign transactions
 const TOKEN_APPROVAL_GAS = 15000;
@@ -480,7 +481,7 @@ export function useContributeSecret() {
       tokenAddress,
     }: {
       crowdfundingAddress: string;
-      amount: number;
+      amount: number; // Raw token units (not display units)
       tokenAddress: string;
     }): Promise<TransactionResult> => {
       if (!account) throw new Error("Wallet not connected");
@@ -495,7 +496,10 @@ export function useContributeSecret() {
           account.getAddress(),
           crowdfundingAddress
         );
-        const weiAmount = BigInt(amount);
+
+        // Convert raw token units to wei for approval
+        const weiAmount = tokenUnitsToWei(amount);
+
         if (currentAllowance < weiAmount) {
           const approvalTxn = await crowdfundingContract.approveTokens(
             tokenAddress,
@@ -517,7 +521,7 @@ export function useContributeSecret() {
 
         // Step 2: ZK commitment (generate and submit secret input)
         const secretInputData = AbiBitOutput.serialize((_out) => {
-          _out.writeU32(amount);
+          _out.writeU32(amount); // Use raw token units for contract
         });
 
         const zkTxn = await crowdfundingContract.sendCampaignTransaction(
@@ -548,7 +552,7 @@ export function useContributeSecret() {
         const tokenTransferRpc = AbiByteOutput.serializeBigEndian((_out) => {
           _out.writeU8(0x09); // transfer shortname
           _out.writeBytes(Buffer.from([0x07])); // token transfer type
-          _out.writeU32(amount);
+          _out.writeU32(amount); // Use raw token units for contract
         });
 
         const tokenTransferTxn =
