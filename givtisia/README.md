@@ -1,6 +1,6 @@
-# Sekiva Frontend
+# Givtisia Frontend
 
-A modern React application for interacting with Sekiva's privacy-preserving voting system on Partisia Blockchain. Built with React, TypeScript, and Partisia's blockchain SDK.
+A modern React application for interacting with privacy-preserving crowdfunding campaigns on Partisia Blockchain. Built with React, TypeScript, and Partisia's blockchain SDK.
 
 ## Tech Stack
 
@@ -15,18 +15,17 @@ A modern React application for interacting with Sekiva's privacy-preserving voti
 
 ### Contract Integration
 
-The frontend integrates with three main contracts through generated ABIs:
+The frontend integrates with crowdfunding contracts through generated ABIs:
 
-- Factory Contract (`useFactoryContract.ts`)
-- Organization Contract (`useOrganizationContract.ts`)
-- Ballot Contract (`useBallotContract.ts`)
+- Crowdfunding Contract (`useCampaignContract.ts`)
 
-Each contract has a dedicated hook that:
+The contract hook provides:
 
-- Uses generated ABIs for type-safe contract interactions
-- Handles contract state management
-- Manages transaction submission
-- Provides real-time updates
+- Type-safe contract interactions using generated ABIs
+- Campaign state management and real-time updates
+- Transaction submission for contributions, campaign management
+- Support for both public and private (zero-knowledge) contributions
+- Multi-step transaction handling with approval flows
 
 ### Authentication & Session Management
 
@@ -39,20 +38,38 @@ Located in `src/auth/`:
 
 ### Transaction Management
 
-- `TransactionDialog.tsx`: Reusable dialog for transaction status and feedback
+- `TransactionDialog.tsx`: Simple transaction status dialog
+- `StepTransactionDialog.tsx`: Multi-step transaction dialog with progress tracking
 - `useTransactionStatus.ts`: Hook for tracking transaction states across shards
   - Implements shard-aware polling
-  - Handles contract address derivation
-  - Provides real-time status updates
+  - Handles transaction event chain traversal
+  - Provides real-time status updates with error handling
+- `useStepTransactionStatus.ts`: Tracks multiple transactions in sequence
 
 ### Shard-Aware Design
 
 The application is designed to work with Partisia's sharded architecture:
 
 - Transactions are submitted to specific shards
-- Status polling checks multiple shards for transaction updates
-- Contract addresses are derived based on transaction IDs and contract type
+- Status polling checks transaction event chains across shards
+- Automatic error detection and reporting from transaction failures
 - Priority-based shard fallback for reliability
+
+### Privacy-Preserving Contributions
+
+The platform supports two types of contributions:
+
+1. **Public Contributions**: Standard token transfers visible on-chain
+2. **Secret Contributions**: Zero-knowledge proof-based contributions that hide:
+   - Individual contribution amounts
+   - Contributor identities  
+   - Total raised amount (until funding target is met)
+
+Secret contributions use a multi-step process:
+
+1. Token approval for the campaign contract
+2. Zero-knowledge proof generation and submission
+3. Actual token transfer completion
 
 ## Development
 
@@ -74,50 +91,62 @@ The application is designed to work with Partisia's sharded architecture:
 
    ```bash
    # Build and generate ABI
-   cd ../ballot && cargo pbc build --release && \
-   cargo pbc abi codegen --ts target/wasm32-unknown-unknown/release/ballot.abi ../sekiva-frontend/src/contracts/BallotGenerated.ts --deserialize-rpc
+   cd ../crowdfund && cargo pbc build --release && \
+   cargo pbc abi codegen --ts target/wasm32-unknown-unknown/release/crowdfund.abi ../givtisia/src/contracts/CrowdfundGenerated.ts --deserialize-rpc
    ```
 
 3. Start development server:
 
    ```bash
-   cd sekiva-fronted && bun dev
+   cd givtisia && bun dev
    ```
 
 ### Key Development Patterns
 
-1. **Contract Hooks**
+1. **Campaign Management**
 
    ```typescript
-   // Example usage of a contract hook
-   const { deployOrganization, isLoading } = useFactoryContract();
+   // Example usage of campaign hooks
+   const { contributeSecret, isLoading } = useContributeSecret();
    
-   const handleDeploy = async () => {
-     const tx = await deployOrganization({
-       name: "My Org",
-       description: "Description"
+   const handleContribute = async () => {
+     const result = await contributeSecret({
+       crowdfundingAddress: "03...",
+       amount: 1000000, // raw token units
+       tokenAddress: "01..."
      });
-     // TransactionDialog handles the rest
+     // StepTransactionDialog handles the multi-step flow
    };
    ```
 
-2. **Transaction Handling**
+2. **Multi-Step Transaction Handling**
 
    ```typescript
-   // TransactionDialog usage
-   <TransactionDialog
-     action="deploy"
-     id={txId}
-     destinationShard={shard}
-     trait="collective"
-     onSuccess={handleSuccess}
+   // For secret contributions with multiple steps
+   <StepTransactionDialog
+     transactionResult={{
+       isLoading,
+       isSuccess,
+       isError,
+       error,
+       transactionPointer,
+       steps: stepsWithStatus,
+       allTransactionPointers: secretTransactionIds
+     }}
+     campaignId={campaignId}
+     onClose={handleTransactionComplete}
    />
    ```
 
-3. **Authentication**
+3. **Campaign State Display**
 
    ```typescript
-   const { connect, account, isConnected } = useAuth();
+   // Real-time campaign data
+   const { data: campaign, isLoading } = useQuery({
+     queryKey: ["crowdfunding", campaignId],
+     queryFn: () => getCrowdfundingState(campaignId),
+     enabled: !!campaignId,
+   });
    ```
 
 ## Project Structure
@@ -127,23 +156,56 @@ src/
 ├── auth/              # Authentication and session management
 ├── components/        # React components
 │   ├── shared/       # Reusable components
+│   │   ├── TransactionDialog.tsx      # Simple transaction dialog
+│   │   ├── StepTransactionDialog.tsx  # Multi-step transaction dialog
+│   │   └── TransactionStepper.tsx     # Step progress component
 │   ├── ui/          # shadcn/ui components
+│   ├── CampaignCard.tsx               # Campaign display and interaction
 │   └── ...
 ├── hooks/            # Custom hooks
-│   ├── useFactoryContract.ts
-│   ├── useOrganizationContract.ts
-│   ├── useBallotContract.ts
-│   └── useTransactionStatus.ts
+│   ├── useCampaignContract.ts         # Main campaign contract interactions
+│   ├── useTransactionStatus.ts        # Single transaction status tracking
+│   ├── useStepTransactionStatus.ts    # Multi-transaction status tracking
+│   └── useCampaignTransaction.ts      # Transaction utilities
+├── contracts/        # Generated ABI types
+│   └── CrowdfundGenerated.ts
 ├── lib/             # Utilities and helpers
 ├── partisia-config.ts # Blockchain configuration
+├── Home.tsx         # Main campaign search interface
 └── ...
 ```
+
+## Features
+
+### Campaign Management
+
+- **Search Campaigns**: Find campaigns by contract address
+- **View Campaign Details**: Progress, funding target, contributor count, status
+- **Real-time Updates**: Automatic refresh of campaign state
+
+### Contribution System
+
+- **Secret Contributions**: Privacy-preserving contributions using zero-knowledge proofs
+- **Token Support**: ETH Sepolia and other ERC-20 compatible tokens
+- **Balance Checking**: Automatic balance validation for supported tokens
+
+### Campaign Administration
+
+- **End Campaigns**: Campaign owners can end active campaigns
+- **Withdraw Funds**: Campaign owners can withdraw funds from successful campaigns
+- **Status Tracking**: Real-time tracking of campaign lifecycle
+
+### Privacy Features
+
+- **Hidden Amounts**: Individual contribution amounts are hidden for secret contributions
+- **Threshold Revelation**: Total amount only revealed when funding target is met
+- **Anonymous Contributions**: No linkage between contributors and amounts
 
 ## Contributing
 
 1. Follow the TypeScript and React patterns established in the codebase
 2. Use the existing hooks for contract interactions
-3. Implement new features using the transaction dialog for UX consistency
+3. Implement new features using the transaction dialogs for UX consistency
 4. Add proper error handling for blockchain operations
 5. Update ABIs when contract interfaces change
 
@@ -152,7 +214,7 @@ src/
 1. **Transaction Not Found**
    - Check the destination shard
    - Verify transaction ID format
-   - Ensure proper contract address derivation
+   - Ensure proper event chain traversal
    - Check explorer (link below)
 
 2. **Authentication Issues**
@@ -161,9 +223,21 @@ src/
    - Check network configuration
 
 3. **Contract Interaction Errors**
-   - Verify ABI generation
-   - Check contract address
-   - Validate input parameters
+   - Verify ABI generation matches contract
+   - Check contract address format (42 characters, starts with '03')
+   - Validate input parameters and token units
+
+4. **Multi-Step Transaction Failures**
+   - Check each step individually in the transaction dialog
+   - Verify token approval succeeded before secret contribution
+   - Ensure sufficient gas for all steps
+
+## Token Bridge Instructions
+
+The app includes built-in instructions for users to get testnet tokens:
+
+1. **Get ETH on Sepolia testnet** via [Alchemy Sepolia Faucet](https://www.alchemy.com/faucets/ethereum-sepolia)
+2. **Bridge to Partisia Blockchain** via [Partisia Bridge](https://browser.partisiablockchain.com/bridge)
 
 ## Resources
 
