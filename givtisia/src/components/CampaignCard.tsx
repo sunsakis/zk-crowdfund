@@ -41,10 +41,7 @@ interface CrowdfundingCardProps {
 
 const ETH_SEPOLIA_TOKEN_ADDRESS = "0117f2ccfcb0c56ce5b2ad440e879711a5ac8b64a6";
 
-async function fetchTokenBalance(
-  tokenAddress: string,
-  walletAddress: string
-): Promise<bigint> {
+async function fetchTokenBalance(walletAddress: string): Promise<bigint> {
   const response = await fetch(
     `https://node1.testnet.partisiablockchain.com/chain/accounts/${walletAddress}`
   );
@@ -144,7 +141,7 @@ export function CampaignCard({ campaign, campaignId }: CrowdfundingCardProps) {
   useEffect(() => {
     if (isConnected && walletAddress && isSepoliaEth) {
       setIsLoadingBalance(true);
-      fetchTokenBalance(campaign.tokenAddress.asString(), walletAddress)
+      fetchTokenBalance(walletAddress)
         .then((balance) => {
           setUserBalance(balance);
         })
