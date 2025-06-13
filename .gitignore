@@ -10,13 +10,9 @@ expanded.rs
 # Maven with auto-import, exclude module files
 *.iml
 
-Account-A.pk
-Account-B.pk
-Account-C.pk
+*.pk
 
-zk-crowdfunding-frontend/node_modules/
-zk-crowdfunding-frontend/dist/
+givtisia/node_modules/
+givtisia/dist/
 .env
 .DS_Store
-
-*.pk
