@@ -1,8 +1,10 @@
 # Givtisia - Private Crowdfunding Campaign Manager
 
-Authors: [sunsakis](https://github.com/sunsakis), [thebeyondr](https://github.com/thebeyondr) on behalf of [Raid Guild](https://www.raidguild.org/)
-
 A modern web application for managing private crowdfunding campaigns on Partisia Blockchain. Givtisia provides a user-friendly interface for contributing to campaigns while maintaining privacy through zero-knowledge proofs.
+
+## Authors
+
+[sunsakis](https://github.com/sunsakis), [thebeyondr](https://github.com/thebeyondr) on behalf of [Raid Guild](https://www.raidguild.org/)
 
 ## 🔒 Privacy Features
 
